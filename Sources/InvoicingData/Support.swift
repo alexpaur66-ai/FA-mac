@@ -55,8 +55,11 @@ extension CalendarDay {
         return day
     }
 
+    /// The optional column: nil stays nil. The explicit type picks the non-optional overload above, which
+    /// the compiler otherwise finds ambiguous with this one.
     static func stored(_ text: String?, table: String, id: String) throws -> CalendarDay? {
         guard let text else { return nil }
-        return try stored(text, table: table, id: id)
+        let day: CalendarDay = try stored(text, table: table, id: id)
+        return day
     }
 }
