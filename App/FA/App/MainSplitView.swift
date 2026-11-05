@@ -1,6 +1,7 @@
 // The main window: one three-column NavigationSplitView for every section (screens-flows.md §1.2),
 // the document sheets, and the actions the menu bar can call.
 
+import AppKit
 import Combine
 import InvoicingCore
 import InvoicingData
@@ -31,6 +32,12 @@ struct MainSplitView: View {
     @State private var pdfVersion = 0
     /// Issue stored the PDF but could not write the file; the detail shows the banner (screens-flows.md §2c).
     @State private var pdfSaveFailure: PDFSaveFailure?
+    /// The Documents search; cleared when a draft is opened, so the search cannot hide the row of the
+    /// draft being edited.
+    @State private var documentsSearch = ""
+    /// Where the editor of the draft being opened puts the cursor: the client of a new draft without one,
+    /// else its first line. Consumed when that editor is created.
+    @State private var pendingEditorFocus: EditorFocusRequest?
     @Environment(\.locale) private var locale
 
     init(stores: Stores) {
@@ -92,6 +99,11 @@ struct MainSplitView: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
             documents.restart()
         }
+        // Quit writes the open draft at once: autosave's delay must not lose the last edits. AppKit posts
+        // the notification on the main thread, synchronously, just before the process exits.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            _ = editor?.saveNow()
+        }
     }
 
     // MARK: Columns
@@ -103,7 +115,8 @@ struct MainSplitView: View {
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: $documentSelection,
-                inspectorPresented: $inspectorPresented, resultLine: resultLine,
+                inspectorPresented: $inspectorPresented, search: $documentsSearch, editingID: editor?.documentID,
+                resultLine: resultLine,
                 newDocument: newDraft, recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft)
         case .clients:
             ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) })
@@ -164,8 +177,8 @@ struct MainSplitView: View {
             if let editor, editor.documentID == id {
                 DraftEditorView(
                     stores: stores, documents: documents, model: editor, onIssued: issued,
-                    newClient: { sheet = .client(nil) }, deleteDraft: deleteDraft, issueSheetPresented: $issueSheetPresented,
-                    previewShown: $previewShown)
+                    newClient: { sheet = .newClientForDraft($0) }, duplicate: duplicate,
+                    issueSheetPresented: $issueSheetPresented, previewShown: $previewShown)
             } else {
                 ProgressView()
             }
@@ -212,7 +225,8 @@ struct MainSplitView: View {
         }
         issueSheetPresented = false
         previewShown = false
-        editor = id.map { DraftEditorModel(stores: stores, documentID: $0) }
+        editor = id.map { DraftEditorModel(stores: stores, documentID: $0, initialFocus: pendingEditorFocus) }
+        if id != nil { pendingEditorFocus = nil }
     }
 
     private var mainActions: MainActions {
@@ -226,8 +240,11 @@ struct MainSplitView: View {
         if summary.status == .draft {
             actions.deleteDraft = { deleteDraft(id) }
             actions.issue = { requestIssue(id) }
-            actions.duplicate = { duplicate(id) }
+            if summary.kind != .paymentTaxDocument {
+                actions.duplicate = { duplicate(id) }
+            }
             if let editor, editor.documentID == id {
+                actions.editor = editor
                 actions.togglePreview = { previewShown.toggle() }
                 actions.previewShown = previewShown
                 // A draft prints as its watermarked preview (screens-flows.md §1.4).
@@ -237,6 +254,7 @@ struct MainSplitView: View {
         }
         if summary.kind != .paymentTaxDocument {
             actions.duplicate = { duplicate(id) }
+            actions.duplicateSourceNumber = summary.number
         }
         actions.savePDF = { savePDF(id) }
         actions.printDocument = { printDocument(id, draft: nil) }
@@ -298,17 +316,29 @@ struct MainSplitView: View {
                 issueDate: today, taxPointDate: kind.isTaxDocument ? today : nil, dueDate: today.adding(days: customer?.paymentTermDays ?? profile.defaultPaymentTermDays),
                 footer: profile.footer)
             try stores.documents.saveDraft(document)
-            openDraft(document.id)
+            openDraft(document.id, focus: customer == nil ? .client : .firstLineText)
         } catch {
             resultLine = ErrorText.message(error)
         }
     }
 
-    /// Shows a draft in Documents ▸ Drafts, where its editor opens.
-    private func openDraft(_ id: String) {
+    /// Shows a draft in Documents ▸ Drafts, where its editor opens with the cursor at `focus`. The search
+    /// is cleared first: a search that hides the row would leave the detail column without the editor.
+    private func openDraft(_ id: String, focus: EditorFocusRequest) {
+        documentsSearch = ""
+        if let editor, editor.documentID == id {
+            editor.requestFocus(focus)
+        } else {
+            pendingEditorFocus = focus
+        }
         sidebar = .filter(.drafts)
         documentSelection = [id]
         resultLine = nil
+    }
+
+    /// An existing draft opened from a list, a payment row or a chain: the cursor goes to the first line.
+    private func openDraft(_ id: String) {
+        openDraft(id, focus: .firstLineQuantity)
     }
 
     /// Document ▸ Issue… (⌘↩): writes the draft and opens the review sheet over its editor.
@@ -380,7 +410,7 @@ struct MainSplitView: View {
                 lines: Self.copiedLines(source.lines),
                 orderReference: source.orderReference, note: source.note, footer: source.footer)
             try stores.documents.saveDraft(copy)
-            openDraft(copy.id)
+            openDraft(copy.id, focus: .firstLineQuantity)
         } catch {
             resultLine = ErrorText.message(error)
         }
@@ -397,8 +427,10 @@ struct MainSplitView: View {
                   advance.kind == .advanceRequest, advance.status != .draft else { return }
             let pending = try stores.documents.payments(for: advanceID).filter { $0.kind == .received && !$0.receiptIssued }
             guard pending.isEmpty else {
-                let days = pending.map { $0.paidOn.formatted(locale) }.joined(separator: ", ")
-                resultLine = String(localized: L.finalInvoiceReceiptsPending(days))
+                let days = pending.map { $0.paidOn.formatted(locale) }
+                resultLine = days.count == 1
+                    ? String(localized: L.finalInvoiceReceiptsPending(days[0]))
+                    : String(localized: L.finalInvoiceReceiptsPendingMany(days.formatted(.list(type: .and).locale(locale))))
                 return
             }
             let profile = try stores.profile.load()
@@ -420,7 +452,7 @@ struct MainSplitView: View {
                 advanceDeductions: deductions, relatedDocumentNumber: advance.number,
                 orderReference: advance.orderReference, note: advance.note, footer: advance.footer)
             try stores.documents.saveDraft(final)
-            openDraft(final.id)
+            openDraft(final.id, focus: .firstLineQuantity)
         } catch {
             resultLine = ErrorText.message(error)
         }
@@ -481,6 +513,13 @@ struct MainSplitView: View {
             }
         case .client(let id):
             ClientFormSheet(clients: clients, customer: id.flatMap { clients.customer(id: $0) })
+        case .newClientForDraft(let name):
+            // New Client “X”… from the editor's client field: the saved client becomes the draft's.
+            ClientFormSheet(clients: clients, customer: nil, initialName: name, onSaved: { id in
+                editor?.refreshReferenceData()
+                editor?.setCustomer(id)
+                editor?.requestFocus(.firstLineText)
+            })
         }
     }
 }
@@ -490,12 +529,15 @@ enum MainSheet: Identifiable, Hashable {
     case closure(String, DocumentClosureKind)
     /// nil creates a new client.
     case client(String?)
+    /// A new client typed into the editor's client field, picked into the draft when saved.
+    case newClientForDraft(String)
 
     var id: String {
         switch self {
         case .recordPayment(let id): "payment:" + id
         case .closure(let id, let kind): "closure:" + kind.rawValue + ":" + id
         case .client(let id): "client:" + (id ?? "new")
+        case .newClientForDraft: "newClientForDraft"
         }
     }
 }

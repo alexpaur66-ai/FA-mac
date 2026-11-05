@@ -145,6 +145,69 @@ import Testing
         #expect(!table.isEmpty)
         #expect(ExchangeRateTable().isEmpty)
     }
+
+    func typed(_ iso: String, _ value: String) -> ExchangeRate {
+        ExchangeRate(currency: .eur, czkPerAmount: d(value), validFor: day(iso), source: .manual)
+    }
+
+    @Test func resolveUsesTheDayOrItsPublicationDayOnly() {
+        // A rate typed for another day never stands in for a working day.
+        let typedOnly = ExchangeRateTable(rates: [typed("2026-09-30", "24.5")])
+        let friday = typedOnly.resolve(.eur, on: day("2026-10-30"))
+        #expect(friday.rule == .missing)
+        #expect(friday.rate == nil)
+        #expect(friday.publicationDay == day("2026-10-30"))
+        #expect(friday.fallbackFrom == nil)
+
+        // The day's own rate wins, whatever its source.
+        let exact = typedOnly.resolve(.eur, on: day("2026-09-30"))
+        #expect(exact.rule == .storedForDay)
+        #expect(exact.rate?.czkPerAmount == d("24.5"))
+        #expect(exact.fallbackFrom == nil)
+
+        // A weekend takes the last working day's rate, typed or imported.
+        let fridayTyped = ExchangeRateTable(rates: [typed("2026-10-30", "24.4")])
+        let saturday = fridayTyped.resolve(.eur, on: day("2026-10-31"))
+        #expect(saturday.rule == .weekendOrHoliday)
+        #expect(saturday.rate?.validFor == day("2026-10-30"))
+        #expect(saturday.fallbackFrom == day("2026-10-30"))
+        #expect(saturday.publicationDay == day("2026-10-30"))
+
+        // A holiday on a Wednesday takes Tuesday's rate.
+        let tuesday = ExchangeRateTable(rates: [typed("2026-10-27", "24.2")])
+        let holiday = tuesday.resolve(.eur, on: day("2026-10-28"))
+        #expect(holiday.rule == .weekendOrHoliday)
+        #expect(holiday.fallbackFrom == day("2026-10-27"))
+
+        // Rates stored only for later days never apply.
+        let later = ExchangeRateTable(rates: [rate("2026-11-02", "24.3"), rate("2026-11-03", "24.31"), rate("2026-11-04", "24.32")])
+        let before = later.resolve(.eur, on: day("2026-10-31"))
+        #expect(before.rule == .missing)
+        #expect(before.publicationDay == day("2026-10-30"))
+
+        // A rate stored for a Saturday is used as stored.
+        let saturdayRow = ExchangeRateTable(rates: [typed("2026-10-31", "24.9")])
+        #expect(saturdayRow.resolve(.eur, on: day("2026-10-31")).rule == .storedForDay)
+        #expect(saturdayRow.resolve(.usd, on: day("2026-10-31")).rule == .missing)
+    }
+
+    @Test func resolveBridgesAWorkingDayTheCNBSkipped() {
+        // Imported rates for Wednesday and Friday but none for Thursday: the ČNB published none, so
+        // Wednesday's rate applies. Typed neighbours are no evidence of a publication gap.
+        let imported = ExchangeRateTable(rates: [rate("2026-11-04", "24.31"), rate("2026-11-06", "24.35")])
+        let thursday = imported.resolve(.eur, on: day("2026-11-05"))
+        #expect(thursday.rule == .noPublicationThatDay)
+        #expect(thursday.fallbackFrom == day("2026-11-04"))
+        #expect(thursday.rate?.czkPerAmount == d("24.31"))
+
+        let typedNeighbours = ExchangeRateTable(rates: [typed("2026-11-04", "24.31"), typed("2026-11-06", "24.35")])
+        #expect(typedNeighbours.resolve(.eur, on: day("2026-11-05")).rule == .missing)
+
+        // Sparse imports (one day a month) are not a span.
+        let sparse = ExchangeRateTable(rates: [rate("2026-10-01", "24.1"), rate("2026-11-02", "24.3")])
+        #expect(sparse.resolve(.eur, on: day("2026-10-15")).rule == .missing)
+        #expect(sparse.resolve(.eur, on: day("2026-10-15")).rate == nil)
+    }
 }
 
 @Suite struct ExchangeRateTests {

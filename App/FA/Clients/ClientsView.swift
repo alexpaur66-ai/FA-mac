@@ -232,6 +232,10 @@ struct ClientDetailView: View {
 struct ClientFormSheet: View {
     let clients: ClientsModel
     let customer: Customer?
+    /// The name typed into the editor's client field, prefilled for a new client.
+    var initialName: String? = nil
+    /// Called with the saved client's id before the sheet closes (the editor picks it into the draft).
+    var onSaved: (@MainActor (String) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -302,7 +306,10 @@ struct ClientFormSheet: View {
     }
 
     private func fill() {
-        guard let customer else { return }
+        guard let customer else {
+            if let initialName { name = initialName }
+            return
+        }
         let party = customer.party
         name = party.name
         street = party.address.street
@@ -344,6 +351,7 @@ struct ClientFormSheet: View {
         do {
             try clients.stores.customers.save(saved)
             clients.reload()
+            onSaved?(saved.id)
             dismiss()
         } catch {
             self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))

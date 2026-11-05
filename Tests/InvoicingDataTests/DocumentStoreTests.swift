@@ -997,4 +997,67 @@ import InvoicingCore
         #expect(try NumberSeriesStore(database).peekNextNumber(seriesID: "fv", on: day) == "FV-2026-001")
         #expect(try store.deduction(ofReceipt: "dd1") == nil)
     }
+
+    @Test func anIssuedPaymentTaxDocumentCarriesNoPaymentInstructions() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let advance = try Fixtures.issuedAdvance(database)
+        #expect(advance.payment != nil)
+        let receipt = try Fixtures.issuedReceipt(database, advance: advance)
+        #expect(receipt.payment == nil)
+        #expect(try store.summary(id: "dd1")?.variableSymbol == nil)
+        #expect(try store.document(id: "dd1")?.payment == nil)
+        // A draft receipt that carries instructions loses them when issued.
+        var withAccount = Document.paymentTaxDocument(id: "dd2", forAdvanceRequest: advance, received: Fixtures.d("100"), on: Fixtures.day("2026-11-11"))
+        withAccount.payment = PaymentInstructions(bankConnection: Fixtures.bank, variableSymbol: PaymentSymbol.variable("777"))
+        try store.saveDraft(withAccount, now: Fixtures.now)
+        #expect(try store.issue(id: "dd2", seriesID: "dd", now: Fixtures.now).payment == nil)
+    }
+
+    @Test func paymentOfReceiptFindsTheNamingPayment() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let advance = try Fixtures.issuedAdvance(database)
+        let day = Fixtures.day("2026-11-10")
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day), now: Fixtures.now)
+        #expect(try store.payment(ofReceipt: "dd1") == nil)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+        let found = try store.payment(ofReceipt: "dd1")
+        #expect(found?.id == payment.id)
+        #expect(found?.receiptIssued == false)
+        // Deleting the payment alone leaves an orphan draft receipt that no payment names.
+        try store.deletePayment(id: payment.id, now: Fixtures.now)
+        #expect(try store.payment(ofReceipt: "dd1") == nil)
+        #expect(try store.document(id: "dd1")?.status == .draft)
+        #expect(try store.payment(ofReceipt: "missing") == nil)
+    }
+
+    @Test func deletingAPaymentCanTakeItsDraftReceiptAlong() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let advance = try Fixtures.issuedAdvance(database)
+        let day = Fixtures.day("2026-11-10")
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day), now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+
+        try store.deletePayment(id: payment.id, deletingDraftReceipt: true, now: Fixtures.now)
+        #expect(try store.document(id: "dd1") == nil)
+        #expect(try store.payments(for: advance.id).isEmpty)
+        let deletion = try AuditLog(database).events(entity: "document", id: "dd1").first { $0.action == "delete" }
+        #expect(deletion?.details?["reason"] == "payment deleted")
+        #expect(deletion?.details?["payment"] == payment.id)
+
+        // An issued receipt still locks its payment, with or without the flag.
+        let second = try Fixtures.issuedReceipt(database, advance: advance, id: "dd2", amount: Fixtures.d("100"), on: Fixtures.day("2026-11-11"))
+        let locked = try store.payments(for: advance.id).first { $0.receiptDocumentID == second.id }
+        #expect(throws: DataError.paymentLocked(locked?.id ?? "")) {
+            try store.deletePayment(id: locked?.id ?? "", deletingDraftReceipt: true, now: Fixtures.now)
+        }
+        #expect(try store.document(id: "dd2")?.status == .issued)
+    }
 }

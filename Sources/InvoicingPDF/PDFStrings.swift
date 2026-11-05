@@ -95,7 +95,7 @@ enum PDFStrings {
     static func qrCaption(_ kind: PaymentQRKind) -> String {
         switch kind {
         case .qrPlatba: return "QR Platba"
-        case .sepa: return "SEPA QR (EPC)"
+        case .sepa: return "EPC QR (SEPA)"
         case .none: return ""
         }
     }

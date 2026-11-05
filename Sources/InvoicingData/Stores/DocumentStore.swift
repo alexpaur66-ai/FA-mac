@@ -66,17 +66,21 @@ public struct DocumentStore: Sendable {
         try database.queue.write { db in
             guard let record = try DocumentRecord.fetchOne(db, key: id) else { throw DataError.documentNotFound(id) }
             guard record.status == DocumentStatus.draft.rawValue else { throw DataError.documentIsFrozen(id) }
-            let stamp = Timestamps.string(now)
-            for var transaction in try BankTransactionRecord.filter(Column("matchedDocumentID") == id).fetchAll(db) {
-                transaction.matchedDocumentID = nil
-                transaction.matchState = TransactionMatchState.unmatched.rawValue
-                try transaction.update(db)
-                try AuditLog.append(db, entity: "bankTransaction", id: transaction.id, action: "match",
-                                    details: ["state": TransactionMatchState.unmatched.rawValue, "document": "", "reason": "draft deleted"], at: stamp)
-            }
-            try record.delete(db)
-            try AuditLog.append(db, entity: "document", id: id, action: "delete", at: stamp)
+            try Self.deleteDraft(db, record, at: Timestamps.string(now), details: nil)
         }
+    }
+
+    /// Deletes a draft record inside a transaction; the caller has checked that it is a draft.
+    static func deleteDraft(_ db: Database, _ record: DocumentRecord, at stamp: String, details: [String: String]?) throws {
+        for var transaction in try BankTransactionRecord.filter(Column("matchedDocumentID") == record.id).fetchAll(db) {
+            transaction.matchedDocumentID = nil
+            transaction.matchState = TransactionMatchState.unmatched.rawValue
+            try transaction.update(db)
+            try AuditLog.append(db, entity: "bankTransaction", id: transaction.id, action: "match",
+                                details: ["state": TransactionMatchState.unmatched.rawValue, "document": "", "reason": "draft deleted"], at: stamp)
+        }
+        try record.delete(db)
+        try AuditLog.append(db, entity: "document", id: record.id, action: "delete", details: details, at: stamp)
     }
 
     public func document(id: String) throws -> Document? {
@@ -147,7 +151,10 @@ public struct DocumentStore: Sendable {
             document.number = number
             document.status = .issued
             let prefix = stored.series.variableSymbolPrefix
-            if var payment = document.payment {
+            if document.kind == .paymentTaxDocument {
+                // The payment it documents has been received: nothing is due, so no account, symbol or QR code.
+                document.payment = nil
+            } else if var payment = document.payment {
                 let standard = PaymentInstructions.standard(for: number, bankConnection: payment.bankConnection, currency: document.currency,
                                                             variableSymbolPrefix: prefix)
                 if payment.variableSymbol == nil { payment.variableSymbol = standard.variableSymbol }
@@ -401,6 +408,14 @@ public struct DocumentStore: Sendable {
         }
     }
 
+    /// The payment a payment tax document is the receipt of; nil for a receipt no payment names.
+    public func payment(ofReceipt documentID: String) throws -> DocumentPayment? {
+        try database.queue.read { db in
+            try DocumentPaymentRecord.filter(Column("receiptDocumentID") == documentID).fetchOne(db)
+                .map { try $0.payment(receiptIssued: try Self.receiptIsIssued(db, $0)) }
+        }
+    }
+
     /// True when the payment's receipt exists and is issued.
     static func receiptIsIssued(_ db: Database, _ payment: DocumentPaymentRecord) throws -> Bool {
         guard let receiptID = payment.receiptDocumentID else { return false }
@@ -428,11 +443,17 @@ public struct DocumentStore: Sendable {
     /// credit deletes the other leg too, so both documents stay consistent. A bank transaction the payment
     /// was taken from goes back to the unmatched list once no payment is taken from it any more, when it was
     /// matched by hand to this document (as `insertPayment` does), so the money does not drop out of every list.
-    public func deletePayment(id: String, now: Date = Date()) throws {
+    /// With `deletingDraftReceipt`, the draft payment tax document created for the payment is deleted in the
+    /// same transaction instead of staying behind as a receipt of nothing.
+    public func deletePayment(id: String, deletingDraftReceipt: Bool = false, now: Date = Date()) throws {
         try database.queue.write { db in
             guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
             if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(id) }
             let stamp = Timestamps.string(now)
+            if deletingDraftReceipt, let receiptID = payment.receiptDocumentID,
+               let receipt = try DocumentRecord.fetchOne(db, key: receiptID), receipt.status == DocumentStatus.draft.rawValue {
+                try Self.deleteDraft(db, receipt, at: stamp, details: ["reason": "payment deleted", "payment": id])
+            }
             if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
                 if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
                 try related.delete(db)

@@ -14,14 +14,7 @@ struct RateRow: Identifiable, Hashable {
     var value: Decimal { rate.czkPerAmount }
     var amount: Int { rate.amount }
 
-    var sourceName: String {
-        switch rate.source {
-        case .cnb: String(localized: L.sourceCNB)
-        case .ecb: String(localized: L.sourceECB)
-        case .manual: String(localized: L.sourceManual)
-        case .fixedAccounting: String(localized: L.sourceFixed)
-        }
-    }
+    var sourceName: String { RateSourceName.text(rate.source) }
 }
 
 struct RatesView: View {
@@ -111,37 +104,14 @@ struct RatesView: View {
         rows = ((try? stores.rates.rates(for: Currency.known(currencyCode))) ?? []).map { RateRow(rate: $0) }
     }
 
-    /// Reads the chosen file as UTF-8 or Windows-1250 text and imports it with the parser its first line
-    /// names, so a parse error reports the line of the format the file really has (§2g).
     private func handleImport(_ result: Result<[URL], Error>) {
-        do {
-            guard let url = try result.get().first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
-            guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1250) else {
-                resultLine = String(localized: L.rateImportFailed)
-                return
-            }
-            let count = try Self.isYearlyFile(text) ? stores.rates.importYearly(text) : stores.rates.importDaily(text)
-            resultLine = String(localized: L.importedRates(count))
-            version += 1
-        } catch {
-            resultLine = ErrorText.message(error, locale: locale)
-        }
+        guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
+        resultLine = outcome.line
+        if outcome.count != nil { version += 1 }
     }
 
-    /// A yearly file ("rok.txt") starts with a "Datum|1 AUD|…" header; a daily file with "04.11.2026 #212".
-    static func isYearlyFile(_ text: String) -> Bool {
-        let firstLine = text.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
-        guard var firstLine else { return false }
-        if firstLine.unicodeScalars.first == "\u{FEFF}" { firstLine.unicodeScalars.removeFirst() }
-        let firstCell = firstLine.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first
-            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-        return firstCell == "Datum" || firstCell == "Date"
-    }
+    /// Kept for the tests and callers of the old name; the parser lives in `RateImport`.
+    static func isYearlyFile(_ text: String) -> Bool { RateImport.isYearlyFile(text) }
 }
 
 /// The detail column of the rates section: the latest stored day per currency.
