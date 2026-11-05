@@ -71,7 +71,7 @@ struct IssueSheet: View {
         .defaultFocus($focus, model.rateIsMissing ? .rate : .checkbox)
         .onAppear {
             // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
-            // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the tax point's rate).
+            // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the rate day's rate).
             model.refreshReferenceData()
             model.refreshRate()
             if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
@@ -396,7 +396,7 @@ struct IssueSheet: View {
             if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
                 resource = L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
             } else {
-                resource = L.rateFallback(document.taxPoint.formatted(locale), used)
+                resource = L.rateFallback(document.exchangeRateDay.formatted(locale), used)
             }
             lines.append(String(localized: resource))
         }

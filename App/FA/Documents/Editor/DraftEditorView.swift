@@ -369,10 +369,10 @@ struct DraftEditorView: View {
     private func fallbackText(_ from: CalendarDay, document: Document) -> LocalizedStringResource {
         let used = from.formatted(locale)
         if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
-            // The day the ČNB skipped: the tax point itself, or the last working day before a weekend tax point.
+            // The day the ČNB skipped: the rate day itself, or the last working day before a weekend rate day.
             return L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
         }
-        return L.rateFallback(document.taxPoint.formatted(locale), used)
+        return L.rateFallback(document.exchangeRateDay.formatted(locale), used)
     }
 
     /// "24,315": the rate for one unit in the UI locale; `czechLabel` stays on the PDF.

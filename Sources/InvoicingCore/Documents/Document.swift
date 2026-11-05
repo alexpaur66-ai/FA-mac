@@ -66,6 +66,8 @@ public struct Document: Hashable, Sendable, Codable, Identifiable {
     }
 
     /// The day the obligation to declare the tax arose: the tax point, or the issue date when none is set.
+    /// A document of goods exempt under § 64 declares the supply on the § 22 odst. 1 day instead
+    /// (`exchangeRateDay`).
     public var taxPoint: CalendarDay { taxPointDate ?? issueDate }
 
     public var isTaxDocument: Bool { kind.isTaxDocument }
@@ -87,6 +89,18 @@ public struct Document: Hashable, Sendable, Codable, Identifiable {
 
     /// True when any line needs the customer's VAT ID from another member state (reverse charge, § 64).
     public var requiresCustomerVATID: Bool { lines.contains { $0.treatment.requiresCustomerVATID } }
+
+    /// The day whose exchange rate converts the document to CZK: the day the obligation to declare the tax
+    /// or the supply arose (§ 4 odst. 8 ZDPH). That is the tax point, except on a document whose lines are
+    /// all goods exempt under § 64: their supply is declared on the § 22 odst. 1 day (`ReportingDay`), the
+    /// 15th of the month after the supply or the earlier issue date. A document that mixes them with other
+    /// treatments and a payment tax document keep the tax point (ACCT, ADR 0011).
+    public var exchangeRateDay: CalendarDay {
+        let lineTreatments = treatments
+        guard kind != .paymentTaxDocument, !lineTreatments.isEmpty,
+              lineTreatments.allSatisfy({ $0 == .intraCommunityGoods }) else { return taxPoint }
+        return ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: taxPoint, issueDate: issueDate)
+    }
 
     /// The heading in the document's language.
     public var title: String { kind.title(language: language) }

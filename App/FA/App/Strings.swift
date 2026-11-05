@@ -512,7 +512,9 @@ enum L {
     static func rateNotPublished(_ wanted: String, _ used: String) -> LocalizedStringResource {
         r("editor.rateNotPublished", "The ČNB published no rate for \(wanted); the last published rate, for \(used), applies")
     }
-    static let rateAfterTaxPoint = r("editor.rateAfterTaxPoint", "The rate date cannot be after the date of taxable supply.")
+    static func rateAfterRateDay(_ day: String) -> LocalizedStringResource {
+        r("editor.rateAfterRateDay", "The rate date cannot be after \(day), the day this document needs the rate for.")
+    }
     static func rateSavedForOtherDay(_ saved: String, _ needed: String) -> LocalizedStringResource {
         r("editor.rateSavedForOtherDay", "The rate was saved for \(saved); this document needs the rate for \(needed).")
     }
