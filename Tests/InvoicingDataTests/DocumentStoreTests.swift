@@ -140,7 +140,7 @@ import InvoicingCore
             Issue.record("issuing an incomplete document must fail")
         } catch DataError.validationFailed(let issues) {
             #expect(issues.contains { $0.code == .customerAddressIncomplete })
-            #expect(issues.allSatisfy(\.isError))
+            #expect(issues.allSatisfy { $0.isError })
         }
         let unchanged = try #require(try store.document(id: draft.id))
         #expect(unchanged.status == .draft)
