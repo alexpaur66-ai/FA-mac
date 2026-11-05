@@ -1,0 +1,133 @@
+// The small sheets of the document flow: Record Payment, and the two closing events (ADR 0007).
+
+import InvoicingCore
+import InvoicingData
+import SwiftUI
+
+struct RecordPaymentSheet: View {
+    let stores: Stores
+    let state: DocumentState
+
+    private enum Entry: Hashable {
+        case received, refund
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
+    @State private var date = Date()
+    @State private var amount: Decimal
+    @State private var entry: Entry = .received
+    @State private var note = ""
+    @State private var error: String?
+
+    init(stores: Stores, state: DocumentState) {
+        self.stores = stores
+        self.state = state
+        _amount = State(initialValue: state.outstanding.amount > 0 ? state.outstanding.amount : 0)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.l) {
+            Text(L.rpTitle).textRole(.screenTitle)
+            Text(verbatim: (state.summary.number ?? String(localized: L.draftTitle)) + " · " + state.summary.customerName)
+                .textRole(.rowSecondary)
+            Form {
+                if state.settlement == .overpaid {
+                    Picker(selection: $entry) {
+                        Text(L.paymentReceived).tag(Entry.received)
+                        Text(L.paymentRefund).tag(Entry.refund)
+                    } label: {
+                        Text(L.rpKind)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                DatePicker(selection: $date, displayedComponents: .date) { Text(L.rpDate) }
+                TextField(value: $amount, format: Decimal.FormatStyle.number.precision(.fractionLength(0...2))) {
+                    Text(L.rpAmount)
+                }
+                TextField(text: $note) { Text(L.rpNote) }
+                if let error {
+                    Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button { dismiss() } label: { Text(L.cancel) }
+                    .keyboardShortcut(.cancelAction)
+                Button { record() } label: { Text(L.rpRecord) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(amount <= 0)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(minWidth: 440)
+    }
+
+    private func record() {
+        let day = CalendarDay(date, in: .current)
+        let money = Money(amount, state.summary.currency)
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            switch entry {
+            case .received:
+                try stores.documents.recordPayment(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+            case .refund:
+                try stores.documents.recordRefund(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+            }
+            dismiss()
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+}
+
+/// Close Advance as Unpaid… / Mark for Credit Note…: a reason, recorded beside the frozen document.
+struct ClosureSheet: View {
+    let stores: Stores
+    let state: DocumentState
+    let kind: DocumentClosureKind
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var reason = ""
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.l) {
+            Text(kind == .closedUnpaid ? L.closeAdvanceTitle : L.markForCreditNoteTitle).textRole(.screenTitle)
+            Text(verbatim: (state.summary.number ?? "") + " · " + state.summary.customerName).textRole(.rowSecondary)
+            Text(L.closureExplanation).textRole(.body)
+            TextField(text: $reason, axis: .vertical) { Text(L.reasonPrompt) }
+                .lineLimit(2...4)
+            if let error {
+                Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button { dismiss() } label: { Text(L.cancel) }
+                    .keyboardShortcut(.cancelAction)
+                Button { close() } label: { Text(L.save) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(minWidth: 440)
+    }
+
+    private func close() {
+        do {
+            switch kind {
+            case .closedUnpaid:
+                try stores.documents.closeAdvanceUnpaid(id: state.id, reason: reason)
+            case .markedForCreditNote:
+                try stores.documents.markForCreditNote(id: state.id, reason: reason)
+            }
+            dismiss()
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+}
