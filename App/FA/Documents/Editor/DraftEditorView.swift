@@ -16,6 +16,8 @@ struct DraftEditorView: View {
 
     @Environment(\.locale) private var locale
     @Binding var issueSheetPresented: Bool
+    /// View ▸ Show Preview: the live PDF preview takes the editor's place; the toolbar and Issue stay.
+    @Binding var previewShown: Bool
 
     private static let rateKinds: [VATRateKind] = [.standard, .reduced, .zero]
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
@@ -28,7 +30,9 @@ struct DraftEditorView: View {
 
     var body: some View {
         Group {
-            if let document = model.document {
+            if model.document != nil, previewShown {
+                DraftPreviewView(model: model)
+            } else if let document = model.document {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.xl) {
                         totalsBar(document)
@@ -57,6 +61,12 @@ struct DraftEditorView: View {
         .navigationSubtitle(Text(saveLine))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { previewShown.toggle() } label: {
+                    Label { Text(previewShown ? L.hidePreview : L.showPreview) } icon: {
+                        Image(systemName: previewShown ? "square.and.pencil" : "doc.text.magnifyingglass")
+                    }
+                }
+                .disabled(model.document == nil)
                 Button(role: .destructive) { deleteDraft(model.documentID) } label: {
                     Label { Text(L.deleteDraft) } icon: { Image(systemName: "trash") }
                 }

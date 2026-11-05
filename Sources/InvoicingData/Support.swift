@@ -18,7 +18,12 @@ enum JSONCodec {
     /// Lower-case hex SHA-256 of the text, stored with issued documents (§ 35a odst. 3 ZDPH: electronic
     /// storage must keep data that guarantee the integrity of the document).
     static func sha256(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        sha256(Data(text.utf8))
+    }
+
+    /// The same hash over raw bytes: the stored PDF of an issued document.
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 

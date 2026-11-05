@@ -104,7 +104,18 @@ struct IssueSheet: View {
             if document.kind != .paymentTaxDocument {
                 row(L.summaryPayment, paymentLine(document))
             }
+            row(L.pdfRow, pdfLine(document))
         }
+    }
+
+    /// Where Issue writes the PDF (screens-flows.md §2c), named with the predicted number, or that it stays
+    /// in the app until Save PDF….
+    private func pdfLine(_ document: Document) -> String {
+        guard PDFSettings.autoSaveOnIssue else { return String(localized: L.pdfAutoSaveOff) }
+        guard let folder = PDFSettings.folderURL() else { return String(localized: L.pdfNoFolder) }
+        var predicted = document
+        predicted.number = seriesID.flatMap { model.predictedNumber(seriesID: $0) }
+        return String(localized: L.pdfWillBeSavedTo(PDFSettings.displayPath(PDFSettings.plannedURL(for: predicted, in: folder))))
     }
 
     private func row(_ label: LocalizedStringResource, _ value: String) -> some View {

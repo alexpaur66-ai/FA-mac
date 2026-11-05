@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		FA0000000000000000000001 /* InvoicingCore in Frameworks */ = {isa = PBXBuildFile; productRef = FA0000000000000000000011 /* InvoicingCore */; };
 		FA0000000000000000000002 /* InvoicingData in Frameworks */ = {isa = PBXBuildFile; productRef = FA0000000000000000000012 /* InvoicingData */; };
+		FA0000000000000000000003 /* InvoicingPDF in Frameworks */ = {isa = PBXBuildFile; productRef = FA0000000000000000000013 /* InvoicingPDF */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 			files = (
 				FA0000000000000000000001 /* InvoicingCore in Frameworks */,
 				FA0000000000000000000002 /* InvoicingData in Frameworks */,
+				FA0000000000000000000003 /* InvoicingPDF in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +76,7 @@
 			packageProductDependencies = (
 				FA0000000000000000000011 /* InvoicingCore */,
 				FA0000000000000000000012 /* InvoicingData */,
+				FA0000000000000000000013 /* InvoicingPDF */,
 			);
 			productName = FA;
 			productReference = FA0000000000000000000020 /* FA.app */;
@@ -351,6 +354,10 @@
 		FA0000000000000000000012 /* InvoicingData */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InvoicingData;
+		};
+		FA0000000000000000000013 /* InvoicingPDF */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InvoicingPDF;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

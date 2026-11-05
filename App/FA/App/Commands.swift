@@ -19,6 +19,12 @@ struct MainActions {
     var duplicate: (@MainActor () -> Void)?
     var createFinalInvoice: (@MainActor () -> Void)?
     var createTaxDocument: (@MainActor () -> Void)?
+    var savePDF: (@MainActor () -> Void)?
+    var showPDFInFinder: (@MainActor () -> Void)?
+    var printDocument: (@MainActor () -> Void)?
+    /// View ▸ Show/Hide Preview on a draft in the editor; `previewShown` picks the title.
+    var togglePreview: (@MainActor () -> Void)?
+    var previewShown = false
 }
 
 private struct MainActionsKey: FocusedValueKey {
@@ -51,6 +57,21 @@ struct AppCommands: Commands {
                 .disabled(actions == nil)
         }
 
+        // File ▸ Save PDF…, Show PDF in Finder and Print… (⌘P) follow the selected document (§1.4); ⌘S
+        // stays unbound, drafts autosave.
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button { actions?.savePDF?() } label: { Text(L.savePDF) }
+                .disabled(actions?.savePDF == nil)
+            Button { actions?.showPDFInFinder?() } label: { Text(L.showPDFInFinder) }
+                .disabled(actions?.showPDFInFinder == nil)
+        }
+        CommandGroup(replacing: .printItem) {
+            Button { actions?.printDocument?() } label: { Text(L.printDocument) }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(actions?.printDocument == nil)
+        }
+
         SidebarCommands()
         ToolbarCommands()
 
@@ -66,6 +87,9 @@ struct AppCommands: Commands {
             Button { actions?.toggleInspector() } label: { Text(L.toggleInspector) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(actions == nil)
+            // A draft in the editor: its detail swaps between the editor and the live PDF preview (§2c).
+            Button { actions?.togglePreview?() } label: { Text(actions?.previewShown == true ? L.hidePreview : L.showPreview) }
+                .disabled(actions?.togglePreview == nil)
             Divider()
             Button { model.stepTextScale(1) } label: { Text(L.biggerText) }
                 .keyboardShortcut("+", modifiers: .command)

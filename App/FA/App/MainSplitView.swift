@@ -25,6 +25,12 @@ struct MainSplitView: View {
     /// The editor of the selected draft; replaced when another draft is selected (ADR 0009).
     @State private var editor: DraftEditorModel?
     @State private var issueSheetPresented = false
+    /// View ▸ Show Preview: the selected draft's detail shows its live PDF preview instead of the editor.
+    @State private var previewShown = false
+    /// Bumped after a menu action changed a stored PDF's saved path, so the detail reloads its PDF row.
+    @State private var pdfVersion = 0
+    /// Issue stored the PDF but could not write the file; the detail shows the banner (screens-flows.md §2c).
+    @State private var pdfSaveFailure: PDFSaveFailure?
     @Environment(\.locale) private var locale
 
     init(stores: Stores) {
@@ -158,7 +164,8 @@ struct MainSplitView: View {
             if let editor, editor.documentID == id {
                 DraftEditorView(
                     stores: stores, documents: documents, model: editor, onIssued: issued,
-                    newClient: { sheet = .client(nil) }, deleteDraft: deleteDraft, issueSheetPresented: $issueSheetPresented)
+                    newClient: { sheet = .client(nil) }, deleteDraft: deleteDraft, issueSheetPresented: $issueSheetPresented,
+                    previewShown: $previewShown)
             } else {
                 ProgressView()
             }
@@ -167,7 +174,8 @@ struct MainSplitView: View {
                 stores: stores, documents: documents, documentID: id,
                 recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft,
                 createFinalInvoice: { createFinalInvoice(from: $0) },
-                createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft)
+                createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft,
+                pdfVersion: $pdfVersion, pdfSaveFailure: $pdfSaveFailure)
         }
     }
 
@@ -203,6 +211,7 @@ struct MainSplitView: View {
             resultLine = String(localized: L.draftChangesNotSaved(old.saveError ?? ""))
         }
         issueSheetPresented = false
+        previewShown = false
         editor = id.map { DraftEditorModel(stores: stores, documentID: $0) }
     }
 
@@ -218,10 +227,21 @@ struct MainSplitView: View {
             actions.deleteDraft = { deleteDraft(id) }
             actions.issue = { requestIssue(id) }
             actions.duplicate = { duplicate(id) }
+            if let editor, editor.documentID == id {
+                actions.togglePreview = { previewShown.toggle() }
+                actions.previewShown = previewShown
+                // A draft prints as its watermarked preview (screens-flows.md §1.4).
+                actions.printDocument = { printDocument(id, draft: editor.document) }
+            }
             return actions
         }
         if summary.kind != .paymentTaxDocument {
             actions.duplicate = { duplicate(id) }
+        }
+        actions.savePDF = { savePDF(id) }
+        actions.printDocument = { printDocument(id, draft: nil) }
+        if let path = PDFActions.existingFile(stores, documentID: id) {
+            actions.showPDFInFinder = { PDFFiles.reveal(path: path) }
         }
         if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
@@ -302,9 +322,45 @@ struct MainSplitView: View {
     /// detail column shows the issued view (screens-flows.md §2c, "Afterwards").
     private func issued(_ document: Document) {
         issueSheetPresented = false
+        previewShown = false
         if sidebar == .filter(.drafts) { sidebar = .filter(.all) }
         if sidebar.section == .documents { documentSelection = [document.id] }
-        resultLine = String(localized: L.issuedResult(document.number ?? ""))
+        let issuedLine = String(localized: L.issuedResult(document.number ?? ""))
+        pdfSaveFailure = nil
+        // The PDF is rendered and stored now, and written to the PDF folder when one is chosen (ADR 0010).
+        do {
+            if let url = try DocumentPDFService.storeAndSave(stores, document: document) {
+                resultLine = issuedLine + " · " + String(localized: L.pdfSavedTo(PDFSettings.displayPath(url)))
+            } else {
+                resultLine = issuedLine
+            }
+        } catch {
+            // The document is issued either way: the database is the source of truth (screens-flows.md §2c).
+            resultLine = issuedLine
+            let folder = PDFSettings.folderURL().map(PDFSettings.displayPath) ?? String(localized: L.pdfFolderNone)
+            pdfSaveFailure = PDFSaveFailure(documentID: document.id, folder: folder, detail: ErrorText.message(error))
+        }
+    }
+
+    /// File ▸ Save PDF…: the issued document's stored PDF through a save panel (screens-flows.md §1.4).
+    private func savePDF(_ id: String) {
+        do {
+            guard let url = try PDFActions.save(stores, documentID: id) else { return }
+            pdfSaveFailure = nil
+            pdfVersion += 1
+            resultLine = String(localized: L.pdfSavedTo(PDFSettings.displayPath(url)))
+        } catch {
+            resultLine = ErrorText.message(error)
+        }
+    }
+
+    /// File ▸ Print… (⌘P): the stored PDF of an issued document, or the draft's watermarked preview.
+    private func printDocument(_ id: String, draft: Document?) {
+        do {
+            try PDFActions.printPDF(stores, documentID: id, draft: draft)
+        } catch {
+            resultLine = ErrorText.message(error)
+        }
     }
 
     /// Duplicate as Draft (⌘D): the lines, client, currency, language and notes of any invoice, advance or

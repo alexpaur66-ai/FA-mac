@@ -18,16 +18,26 @@ struct DocumentDetailView: View {
     var createTaxDocument: (@MainActor (DocumentPayment) -> Void)? = nil
     /// Opens a payment's draft tax document in the editor.
     var openDraft: (@MainActor (String) -> Void)? = nil
+    /// Bumped by the window after a menu action changed the stored PDF's saved path, so the PDF row reloads.
+    /// Bumped by whoever saves the PDF (the File menu, this view), so the row and the menu items reload.
+    var pdfVersion: Binding<Int> = .constant(0)
+    /// Issue could not write the PDF file (screens-flows.md §2c): the banner offers Choose Folder… and Save PDF….
+    var pdfSaveFailure: Binding<PDFSaveFailure?> = .constant(nil)
 
     @State private var payments: [DocumentPayment] = []
     /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
     @State private var deductions: [AdvanceDeductionLink] = []
     @State private var loadError: String?
+    /// The issued document's stored PDF, rendered and stored now when it has none yet (ADR 0010).
+    @State private var pdf: StoredDocumentPDF?
+    @State private var pdfError: String?
+    @State private var savedFileExists = false
     @Environment(\.locale) private var locale
 
     private struct LoadKey: Equatable {
         let id: String
         let states: [DocumentState]
+        let pdfVersion: Int
     }
 
     var body: some View {
@@ -43,7 +53,7 @@ struct DocumentDetailView: View {
             }
         }
         .navigationTitle(Text(verbatim: documents.state(id: documentID)?.summary.number ?? String(localized: L.draftTitle)))
-        .task(id: LoadKey(id: documentID, states: documents.states)) {
+        .task(id: LoadKey(id: documentID, states: documents.states, pdfVersion: pdfVersion.wrappedValue)) {
             load()
         }
     }
@@ -57,6 +67,28 @@ struct DocumentDetailView: View {
             payments = []
             deductions = []
             loadError = ErrorText.message(error, locale: locale)
+        }
+        loadPDF()
+    }
+
+    /// The stored PDF of an issued document. A failure shows "Preview unavailable" with Try again; the
+    /// document itself stays intact (screens-flows.md §2b).
+    private func loadPDF() {
+        guard documents.state(id: documentID)?.summary.status == .issued else {
+            pdf = nil
+            pdfError = nil
+            savedFileExists = false
+            return
+        }
+        do {
+            let stored = try DocumentPDFService.issuedPDF(stores, documentID: documentID)
+            pdf = stored
+            savedFileExists = stored.savedPath.map { PDFFiles.fileExists(at: $0) } ?? false
+            pdfError = nil
+        } catch {
+            pdf = nil
+            savedFileExists = false
+            pdfError = ErrorText.message(error, locale: locale)
         }
     }
 
@@ -136,6 +168,9 @@ struct DocumentDetailView: View {
             actions(state)
             if let loadError {
                 Text(verbatim: loadError).textRole(.caption).foregroundStyle(.red)
+            }
+            if summary.status == .issued {
+                pdfSection
             }
         }
     }
@@ -236,6 +271,96 @@ struct DocumentDetailView: View {
         do {
             try stores.documents.deletePayment(id: id)
             load()
+        } catch {
+            loadError = ErrorText.message(error, locale: locale)
+        }
+    }
+
+    // MARK: PDF (screens-flows.md §2b, ADR 0010)
+
+    /// The saved file line, the PDF actions and the pages. Show PDF in Finder is disabled while the file is
+    /// missing: the app keeps its own frozen copy of the bytes from issue time.
+    @ViewBuilder private var pdfSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text(L.pdfSection).textRole(.sectionTitle)
+            if let failure = pdfSaveFailure.wrappedValue, failure.documentID == documentID {
+                saveFailureBanner(failure)
+            }
+            if let path = pdf?.savedPath {
+                Text(verbatim: savedFileExists ? PDFSettings.displayPath(URL(fileURLWithPath: path)) : String(localized: L.pdfFileMoved))
+                    .textRole(.rowSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            } else if pdf != nil {
+                Text(L.pdfNotSavedYet).textRole(.rowSecondary)
+            }
+            HStack(spacing: Spacing.m) {
+                Button { savePDF() } label: { Text(L.savePDF) }
+                    .disabled(pdf == nil)
+                Button { if let path = pdf?.savedPath { PDFFiles.reveal(path: path) } } label: { Text(L.showPDFInFinder) }
+                    .disabled(!savedFileExists)
+                Button { printPDF() } label: { Text(L.printDocument) }
+                    .disabled(pdf == nil)
+            }
+            if let pdfError {
+                HStack(spacing: Spacing.m) {
+                    Text(L.pdfPreviewUnavailable).textRole(.body)
+                    Button { loadPDF() } label: { Text(L.retry) }
+                }
+                Text(verbatim: pdfError).textRole(.caption).foregroundStyle(.red)
+            }
+        }
+        if let pdf {
+            PDFPagesView(data: pdf.data)
+        }
+    }
+
+    /// "PDF couldn't be saved to …" with Choose Folder… and Save PDF… (screens-flows.md §2c).
+    private func saveFailureBanner(_ failure: PDFSaveFailure) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Label {
+                Text(L.pdfSaveFailed(failure.folder))
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            .textRole(.body)
+            Text(verbatim: failure.detail).textRole(.caption)
+            HStack(spacing: Spacing.m) {
+                Button { chooseFolderAndSave() } label: { Text(L.chooseFolder) }
+                Button { savePDF() } label: { Text(L.savePDF) }
+            }
+        }
+        .padding(Spacing.m)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: Radius.m))
+    }
+
+    private func savePDF() {
+        do {
+            guard try PDFActions.save(stores, documentID: documentID) != nil else { return }
+            pdfSaveFailure.wrappedValue = nil
+            loadPDF()
+            pdfVersion.wrappedValue += 1
+        } catch {
+            loadError = ErrorText.message(error, locale: locale)
+        }
+    }
+
+    private func chooseFolderAndSave() {
+        do {
+            guard let folder = try PDFFiles.chooseFolder() else { return }
+            _ = try PDFActions.save(stores, documentID: documentID, into: folder)
+            pdfSaveFailure.wrappedValue = nil
+            loadPDF()
+            pdfVersion.wrappedValue += 1
+        } catch {
+            loadError = ErrorText.message(error, locale: locale)
+        }
+    }
+
+    private func printPDF() {
+        do {
+            try PDFActions.printPDF(stores, documentID: documentID, draft: nil)
         } catch {
             loadError = ErrorText.message(error, locale: locale)
         }
