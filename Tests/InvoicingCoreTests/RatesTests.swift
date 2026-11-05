@@ -221,6 +221,33 @@ import Testing
         let openEnded = ExchangeRateTable(rates: [rate("2026-11-05", "24.33")])
         #expect(openEnded.resolve(.eur, on: day("2026-11-07")).rule == .missing)
     }
+
+    @Test func resolveAroundEasterTakesTheLastWorkingDayBeforeTheHolidays() {
+        // 2026: Good Friday 3 April and Easter Monday 6 April are public holidays, so Thursday 2 April is
+        // the last working day before them and Tuesday 7 April the first after.
+        let table = ExchangeRateTable(rates: [rate("2026-04-02", "24.1"), rate("2026-04-07", "24.2")])
+        for iso in ["2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06"] {
+            let resolution = table.resolve(.eur, on: day(iso))
+            #expect(resolution.rule == .weekendOrHoliday)
+            #expect(resolution.publicationDay == day("2026-04-02"))
+            #expect(resolution.fallbackFrom == day("2026-04-02"))
+            #expect(resolution.rate?.czkPerAmount == d("24.1"))
+        }
+        #expect(table.resolve(.eur, on: day("2026-04-07")).rule == .storedForDay)
+        #expect(table.resolve(.eur, on: day("2026-04-02")).rule == .storedForDay)
+
+        // Thursday 2 April imported neither: it lies between the imports of Wednesday 1 April and Tuesday
+        // 7 April, so the ČNB skipped it and Wednesday's rate bridges the whole Easter weekend.
+        let skippedThursday = ExchangeRateTable(rates: [rate("2026-04-01", "24.05"), rate("2026-04-07", "24.2")])
+        let saturday = skippedThursday.resolve(.eur, on: day("2026-04-04"))
+        #expect(saturday.rule == .noPublicationThatDay)
+        #expect(saturday.publicationDay == day("2026-04-02"))
+        #expect(saturday.fallbackFrom == day("2026-04-01"))
+        #expect(saturday.rate?.czkPerAmount == d("24.05"))
+        // A typed Wednesday rate is no evidence of a skipped publication.
+        let typedWednesday = ExchangeRateTable(rates: [typed("2026-04-01", "24.05"), rate("2026-04-07", "24.2")])
+        #expect(typedWednesday.resolve(.eur, on: day("2026-04-04")).rule == .missing)
+    }
 }
 
 @Suite struct ExchangeRateTests {

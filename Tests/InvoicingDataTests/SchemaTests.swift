@@ -168,4 +168,22 @@ import InvoicingCore
         #expect(payments.first?.kind == .refund)
         #expect(payments.first?.amount == Money(Fixtures.d("-0.01"), .czk))
     }
+
+    @Test func upgradingAV1DatabaseKeepsItsRows() throws {
+        // A database written by the first release (schema v1) is migrated in place; nothing is dropped.
+        let queue = try DatabaseQueue()
+        let migrator = Schema.migrator
+        try migrator.migrate(queue, upTo: "v1")
+        try queue.write { db in
+            #expect(try !db.tableExists("documentPDF"))
+            try db.execute(sql: "INSERT INTO auditEvent (at, entity, entityID, action) VALUES (?, ?, ?, ?)",
+                           arguments: ["2026-11-05T10:00:00Z", "document", "doc-1", "create"])
+        }
+        try migrator.migrate(queue)
+        try queue.read { db in
+            #expect(try migrator.hasCompletedMigrations(db))
+            #expect(try db.tableExists("documentPDF"))
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM auditEvent WHERE entityID = 'doc-1'") == 1)
+        }
+    }
 }

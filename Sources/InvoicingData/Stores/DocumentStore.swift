@@ -190,12 +190,13 @@ public struct DocumentStore: Sendable {
     /// Records money received against an issued document (`amount` positive). A payment taken from a bank
     /// transaction must be in its currency and come from a credit line, and the payments taken from one
     /// transaction never add up to more than it carries (one transfer may pay several documents, but is
-    /// never counted twice); an unmatched transaction becomes matched to the document.
+    /// never counted twice); an unmatched transaction becomes matched to the document. `id` names the new
+    /// row: the app's Undo records a deleted payment again under its old id, so the audit trail names one payment.
     @discardableResult
-    public func recordPayment(documentID: String, on day: CalendarDay, amount: Money, bankTransactionID: String? = nil,
-                              note: String? = nil, now: Date = Date()) throws -> DocumentPayment {
+    public func recordPayment(documentID: String, id: String = UUID().uuidString, on day: CalendarDay, amount: Money,
+                              bankTransactionID: String? = nil, note: String? = nil, now: Date = Date()) throws -> DocumentPayment {
         try database.queue.write { db in
-            try Self.insertPayment(db, documentID: documentID, on: day, amount: amount, kind: .received,
+            try Self.insertPayment(db, id: id, documentID: documentID, on: day, amount: amount, kind: .received,
                                    bankTransactionID: bankTransactionID, relatedPaymentID: nil, note: note, at: Timestamps.string(now))
         }
     }
@@ -204,12 +205,12 @@ public struct DocumentStore: Sendable {
     /// returned, stored as a negative `refund` payment. It may not exceed what the document holds: its net
     /// paid amount or, for a final invoice whose advances exceed the supply, the credit the customer holds
     /// (`refundExceedsAvailable`). From a bank statement it must be a debit line in the document's
-    /// currency, allocated like a credit line (`transactionOverallocated`).
+    /// currency, allocated like a credit line (`transactionOverallocated`). `id` as in `recordPayment`.
     @discardableResult
-    public func recordRefund(documentID: String, on day: CalendarDay, amount: Money, bankTransactionID: String? = nil,
-                             note: String? = nil, now: Date = Date()) throws -> DocumentPayment {
+    public func recordRefund(documentID: String, id: String = UUID().uuidString, on day: CalendarDay, amount: Money,
+                             bankTransactionID: String? = nil, note: String? = nil, now: Date = Date()) throws -> DocumentPayment {
         try database.queue.write { db in
-            try Self.insertPayment(db, documentID: documentID, on: day, amount: -amount, kind: .refund,
+            try Self.insertPayment(db, id: id, documentID: documentID, on: day, amount: -amount, kind: .refund,
                                    bankTransactionID: bankTransactionID, relatedPaymentID: nil, note: note, at: Timestamps.string(now))
         }
     }
@@ -444,15 +445,20 @@ public struct DocumentStore: Sendable {
     /// was taken from goes back to the unmatched list once no payment is taken from it any more, when it was
     /// matched by hand to this document (as `insertPayment` does), so the money does not drop out of every list.
     /// With `deletingDraftReceipt`, the draft payment tax document created for the payment is deleted in the
-    /// same transaction instead of staying behind as a receipt of nothing.
+    /// same transaction instead of staying behind as a receipt of nothing; the `paymentDeleted` event names the
+    /// draft either way (`receiptDeleted` or `receiptKept`).
     public func deletePayment(id: String, deletingDraftReceipt: Bool = false, now: Date = Date()) throws {
         try database.queue.write { db in
             guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
             if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(id) }
             let stamp = Timestamps.string(now)
+            var details = ["payment": id, "kind": payment.kind]
             if deletingDraftReceipt, let receiptID = payment.receiptDocumentID,
                let receipt = try DocumentRecord.fetchOne(db, key: receiptID), receipt.status == DocumentStatus.draft.rawValue {
                 try Self.deleteDraft(db, receipt, at: stamp, details: ["reason": "payment deleted", "payment": id])
+                details["receiptDeleted"] = receiptID
+            } else if let receiptID = payment.receiptDocumentID {
+                details["receiptKept"] = receiptID
             }
             if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
                 if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
@@ -461,8 +467,7 @@ public struct DocumentStore: Sendable {
                                     details: ["payment": relatedID, "kind": related.kind], at: stamp)
             }
             try payment.delete(db)
-            try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted",
-                                details: ["payment": id, "kind": payment.kind], at: stamp)
+            try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted", details: details, at: stamp)
             try Self.releaseTransaction(db, of: payment, at: stamp)
         }
     }
