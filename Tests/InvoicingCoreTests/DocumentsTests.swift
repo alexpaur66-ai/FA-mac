@@ -374,6 +374,30 @@ enum DocumentFixtures {
         #expect(DocumentValidator.validate(document).contains { $0.code == .bankAccountCurrencyDiffers && $0.detail == "EUR" })
     }
 
+    @Test func paymentQRCodeThatCannotBeEncodedIsAWarning() {
+        // The EPC code carries at most 70 characters of name; the PDF would print a notice in the code's place.
+        var document = DocumentFixtures.euInvoice()
+        document.supplier.name = String(repeating: "N", count: 71)
+        let tooLong = DocumentValidator.validate(document).first { $0.code == .paymentQRCodeNameTooLong }
+        #expect(tooLong?.severity == .warning)
+        #expect(tooLong?.detail == "70")
+        #expect(tooLong?.message(language: .english).contains("at most 70 characters") == true)
+        // A draft without a number is probed with a stand-in number.
+        document.number = nil
+        #expect(DocumentValidator.validate(document, forIssue: false).contains { $0.code == .paymentQRCodeNameTooLong })
+        // Exactly 70 characters fit.
+        document.supplier.name = String(repeating: "N", count: 70)
+        #expect(!DocumentValidator.validate(document, forIssue: false).contains { $0.code.rawValue.hasPrefix("paymentQRCode") })
+
+        // QR platba refuses amounts above 9 999 999,99.
+        var czk = DocumentFixtures.czkInvoice()
+        czk.lines = [DocumentLine(id: "l1", text: "Položka", quantity: 1, unitPrice: d("10000000"), treatment: .taxable(.standard))]
+        #expect(DocumentValidator.validate(czk).contains { $0.code == .paymentQRCodeUnavailable && $0.severity == .warning })
+        // Without a QR code there is nothing to check.
+        czk.payment?.qrCode = PaymentQRKind.none
+        #expect(!DocumentValidator.validate(czk).contains { $0.code == .paymentQRCodeUnavailable })
+    }
+
     @Test func advanceRequestIsNotATaxDocument() {
         var document = DocumentFixtures.czkInvoice()
         document.kind = .advanceRequest

@@ -13,7 +13,8 @@ struct PaymentRow: Identifiable, Hashable {
     var date: CalendarDay { payment.paidOn }
     var amount: Decimal { payment.amount.amount }
     var currencyCode: String { payment.amount.currency.code }
-    var kindName: String { String(localized: payment.kind.title) }
+    /// Typed, Statement or Credit (screens-flows.md §2f).
+    var sourceName: String { String(localized: payment.sourceTitle) }
     var documentNumber: String { state.summary.number ?? "" }
     var customerName: String { state.summary.customerName }
     var note: String { payment.note ?? "" }
@@ -22,38 +23,40 @@ struct PaymentRow: Identifiable, Hashable {
 struct PaymentsView: View {
     let stores: Stores
     let documents: DocumentListModel
+    /// The document of the selected payment, for the detail column and the inspector.
     @Binding var selectedDocumentID: String?
+    /// Deletes a payment (a draft tax document never goes with it from here); the window registers the undo.
+    let deletePayment: @MainActor (DocumentPayment) -> Void
 
     @State private var rows: [PaymentRow] = []
+    @State private var loaded = false
     @State private var loadError: String?
-    @State private var selection: String?
+    /// Kept per window, so the selection survives a switch to another section (screens-flows.md §0.1).
+    @SceneStorage("payments.selection") private var selection: String?
+    @State private var paymentPendingDeletion: DocumentPayment?
     @State private var sortOrder = [KeyPathComparator(\PaymentRow.date, order: .reverse)]
     @Environment(\.locale) private var locale
 
     var body: some View {
-        Group {
-            if rows.isEmpty {
+        VStack(spacing: 0) {
+            if let loadError {
+                HStack(spacing: Spacing.m) {
+                    InlineMessage(loadError)
+                    Spacer()
+                    Button { load() } label: { Text(L.retry) }
+                }
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, Spacing.s)
+                Divider()
+            }
+            if loaded && rows.isEmpty {
                 ContentUnavailableView {
                     Label { Text(L.noPayments) } icon: { Image(systemName: "banknote") }
                 } description: {
-                    if let loadError { Text(verbatim: loadError) } else { EmptyView() }
+                    Text(L.noPaymentsDescription)
                 }
             } else {
-                Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
-                    TableColumn(Text(L.colDate), value: \.date) { row in DayText(row.date) }
-                        .width(min: 90, ideal: 100)
-                    TableColumn(Text(L.colKind), value: \.kindName)
-                        .width(min: 80, ideal: 110)
-                    TableColumn(Text(L.colAmount), value: \.amount) { row in
-                        MoneyText(amount: row.amount, currency: row.currencyCode, locale: locale)
-                    }
-                    .width(min: 100, ideal: 130)
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colDocument), value: \.documentNumber)
-                        .width(min: 90, ideal: 130)
-                    TableColumn(Text(L.colClient), value: \.customerName)
-                    TableColumn(Text(L.colNote), value: \.note)
-                }
+                table
             }
         }
         .navigationTitle(Text(L.payments))
@@ -61,8 +64,79 @@ struct PaymentsView: View {
         .task(id: documents.states) {
             load()
         }
-        .onChange(of: selection) { _, newValue in
-            selectedDocumentID = rows.first { $0.id == newValue }?.state.id
+        .onChange(of: selection, initial: true) { _, newValue in
+            sync(newValue)
+        }
+        .paymentDeletionDialog(pending: $paymentPendingDeletion) { payment, _ in
+            deletePayment(payment)
+        }
+    }
+
+    // Date · Client · Document · Amount · Source · Note (screens-flows.md §2f); Account and the CZK
+    // difference arrive with the bank import.
+    private var table: some View {
+        Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+            TableColumn(Text(L.colDate), value: \.date) { row in DayText(row.date) }
+                .width(min: 90, ideal: 100)
+            TableColumn(Text(L.colClient), value: \.customerName) { row in
+                Text(verbatim: row.customerName.isEmpty ? String(localized: L.noClient) : row.customerName).textRole(.body)
+            }
+            TableColumn(Text(L.colDocument), value: \.documentNumber) { row in
+                Text(verbatim: row.documentNumber).textRole(.body)
+            }
+            .width(min: 90, ideal: 130)
+            TableColumn(Text(L.colAmount), value: \.amount) { row in
+                HStack(spacing: Spacing.xs) {
+                    MoneyText(amount: row.amount, currency: row.currencyCode, locale: locale)
+                    if row.payment.receiptIssued {
+                        // The basis of an issued tax document: locked (screens-flows.md §2f).
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel(Text(L.paymentLocked))
+                    }
+                }
+            }
+            .width(min: 110, ideal: 140)
+            .alignment(.trailing)
+            TableColumn(Text(L.colSource), value: \.sourceName) { row in
+                Text(verbatim: row.sourceName).textRole(.body)
+            }
+            .width(min: 70, ideal: 90)
+            TableColumn(Text(L.colNote), value: \.note) { row in
+                Text(verbatim: row.note).textRole(.body)
+            }
+        }
+        .contextMenu(forSelectionType: String.self) { ids in
+            if ids.count == 1, let id = ids.first, let row = rows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+                Button(role: .destructive) { requestDeletion(row.payment) } label: { Text(L.deletePayment) }
+            }
+        }
+        .onDeleteCommand {
+            if let id = selection, let row = rows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+                requestDeletion(row.payment)
+            }
+        }
+    }
+
+    private func requestDeletion(_ payment: DocumentPayment) {
+        if payment.deletionNeedsConfirmation {
+            paymentPendingDeletion = payment
+        } else {
+            deletePayment(payment)
+        }
+    }
+
+    /// The selected payment's document; a selection the list no longer has is dropped once the list is loaded.
+    private func sync(_ id: String?) {
+        guard let id else {
+            selectedDocumentID = nil
+            return
+        }
+        if let row = rows.first(where: { $0.id == id }) {
+            selectedDocumentID = row.state.id
+        } else if loaded {
+            selection = nil
         }
     }
 
@@ -80,7 +154,9 @@ struct PaymentsView: View {
             loadError = nil
         } catch {
             rows = collected
-            loadError = ErrorText.message(error)
+            loadError = ErrorText.message(error, locale: locale)
         }
+        loaded = documents.loaded
+        sync(selection)
     }
 }

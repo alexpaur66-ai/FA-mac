@@ -1,5 +1,5 @@
 // The main window: one three-column NavigationSplitView for every section (screens-flows.md §1.2),
-// the document sheets, and the actions the menu bar can call.
+// the result line, the document sheets, undo, and the actions the menu bar can call.
 
 import AppKit
 import Combine
@@ -19,10 +19,13 @@ struct MainSplitView: View {
     @State private var paymentDocumentSelection: String?
     @State private var inspectorPresented = false
     @State private var sheet: MainSheet?
-    /// An inline result or error line from the last menu or window action; cleared when the user navigates.
-    @State private var resultLine: String?
+    /// The result or error of the last action, at the top of the content column (design-system.md §8.17);
+    /// cleared when the user navigates or closes it.
+    @State private var result: ResultLineModel?
     /// Bumped after every rate import, so the coverage column reloads beside the rates table.
     @State private var ratesVersion = 0
+    /// File ▸ Import ČNB Rates… opens the file importer of the Exchange rates section.
+    @State private var ratesImporting = false
     /// The editor of the selected draft; replaced when another draft is selected (ADR 0009).
     @State private var editor: DraftEditorModel?
     @State private var issueSheetPresented = false
@@ -36,9 +39,19 @@ struct MainSplitView: View {
     /// draft being edited.
     @State private var documentsSearch = ""
     /// Where the editor of the draft being opened puts the cursor: the client of a new draft without one,
-    /// else its first line. Consumed when that editor is created.
-    @State private var pendingEditorFocus: EditorFocusRequest?
+    /// else its first line. Consumed by the editor of that draft only.
+    @State private var pendingEditorFocus: PendingEditorFocus?
+    /// The payment date last recorded, proposed by the next Record Payment sheet (screens-flows.md §2f).
+    @State private var lastPaymentDate: Date?
+    /// Help ▸ Getting Started shows the setup card again once it has hidden itself.
+    @AppStorage(SetupStatus.forcedKey) private var gettingStartedForced = false
     @Environment(\.locale) private var locale
+    @Environment(\.undoManager) private var undoManager
+
+    struct PendingEditorFocus: Equatable {
+        let documentID: String
+        let focus: EditorFocusRequest
+    }
 
     init(stores: Stores) {
         self.stores = stores
@@ -54,6 +67,13 @@ struct MainSplitView: View {
             })
     }
 
+    /// The inspector is a column of the sections that have one; elsewhere it stays closed.
+    private var inspectorBinding: Binding<Bool> {
+        Binding(
+            get: { inspectorPresented && sidebar.section.hasInspector },
+            set: { inspectorPresented = $0 })
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selection: sidebarSelection, counts: documents.badgeCounts)
@@ -61,19 +81,9 @@ struct MainSplitView: View {
                     min: LayoutMetrics.sidebar.min, ideal: LayoutMetrics.sidebar.ideal, max: LayoutMetrics.sidebar.max)
         } content: {
             contentColumn
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    // Documents shows the line itself, in place of its selection bar.
-                    if let resultLine, sidebar.section != .documents {
-                        VStack(spacing: 0) {
-                            Divider()
-                            Text(verbatim: resultLine)
-                                .textRole(.caption)
-                                .textSelection(.enabled)
-                                .padding(.horizontal, Spacing.m)
-                                .padding(.vertical, Spacing.xs)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .background(.bar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let result {
+                        ResultLine(model: result) { self.result = nil }
                     }
                 }
                 .navigationSplitViewColumnWidth(
@@ -81,7 +91,7 @@ struct MainSplitView: View {
         } detail: {
             detailColumn
                 .frame(minWidth: LayoutMetrics.detailMinWidth)
-                .inspector(isPresented: $inspectorPresented) {
+                .inspector(isPresented: inspectorBinding) {
                     inspectorColumn
                         .inspectorColumnWidth(
                             min: LayoutMetrics.inspector.min, ideal: LayoutMetrics.inspector.ideal, max: LayoutMetrics.inspector.max)
@@ -91,6 +101,14 @@ struct MainSplitView: View {
         .focusedSceneValue(\.mainActions, mainActions)
         .onChange(of: selectedDraftID, initial: true) { _, id in
             syncEditor(id)
+        }
+        .onChange(of: documents.restoreOutcome) { _, outcome in
+            guard let outcome else { return }
+            if let error = outcome.error {
+                report(error, kind: .error)
+            } else if let id = outcome.draftID, sidebar.section == .documents {
+                documentSelection = [id]
+            }
         }
         // A client created or edited from the sheet must reach the open editor's Client picker.
         .sheet(item: $sheet, onDismiss: { editor?.refreshReferenceData() }) { sheet in
@@ -111,19 +129,23 @@ struct MainSplitView: View {
     @ViewBuilder private var contentColumn: some View {
         switch sidebar.section {
         case .overview:
-            OverviewView(stores: stores, documents: documents, selection: $overviewSelection, show: show, newDocument: newDraft)
+            OverviewView(
+                stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
+                show: show, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: $documentSelection,
                 inspectorPresented: $inspectorPresented, search: $documentsSearch, editingID: editor?.documentID,
-                resultLine: resultLine,
-                newDocument: newDraft, recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft)
+                newDocument: newDraft, documentActions: documentActions(for:), deleteDrafts: deleteDrafts)
         case .clients:
             ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) })
         case .payments:
-            PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection)
+            PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
+                         deletePayment: { deletePayment($0, deletingDraftReceipt: false) })
         case .rates:
-            RatesView(stores: stores, version: $ratesVersion)
+            RatesView(stores: stores, version: $ratesVersion, importing: $ratesImporting, report: { text, isError in
+                report(text, kind: isError ? .error : .success)
+            })
         case .exports:
             ExportsView(stores: stores)
         }
@@ -141,13 +163,14 @@ struct MainSplitView: View {
             if documentSelection.count == 1, let id = documentSelection.first {
                 documentDetail(id)
             } else if documentSelection.count > 1 {
-                MultiSelectionView(rows: documents.rows(for: sidebar.documentFilter).filter { documentSelection.contains($0.id) })
+                MultiSelectionView(rows: selectedRows)
             } else {
                 placeholder(L.noSelection, symbol: Symbols.document)
             }
         case .clients:
             if let id = clientSelection {
-                ClientDetailView(clients: clients, documents: documents, customerID: id, editClient: { sheet = .client(id) })
+                ClientDetailView(clients: clients, documents: documents, customerID: id,
+                                 editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) })
             } else {
                 placeholder(L.noClientSelected, symbol: "person.2")
             }
@@ -165,11 +188,27 @@ struct MainSplitView: View {
     }
 
     @ViewBuilder private var inspectorColumn: some View {
-        if let id = selectedDocumentID {
-            DocumentInspectorView(stores: stores, documents: documents, documentID: id)
-        } else {
-            placeholder(L.noSelection, symbol: "sidebar.right")
+        switch sidebar.section {
+        case .clients:
+            if let id = clientSelection {
+                ClientInspectorView(clients: clients, documents: documents, customerID: id)
+            } else {
+                placeholder(L.noClientSelected, symbol: "person.2")
+            }
+        case .documents where documentSelection.count > 1:
+            MultiSelectionView(rows: selectedRows)
+        default:
+            if let id = selectedDocumentID {
+                DocumentInspectorView(stores: stores, documents: documents, documentID: id, openDocument: openDocument(number:))
+            } else {
+                placeholder(L.noSelection, symbol: "sidebar.right")
+            }
         }
+    }
+
+    /// The rows selected in Documents, in the current filter.
+    private var selectedRows: [DocumentRow] {
+        documents.rows(for: sidebar.documentFilter).filter { documentSelection.contains($0.id) }
     }
 
     @ViewBuilder private func documentDetail(_ id: String) -> some View {
@@ -184,10 +223,10 @@ struct MainSplitView: View {
             }
         } else {
             DocumentDetailView(
-                stores: stores, documents: documents, documentID: id,
-                recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft,
-                createFinalInvoice: { createFinalInvoice(from: $0) },
+                stores: stores, documents: documents, documentID: id, actions: documentActions(for: id),
+                deletePayment: deletePayment,
                 createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft,
+                openDocument: openDocument(id:),
                 pdfVersion: $pdfVersion, pdfSaveFailure: $pdfSaveFailure)
         }
     }
@@ -196,6 +235,20 @@ struct MainSplitView: View {
         ContentUnavailableView {
             Label { Text(title) } icon: { Image(systemName: symbol) }
         }
+    }
+
+    // MARK: Result line
+
+    private func report(_ text: String, kind: ResultLineModel.Kind = .success, undo: (@MainActor () -> Void)? = nil) {
+        result = ResultLineModel(text, kind: kind, undo: undo)
+    }
+
+    private func report(_ resource: LocalizedStringResource, kind: ResultLineModel.Kind = .success, undo: (@MainActor () -> Void)? = nil) {
+        report(String(localized: resource), kind: kind, undo: undo)
+    }
+
+    private func report(_ error: Error) {
+        report(ErrorText.message(error, locale: locale), kind: .error)
     }
 
     // MARK: Selection and actions
@@ -216,17 +269,24 @@ struct MainSplitView: View {
         return id
     }
 
+    /// The client the Client menu acts on: the one selected in Clients, else the selected document's.
+    private var menuClientID: String? {
+        if sidebar.section == .clients { return clientSelection }
+        return selectedDocumentID.flatMap { documents.state(id: $0)?.summary.customerID }
+    }
+
     /// One editor per selected draft; the old one writes its draft before it goes. When that save fails
     /// (the store refused it), the user is told the edits were not kept instead of losing them silently.
     private func syncEditor(_ id: String?) {
         guard editor?.documentID != id else { return }
         if let old = editor, !old.saveNow() {
-            resultLine = String(localized: L.draftChangesNotSaved(old.saveError ?? ""))
+            report(L.draftChangesNotSaved(old.saveError ?? ""), kind: .error)
         }
         issueSheetPresented = false
         previewShown = false
-        editor = id.map { DraftEditorModel(stores: stores, documentID: $0, initialFocus: pendingEditorFocus) }
-        if id != nil { pendingEditorFocus = nil }
+        let focus = pendingEditorFocus?.documentID == id ? pendingEditorFocus?.focus : nil
+        editor = id.map { DraftEditorModel(stores: stores, documentID: $0, initialFocus: focus) }
+        if let id, pendingEditorFocus?.documentID == id { pendingEditorFocus = nil }
     }
 
     private var mainActions: MainActions {
@@ -234,21 +294,48 @@ struct MainSplitView: View {
             show: show,
             newDocument: newDraft,
             newClient: { sheet = .client(nil) },
-            toggleInspector: { inspectorPresented.toggle() })
-        guard let id = selectedDocumentID, let state = documents.state(id: id) else { return actions }
-        let summary = state.summary
-        if summary.status == .draft {
-            actions.deleteDraft = { deleteDraft(id) }
-            actions.issue = { requestIssue(id) }
-            if summary.kind != .paymentTaxDocument {
-                actions.duplicate = { duplicate(id) }
-            }
+            importRates: importRates,
+            showGettingStarted: showGettingStarted)
+        if let url = stores.databaseURL {
+            actions.showDataFolder = { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        }
+        if sidebar.section.hasInspector {
+            actions.toggleInspector = { inspectorPresented.toggle() }
+            actions.inspectorShown = inspectorPresented
+        }
+        if let clientID = menuClientID, let customer = clients.customer(id: clientID) {
+            actions.clientName = customer.party.name
+            actions.newDocumentForClient = { newDraft($0, customerID: clientID) }
+            actions.editClient = { sheet = .client(clientID) }
+        }
+        if let id = selectedDocumentID {
+            actions.document = documentActions(for: id)
             if let editor, editor.documentID == id {
                 actions.editor = editor
                 actions.togglePreview = { previewShown.toggle() }
                 actions.previewShown = previewShown
+            }
+        }
+        return actions
+    }
+
+    /// What one document offers, for the Document menu of the selected one and the context menu of any row.
+    private func documentActions(for id: String) -> DocumentActions {
+        var actions = DocumentActions()
+        guard let state = documents.state(id: id) else { return actions }
+        let summary = state.summary
+        if summary.customerID != nil {
+            actions.showClient = { showClient(ofDocument: id) }
+        }
+        if summary.status == .draft {
+            actions.deleteDraft = { deleteDrafts([id]) }
+            if let editor, editor.documentID == id {
+                actions.issue = { requestIssue(id) }
                 // A draft prints as its watermarked preview (screens-flows.md §1.4).
                 actions.printDocument = { printDocument(id, draft: editor.document) }
+            }
+            if summary.kind != .paymentTaxDocument {
+                actions.duplicate = { duplicate(id) }
             }
             return actions
         }
@@ -274,8 +361,12 @@ struct MainSplitView: View {
         if state.acceptsPayment {
             actions.recordPayment = { sheet = .recordPayment(id) }
         }
-        if state.closure != nil {
+        if state.acceptsRefund {
+            actions.recordRefund = { sheet = .recordRefund(id) }
+        }
+        if let closure = state.closure {
             actions.reopen = { reopen(id) }
+            actions.reopenKind = closure.kind
         } else {
             // The store refuses while any payment row exists, even a payment and its refund that net to zero.
             if summary.kind == .advanceRequest && state.paid.isZero && !state.deductedInFinal
@@ -292,21 +383,54 @@ struct MainSplitView: View {
     private func show(_ item: SidebarItem) {
         // The Documents section itself is its "All" filter.
         sidebar = item == .section(.documents) ? .filter(.all) : item
-        resultLine = nil
+        result = nil
+    }
+
+    /// Shows an issued document in Documents ▸ All (the chain, a locked payment's tax document).
+    private func openDocument(id: String) {
+        show(.filter(.all))
+        documentsSearch = ""
+        documentSelection = [id]
+    }
+
+    /// The same by number, for the inspector's chain, which knows numbers only.
+    private func openDocument(number: String) {
+        guard let state = documents.states.first(where: { $0.summary.number == number }) else { return }
+        openDocument(id: state.id)
+    }
+
+    private func showClient(ofDocument id: String) {
+        guard let customerID = documents.state(id: id)?.summary.customerID else { return }
+        clientSelection = customerID
+        show(.section(.clients))
+    }
+
+    /// File ▸ Import ČNB Rates…: Exchange rates with its file importer open.
+    private func importRates() {
+        show(.section(.rates))
+        ratesImporting = true
+    }
+
+    private func showGettingStarted() {
+        gettingStartedForced = true
+        show(.section(.overview))
     }
 
     /// New Invoice / New Advance Invoice: a draft with the company's and the selected client's defaults,
-    /// opened in the editor.
+    /// opened in the editor. In Clients the selected client is the draft's.
     private func newDraft(_ kind: DocumentKind) {
+        newDraft(kind, customerID: sidebar.section == .clients ? clientSelection : nil)
+    }
+
+    private func newDraft(_ kind: DocumentKind, customerID: String?) {
         do {
             guard let profile = try stores.profile.load() else {
                 // show() clears the line, so it comes first; the Overview carries the setup card.
                 show(.section(.overview))
-                resultLine = String(localized: L.setUpCompanyFirst)
+                report(L.setUpCompanyFirst, kind: .info)
                 return
             }
-            let selectedClient = sidebar.section == .clients ? clientSelection : nil
-            let customer = try selectedClient.flatMap { try stores.customers.customer(id: $0) }
+            let customer = try customerID.flatMap { try stores.customers.customer(id: $0) }
             let today = CalendarDay(Date(), in: .current)
             let customerParty = customer?.party
                 ?? Party(name: "", address: PostalAddress(street: "", city: "", postalCode: "", countryCode: "CZ"))
@@ -318,7 +442,7 @@ struct MainSplitView: View {
             try stores.documents.saveDraft(document)
             openDraft(document.id, focus: customer == nil ? .client : .firstLineText)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -329,11 +453,11 @@ struct MainSplitView: View {
         if let editor, editor.documentID == id {
             editor.requestFocus(focus)
         } else {
-            pendingEditorFocus = focus
+            pendingEditorFocus = PendingEditorFocus(documentID: id, focus: focus)
         }
         sidebar = .filter(.drafts)
         documentSelection = [id]
-        resultLine = nil
+        result = nil
     }
 
     /// An existing draft opened from a list, a payment row or a chain: the cursor goes to the first line.
@@ -360,13 +484,13 @@ struct MainSplitView: View {
         // The PDF is rendered and stored now, and written to the PDF folder when one is chosen (ADR 0010).
         do {
             if let url = try DocumentPDFService.storeAndSave(stores, document: document) {
-                resultLine = issuedLine + " · " + String(localized: L.pdfSavedTo(PDFSettings.displayPath(url)))
+                report(issuedLine + " · " + String(localized: L.pdfSavedTo(PDFSettings.displayPath(url))))
             } else {
-                resultLine = issuedLine
+                report(issuedLine)
             }
         } catch {
             // The document is issued either way: the database is the source of truth (screens-flows.md §2c).
-            resultLine = issuedLine
+            report(issuedLine)
             let folder = PDFSettings.folderURL().map(PDFSettings.displayPath) ?? String(localized: L.pdfFolderNone)
             pdfSaveFailure = PDFSaveFailure(documentID: document.id, folder: folder, detail: ErrorText.message(error))
         }
@@ -378,9 +502,9 @@ struct MainSplitView: View {
             guard let url = try PDFActions.save(stores, documentID: id) else { return }
             pdfSaveFailure = nil
             pdfVersion += 1
-            resultLine = String(localized: L.pdfSavedTo(PDFSettings.displayPath(url)))
+            report(L.pdfSavedTo(PDFSettings.displayPath(url)))
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -389,7 +513,7 @@ struct MainSplitView: View {
         do {
             try PDFActions.printPDF(stores, documentID: id, draft: draft)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -399,7 +523,7 @@ struct MainSplitView: View {
     private func duplicate(_ id: String) {
         // The open draft's last edits are still waiting for autosave: the copy is made of what the editor shows.
         if let editor, editor.documentID == id, !editor.saveNow() {
-            resultLine = String(localized: L.draftChangesNotSaved(editor.saveError ?? ""))
+            report(L.draftChangesNotSaved(editor.saveError ?? ""), kind: .error)
             return
         }
         do {
@@ -417,7 +541,7 @@ struct MainSplitView: View {
             try stores.documents.saveDraft(copy)
             openDraft(copy.id, focus: .firstLineQuantity)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -433,9 +557,10 @@ struct MainSplitView: View {
             let pending = try stores.documents.payments(for: advanceID).filter { $0.kind == .received && !$0.receiptIssued }
             guard pending.isEmpty else {
                 let days = pending.map { $0.paidOn.formatted(locale) }
-                resultLine = days.count == 1
+                let text = days.count == 1
                     ? String(localized: L.finalInvoiceReceiptsPending(days[0]))
                     : String(localized: L.finalInvoiceReceiptsPendingMany(days.formatted(.list(type: .and).locale(locale))))
+                report(text, kind: .info)
                 return
             }
             let profile = try stores.profile.load()
@@ -459,7 +584,7 @@ struct MainSplitView: View {
             try stores.documents.saveDraft(final)
             openDraft(final.id, focus: .firstLineQuantity)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -470,20 +595,68 @@ struct MainSplitView: View {
         }
     }
 
-    /// A pending or failed autosave of the deleted draft must not write it back (`saveDraft` inserts a
-    /// missing id): the editor is discarded before the selection change runs `syncEditor`.
-    private func deleteDraft(_ id: String) {
-        do {
-            try stores.documents.deleteDraft(id: id)
-            if let open = editor, open.documentID == id {
-                open.discard()
-                editor = nil
-                issueSheetPresented = false
+    /// Delete Draft (⌫, the context menu, the detail, the menu bar): no confirmation, an Undo instead
+    /// (screens-flows.md §4). Undo writes the draft back under its id and relinks a payment tax document
+    /// to its payment. A pending or failed autosave of the deleted draft must not write it back
+    /// (`saveDraft` inserts a missing id): the editor is discarded before the selection change runs `syncEditor`.
+    private func deleteDrafts(_ ids: [String]) {
+        var deleted: [DocumentListModel.DeletedDraft] = []
+        var failure: Error?
+        for id in ids {
+            do {
+                guard let document = try stores.documents.document(id: id), document.status == .draft else { continue }
+                let paymentID = try stores.documents.payment(ofReceipt: id)?.id
+                try stores.documents.deleteDraft(id: id)
+                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOfPaymentID: paymentID))
+                if let open = editor, open.documentID == id {
+                    open.discard()
+                    editor = nil
+                    issueSheetPresented = false
+                }
+                documentSelection.remove(id)
+                if overviewSelection == id { overviewSelection = nil }
+                if paymentDocumentSelection == id { paymentDocumentSelection = nil }
+            } catch {
+                failure = error
             }
-            documentSelection.remove(id)
-            if overviewSelection == id { overviewSelection = nil }
+        }
+        if let failure {
+            report(failure)
+        }
+        guard !deleted.isEmpty else { return }
+        var undo: (@MainActor () -> Void)?
+        if let undoManager {
+            let restore = deleted
+            undoManager.registerUndo(withTarget: documents) { target in
+                MainActor.assumeIsolated { target.restoreDrafts(restore) }
+            }
+            undoManager.setActionName(String(localized: L.deleteDraft))
+            undo = { undoManager.undo() }
+        }
+        if failure == nil {
+            let text = deleted.count == 1 ? String(localized: L.draftDeleted) : String(localized: L.draftsDeleted(deleted.count))
+            report(text, undo: undo)
+        }
+    }
+
+    /// Delete Payment (the payment rows of the detail, ⌫ in Payments & Bank): Undo records the payment
+    /// again, except for credit legs and a payment deleted together with its draft tax document.
+    private func deletePayment(_ payment: DocumentPayment, deletingDraftReceipt: Bool) {
+        do {
+            try stores.documents.deletePayment(id: payment.id, deletingDraftReceipt: deletingDraftReceipt)
+            var undo: (@MainActor () -> Void)?
+            let restorable = (payment.kind == .received || payment.kind == .refund)
+                && !(deletingDraftReceipt && payment.receiptDocumentID != nil)
+            if restorable, let undoManager {
+                undoManager.registerUndo(withTarget: documents) { target in
+                    MainActor.assumeIsolated { target.restorePayment(payment) }
+                }
+                undoManager.setActionName(String(localized: L.deletePayment))
+                undo = { undoManager.undo() }
+            }
+            report(L.paymentDeleted, undo: undo)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -494,7 +667,7 @@ struct MainSplitView: View {
             guard let id = try TaxDocumentDraft.create(stores: stores, advanceID: advanceID, payment: payment) else { return }
             openDraft(id)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -502,7 +675,7 @@ struct MainSplitView: View {
         do {
             try stores.documents.reopen(id: id)
         } catch {
-            resultLine = ErrorText.message(error)
+            report(error)
         }
     }
 
@@ -510,14 +683,21 @@ struct MainSplitView: View {
         switch sheet {
         case .recordPayment(let id):
             if let state = documents.state(id: id) {
-                RecordPaymentSheet(stores: stores, state: state, openDraft: openDraft)
+                RecordPaymentSheet(stores: stores, state: state, mode: .payment, lastDate: $lastPaymentDate, openDraft: openDraft)
+            }
+        case .recordRefund(let id):
+            if let state = documents.state(id: id) {
+                RecordPaymentSheet(stores: stores, state: state, mode: .refund, lastDate: $lastPaymentDate, openDraft: openDraft)
             }
         case .closure(let id, let kind):
             if let state = documents.state(id: id) {
                 ClosureSheet(stores: stores, state: state, kind: kind)
             }
         case .client(let id):
-            ClientFormSheet(clients: clients, customer: id.flatMap { clients.customer(id: $0) })
+            // A new client is selected in Clients once saved (screens-flows.md §2e).
+            ClientFormSheet(clients: clients, customer: id.flatMap { clients.customer(id: $0) }, onSaved: { saved in
+                if sidebar.section == .clients { clientSelection = saved }
+            })
         case .newClientForDraft(let name):
             // New Client “X”… from the editor's client field: the saved client becomes the draft's.
             ClientFormSheet(clients: clients, customer: nil, initialName: name, onSaved: { id in
@@ -531,6 +711,7 @@ struct MainSplitView: View {
 
 enum MainSheet: Identifiable, Hashable {
     case recordPayment(String)
+    case recordRefund(String)
     case closure(String, DocumentClosureKind)
     /// nil creates a new client.
     case client(String?)
@@ -540,6 +721,7 @@ enum MainSheet: Identifiable, Hashable {
     var id: String {
         switch self {
         case .recordPayment(let id): "payment:" + id
+        case .recordRefund(let id): "refund:" + id
         case .closure(let id, let kind): "closure:" + kind.rawValue + ":" + id
         case .client(let id): "client:" + (id ?? "new")
         case .newClientForDraft: "newClientForDraft"
@@ -547,24 +729,25 @@ enum MainSheet: Identifiable, Hashable {
     }
 }
 
-/// The detail column with several documents selected: the count and the totals per currency.
+/// The detail column and the inspector with several documents selected: the count and the totals per
+/// currency (screens-flows.md §2b). The open balance counts issued documents with something left to pay.
 struct MultiSelectionView: View {
     let rows: [DocumentRow]
     @Environment(\.locale) private var locale
 
     var body: some View {
         let totals = rows.compactMap { $0.summary.totalGross }
-        let open = rows.map { $0.state.outstanding }
+        let open = rows.filter { $0.isIssued && $0.state.outstanding.amount > 0 }.map { $0.state.outstanding }
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text(L.selectedCount(rows.count)).textRole(.screenTitle)
             Grid(alignment: .leading, horizontalSpacing: Spacing.xl, verticalSpacing: Spacing.s) {
                 GridRow {
                     Text(L.colTotal).textRole(.label)
-                    Text(verbatim: MoneyList.text(totals, locale: locale)).textRole(.amountStrong)
+                    MoneyListText(monies: totals, locale: locale, role: .amountStrong)
                 }
                 GridRow {
                     Text(L.outstanding).textRole(.label)
-                    Text(verbatim: MoneyList.text(open, locale: locale)).textRole(.amountStrong)
+                    MoneyListText(monies: open, locale: locale, role: .amountStrong)
                 }
             }
             Text(L.totalsPerCurrency).textRole(.caption)

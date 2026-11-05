@@ -138,5 +138,6 @@ ADR stands.
 - **Quit** writes the open draft at once (`NSApplication.willTerminateNotification`), so autosave's delay
   loses nothing.
 - **Deferred to a later PR**: the QR type pop-up and the VS row (E059), item history (E062), the currency
-  banner (E025), the series-order warning (E033), E098 and E100 (they wait on Saša's answers), the
-  New ▸ submenu (E001), the "D" key (E018) and `textInputSuggestions` for the client field.
+  banner (E025), the series-order warning (E033), Amount due on invoices and advances too (E044), E098 and
+  E100 (they wait on Saša's answers), the New ▸ submenu (E001) and the "D" key (E018). The client field's
+  own suggestion list is the spec (design-system.md §8.4), so `textInputSuggestions` is not planned.

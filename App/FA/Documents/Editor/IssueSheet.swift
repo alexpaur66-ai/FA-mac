@@ -66,7 +66,7 @@ struct IssueSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .formSized()
+        .formSheetSized()
         // The rate field comes first when a rate is missing: it is the one thing to type here (E073).
         .defaultFocus($focus, model.rateIsMissing ? .rate : .checkbox)
         .onAppear {
@@ -113,7 +113,7 @@ struct IssueSheet: View {
     }
 
     private func summary(_ document: Document) -> some View {
-        let clauses = DocumentClause.clauses(for: document, totals: model.totals).map { $0.text(language: .ui(locale)) }
+        let clauses = DocumentClause.clauses(for: document, totals: model.totals).map { $0.text(language: .english) }
         return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.s) {
             row(L.summaryType) {
                 Text(verbatim: document.kind.pickerTitle).textRole(.body)
@@ -325,7 +325,7 @@ struct IssueSheet: View {
         if model.blockingCount(seriesID: seriesID) > 0 {
             section(L.blockingTitle) {
                 ForEach(errors) { issue in
-                    InlineMessage(issue.message(language: .ui(locale)))
+                    InlineMessage(issue.message(language: .english))
                 }
                 ForEach(model.deductionConflicts, id: \.self) { conflict in
                     InlineMessage(conflict)
@@ -353,7 +353,7 @@ struct IssueSheet: View {
         if !warnings.isEmpty || !extraWarnings.isEmpty || dateNotToday {
             section(L.checkTitle) {
                 ForEach(warnings) { issue in
-                    InlineMessage(issue.message(language: .ui(locale)), kind: .warning)
+                    InlineMessage(issue.message(language: .english), kind: .warning)
                 }
                 ForEach(extraWarnings, id: \.self) { warning in
                     InlineMessage(warning, kind: .warning)
@@ -381,10 +381,13 @@ struct IssueSheet: View {
     private func infoLines(_ document: Document) -> [String] {
         var lines: [String] = []
         if let from = model.rateFallbackFrom {
-            let wanted = document.taxPoint.formatted(locale)
             let used = from.formatted(locale)
-            let resource = model.rateResolution?.rule == .noPublicationThatDay
-                ? L.rateNotPublished(wanted, used) : L.rateFallback(wanted, used)
+            let resource: LocalizedStringResource
+            if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
+                resource = L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
+            } else {
+                resource = L.rateFallback(document.taxPoint.formatted(locale), used)
+            }
             lines.append(String(localized: resource))
         }
         if document.kind != .advanceRequest,
@@ -434,17 +437,6 @@ struct IssueSheet: View {
         } catch {
             issuing = false
             self.error = String(localized: L.issueFailed(ErrorText.message(error, locale: locale)))
-        }
-    }
-}
-
-private extension View {
-    /// A sheet sized to its content on macOS 15 (`presentationSizing(.form)`), a fixed width range before.
-    @ViewBuilder func formSized() -> some View {
-        if #available(macOS 15, *) {
-            frame(minWidth: 560, maxWidth: 720).presentationSizing(.form)
-        } else {
-            frame(minWidth: 560, maxWidth: 720)
         }
     }
 }

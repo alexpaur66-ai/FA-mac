@@ -15,11 +15,10 @@ struct DocumentsView: View {
     @Binding var search: String
     /// The draft open in the editor: its row stays listed whatever the search says.
     let editingID: String?
-    /// An inline result or error line from the last action; stays until the next action (never time-boxed).
-    let resultLine: String?
     let newDocument: @MainActor (DocumentKind) -> Void
-    let recordPayment: @MainActor (String) -> Void
-    let deleteDraft: @MainActor (String) -> Void
+    /// What one row offers, for the context menu and the toolbar.
+    let documentActions: @MainActor (String) -> DocumentActions
+    let deleteDrafts: @MainActor ([String]) -> Void
 
     @State private var sortOrder: [KeyPathComparator<DocumentRow>] = [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
     @SceneStorage("documentsColumns") private var columnCustomization: TableColumnCustomization<DocumentRow>
@@ -31,11 +30,9 @@ struct DocumentsView: View {
             .sorted(using: sortOrder)
     }
 
-    /// The one issued document selected, for Record Payment.
-    private var singleIssued: String? {
-        guard selection.count == 1, let id = selection.first, let state = documents.state(id: id),
-              state.acceptsPayment else { return nil }
-        return id
+    /// The one selected document, for the toolbar's Record Payment.
+    private var singleSelection: String? {
+        selection.count == 1 ? selection.first : nil
     }
 
     /// The selection without the documents the filter or the search hides, so the detail column, the
@@ -57,15 +54,7 @@ struct DocumentsView: View {
             } else {
                 table(rows)
             }
-            if let resultLine {
-                Divider()
-                Text(verbatim: resultLine)
-                    .textRole(.caption)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Spacing.m)
-                    .padding(.vertical, Spacing.xs)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if !selection.isEmpty {
+            if !selection.isEmpty {
                 Divider()
                 selectionBar(rows.filter { selection.contains($0.id) })
             }
@@ -92,7 +81,7 @@ struct DocumentsView: View {
             .customizationID("status")
 
             TableColumn(Text(L.colNumber), value: \.number) { row in
-                Text(verbatim: row.number.isEmpty ? "—" : row.number).textRole(.body)
+                DocumentNumberText(row: row)
             }
             .width(min: 90, ideal: 130)
             .customizationID("number")
@@ -138,15 +127,19 @@ struct DocumentsView: View {
             .customizationID("total")
 
             TableColumn(Text(L.colOpen), value: \.outstanding) { row in
-                MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale)
+                MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
+                          role: row.outstanding > 0 ? .amountStrong : .amount)
             }
             .width(min: 100, ideal: 130)
             .alignment(.trailing)
             .customizationID("open")
 
-            TableColumn(Text(L.colVS), value: \.variableSymbol)
-                .customizationID("vs")
-                .defaultVisibility(.hidden)
+            TableColumn(Text(L.colVS), value: \.variableSymbol) { row in
+                Text(verbatim: row.variableSymbol).textRole(.amount)
+            }
+            .alignment(.trailing)
+            .customizationID("vs")
+            .defaultVisibility(.hidden)
 
             TableColumn(Text(L.colCurrency), value: \.currencyCode)
                 .customizationID("currency")
@@ -157,19 +150,51 @@ struct DocumentsView: View {
         }
         .onDeleteCommand {
             // Only the selected drafts the table shows; a hidden id is never deleted.
-            for row in rows where selection.contains(row.id) && row.isDraft {
-                deleteDraft(row.id)
-            }
+            deleteDrafts(rows.filter { selection.contains($0.id) && $0.isDraft }.map(\.id))
         }
     }
 
     @ViewBuilder private func contextMenu(_ ids: Set<String>) -> some View {
-        if ids.count == 1, let id = ids.first, let state = documents.state(id: id) {
-            if state.acceptsPayment {
-                Button { recordPayment(id) } label: { Text(L.recordPayment) }
+        if ids.count == 1, let id = ids.first {
+            let actions = documentActions(id)
+            if let recordPayment = actions.recordPayment {
+                Button { recordPayment() } label: { Text(L.recordPayment) }
             }
-            if state.summary.status == .draft {
-                Button(role: .destructive) { deleteDraft(id) } label: { Text(L.deleteDraft) }
+            if let recordRefund = actions.recordRefund {
+                Button { recordRefund() } label: { Text(L.recordRefund) }
+            }
+            if let createFinalInvoice = actions.createFinalInvoice {
+                Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
+            }
+            if let createTaxDocument = actions.createTaxDocument {
+                Button { createTaxDocument() } label: { Text(L.createTaxDocumentForPayment) }
+            }
+            if let duplicate = actions.duplicate {
+                Button { duplicate() } label: { Text(actions.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicate) }
+            }
+            if let showClient = actions.showClient {
+                Button { showClient() } label: { Text(L.showClient) }
+            }
+            if actions.closeAdvanceUnpaid != nil || actions.markForCreditNote != nil || actions.reopen != nil {
+                Divider()
+            }
+            if let closeAdvanceUnpaid = actions.closeAdvanceUnpaid {
+                Button { closeAdvanceUnpaid() } label: { Text(L.closeAdvanceUnpaid) }
+            }
+            if let markForCreditNote = actions.markForCreditNote {
+                Button { markForCreditNote() } label: { Text(L.markForCreditNote) }
+            }
+            if let reopen = actions.reopen {
+                Button { reopen() } label: { Text(actions.reopenTitle) }
+            }
+            if actions.deleteDraft != nil {
+                Divider()
+                Button(role: .destructive) { deleteDrafts([id]) } label: { Text(L.deleteDraft) }
+            }
+        } else if ids.count > 1 {
+            let drafts = ids.filter { documents.state(id: $0)?.summary.status == .draft }
+            if !drafts.isEmpty {
+                Button(role: .destructive) { deleteDrafts(Array(drafts)) } label: { Text(L.deleteDraft) }
             }
         }
     }
@@ -177,13 +202,7 @@ struct DocumentsView: View {
     /// The observation stopped: the text and a retry, above the last states the list received.
     private func listError(_ error: String) -> some View {
         HStack(spacing: Spacing.m) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.red)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(L.listStopped).textRole(.body)
-                Text(verbatim: error).textRole(.caption).textSelection(.enabled)
-            }
+            InlineMessage(String(localized: L.listStopped) + " " + error)
             Spacer()
             Button { documents.restart() } label: { Text(L.retry) }
         }
@@ -204,27 +223,52 @@ struct DocumentsView: View {
     @ViewBuilder private var emptyState: some View {
         if !search.isEmpty {
             ContentUnavailableView.search(text: search)
+        } else if documents.error != nil && documents.states.isEmpty {
+            // The error line above says what happened; an empty state would claim there are no documents.
+            Spacer()
         } else {
             switch filter {
             case .overdue:
                 ContentUnavailableView {
                     Label { Text(L.nothingOverdue) } icon: { Image(systemName: "checkmark.circle") }
+                } description: {
+                    Text(L.nothingOverdueDescription)
                 }
             case .drafts:
                 ContentUnavailableView {
                     Label { Text(L.noDrafts) } icon: { Image(systemName: "pencil.circle") }
+                } description: {
+                    Text(L.noDraftsDescription)
+                } actions: {
+                    Button { newDocument(.invoice) } label: { Text(L.newInvoice) }
+                        .buttonStyle(.borderedProminent)
                 }
             case .all:
                 ContentUnavailableView {
                     Label { Text(L.noDocuments) } icon: { Image(systemName: Symbols.document) }
                 } description: {
-                    EmptyView()
+                    Text(L.noDocumentsDescription)
                 } actions: {
                     Button { newDocument(.invoice) } label: { Text(L.newInvoice) }
+                        .buttonStyle(.borderedProminent)
                 }
-            case .unpaid, .thisMonth, .openAdvances:
+            case .unpaid:
                 ContentUnavailableView {
                     Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
+                } description: {
+                    Text(L.noUnpaidDescription)
+                }
+            case .thisMonth:
+                ContentUnavailableView {
+                    Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
+                } description: {
+                    Text(L.noThisMonthDescription)
+                }
+            case .openAdvances:
+                ContentUnavailableView {
+                    Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
+                } description: {
+                    Text(L.noOpenAdvancesDescription)
                 }
             }
         }
@@ -245,21 +289,41 @@ struct DocumentsView: View {
             } primaryAction: {
                 newDocument(.invoice)
             }
-            .help(Text(L.newInvoice))
+            .help(Text(L.newInvoiceHelp))
 
+            let recordPayment = singleSelection.flatMap { documentActions($0).recordPayment }
             Button {
-                if let id = singleIssued { recordPayment(id) }
+                recordPayment?()
             } label: {
                 Label { Text(L.recordPayment) } icon: { Image(systemName: "banknote") }
             }
-            .disabled(singleIssued == nil)
-            .help(Text(L.recordPayment))
+            .disabled(recordPayment == nil)
+            .help(Text(L.recordPaymentHelp))
         }
         ToolbarItem {
             Button { inspectorPresented.toggle() } label: {
                 Label { Text(L.inspector) } icon: { Image(systemName: "sidebar.right") }
             }
             .help(Text(L.toggleInspector))
+        }
+    }
+}
+
+/// The number of a row: an issued document's number with a small lock, a dash for a draft.
+struct DocumentNumberText: View {
+    let row: DocumentRow
+
+    var body: some View {
+        if row.isIssued {
+            HStack(spacing: Spacing.xs) {
+                Text(verbatim: row.number.isEmpty ? "—" : row.number).textRole(.body)
+                Image(systemName: "lock.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel(Text(L.lockedNumber))
+            }
+        } else {
+            Text(verbatim: "—").textRole(.body)
         }
     }
 }

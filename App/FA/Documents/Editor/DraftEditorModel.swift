@@ -201,7 +201,10 @@ struct NumberCell: Hashable {
             totalsError = nil
         } catch {
             totals = nil
-            totalsError = ErrorText.message(error)
+            // The edit was kept; the totals wait for the fix the validator names (a negative quantity, a
+            // discount out of range, a rate not in force). Without one, the view says the totals wait.
+            let causes: Set<ValidationIssue.Code> = [.lineQuantityNegative, .lineDiscountOutOfRange, .rateNotInForce]
+            totalsError = issues.first { causes.contains($0.code) }?.message(language: .english)
         }
     }
 
@@ -654,7 +657,7 @@ struct NumberCell: Hashable {
     /// The validator's first message about a line, for the trailing marker of its row.
     func lineProblem(_ id: String, locale: Locale) -> String? {
         guard let kind = document?.kind else { return nil }
-        return issues.first { $0.lineID == id && !Self.isExcluded($0, kind: kind) }?.message(language: .ui(locale))
+        return issues.first { $0.lineID == id && !Self.isExcluded($0, kind: kind) }?.message(language: .english)
     }
 
     /// A cell holds text that is not a number (or has been fixed). Each invalid cell is a ⛔ row.

@@ -36,7 +36,7 @@ struct StatusStyle {
 /// document and its payments; the views only display the result.
 ///
 /// Two independent axes: `settlement` and `isOverdue`. The model keeps both. On the badge, Overdue takes
-/// the word, tone and symbol, and the detail keeps the days and the open balance ("+12 dní · zbývá 1 000,00 €").
+/// the word, tone and symbol, and the detail keeps the days and the open balance ("+12 days · 1 000,00 € left").
 /// The exception is an advance with a received payment that lacks its tax document, which wins (see `label`).
 struct DocumentStateInputs: Hashable, Sendable {
     /// The document type. The raw values match `InvoicingCore.DocumentKind`, so the data layer can map

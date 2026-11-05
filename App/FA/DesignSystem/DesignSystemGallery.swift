@@ -40,10 +40,10 @@ struct DesignSystemGallery: View {
             ForEach(DocumentStateLabel.allCases, id: \.self) { label in
                 StatusBadge(label)
             }
-            StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
+            StatusBadge(.overdue, detail: "+12 days · 1 000,00 € left")
             StatusBadge(.partlyPaid, compact: true)
             // Too narrow for the detail: the badge drops it by itself.
-            StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
+            StatusBadge(.overdue, detail: "+12 days · 1 000,00 € left")
                 .frame(width: 140, alignment: .leading)
         }
     }
@@ -84,7 +84,7 @@ struct DesignSystemGallery: View {
     /// View ▸ Bigger at 200 %: amounts and badges must scale with the rest of the content.
     private var scaled: some View {
         section("Scaled to 200 %") {
-            StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
+            StatusBadge(.overdue, detail: "+12 days · 1 000,00 € left")
             MoneyText(amount: 4840, currency: "EUR", locale: czech, czk: Decimal(11_766_040) / 100)
             Text(verbatim: "body").textRole(.body)
         }

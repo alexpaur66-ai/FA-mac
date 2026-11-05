@@ -1,40 +1,53 @@
-// The small sheets of the document flow: Record Payment (with the tax-document step for advances), and
-// the two closing events (ADR 0007).
+// The small sheets of the document flow: Record Payment and Record Refund (with the tax-document step for
+// advances), and the two closing events (ADR 0007).
 
 import InvoicingCore
 import InvoicingData
 import SwiftUI
 
 struct RecordPaymentSheet: View {
+    enum Mode {
+        /// Money received on the document.
+        case payment
+        /// The overpaid part paid back to the client (screens-flows.md §2f).
+        case refund
+    }
+
     let stores: Stores
     let state: DocumentState
+    let mode: Mode
+    /// The date of the payment last recorded in this window, proposed again; today when there is none.
+    @Binding var lastDate: Date?
     /// Opens the draft payment tax document created for a payment on an advance (screens-flows.md §2d, step 2).
     let openDraft: @MainActor (String) -> Void
 
-    private enum Entry: Hashable {
-        case received, refund
-    }
-
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
-    @State private var date = Date()
-    @State private var amount: Decimal
-    @State private var entry: Entry = .received
+    @State private var date: Date
+    @State private var amount: Decimal?
     @State private var note = ""
     @State private var error: String?
     /// The payment just recorded on an advance request; it needs its own tax document.
     @State private var recorded: DocumentPayment?
 
-    init(stores: Stores, state: DocumentState, openDraft: @escaping @MainActor (String) -> Void) {
+    init(stores: Stores, state: DocumentState, mode: Mode, lastDate: Binding<Date?>, openDraft: @escaping @MainActor (String) -> Void) {
         self.stores = stores
         self.state = state
+        self.mode = mode
+        self._lastDate = lastDate
         self.openDraft = openDraft
-        _amount = State(initialValue: state.outstanding.amount > 0 ? state.outstanding.amount : 0)
+        _date = State(initialValue: min(lastDate.wrappedValue ?? Date(), Date()))
+        // What is left to pay, or what was paid too much.
+        let outstanding = state.outstanding.amount
+        switch mode {
+        case .payment: _amount = State(initialValue: outstanding > 0 ? outstanding : nil)
+        case .refund: _amount = State(initialValue: outstanding < 0 ? -outstanding : nil)
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
-            Text(L.rpTitle).textRole(.screenTitle)
+            Text(mode == .payment ? L.rpTitle : L.rpRefundTitle).textRole(.screenTitle)
             Text(verbatim: (state.summary.number ?? String(localized: L.draftTitle)) + " · " + state.summary.customerName)
                 .textRole(.rowSecondary)
             if let recorded {
@@ -44,28 +57,23 @@ struct RecordPaymentSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 440)
+        .formSheetSized(minWidth: 460, maxWidth: 560)
     }
 
     private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Form {
-                if state.settlement == .overpaid {
-                    Picker(selection: $entry) {
-                        Text(L.paymentReceived).tag(Entry.received)
-                        Text(L.paymentRefund).tag(Entry.refund)
-                    } label: {
-                        Text(L.rpKind)
-                    }
-                    .pickerStyle(.segmented)
+                if mode == .refund {
+                    Text(L.rpRefundNote).textRole(.caption)
                 }
-                DatePicker(selection: $date, displayedComponents: .date) { Text(L.rpDate) }
-                TextField(value: $amount, format: Decimal.FormatStyle.number.precision(.fractionLength(0...2))) {
-                    Text(L.rpAmount)
+                // A payment lies in the past or today; the date picker refuses the future.
+                DatePicker(selection: $date, in: ...Date(), displayedComponents: .date) {
+                    Text(mode == .payment ? L.rpDate : L.rpRefundDate)
                 }
+                MoneyField(amount: $amount, currency: state.summary.currency.code, label: L.rpAmount)
                 TextField(text: $note) { Text(L.rpNote) }
                 if let error {
-                    Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+                    InlineMessage(error)
                 }
             }
             .formStyle(.grouped)
@@ -73,10 +81,10 @@ struct RecordPaymentSheet: View {
                 Spacer()
                 Button { dismiss() } label: { Text(L.cancel) }
                     .keyboardShortcut(.cancelAction)
-                Button { record() } label: { Text(L.rpRecord) }
+                Button { record() } label: { Text(mode == .payment ? L.rpRecord : L.rpRecordRefund) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(amount <= 0)
+                    .disabled(amount == nil)
             }
         }
     }
@@ -92,7 +100,7 @@ struct RecordPaymentSheet: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             }
             if let error {
-                Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+                InlineMessage(error)
             }
             HStack {
                 Spacer()
@@ -106,13 +114,15 @@ struct RecordPaymentSheet: View {
     }
 
     private func record() {
+        guard let amount else { return }
         let day = CalendarDay(date, in: .current)
         let money = Money(amount, state.summary.currency)
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            switch entry {
-            case .received:
+            switch mode {
+            case .payment:
                 let payment = try stores.documents.recordPayment(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+                lastDate = date
                 if state.summary.kind == .advanceRequest {
                     error = nil
                     recorded = payment
@@ -120,6 +130,7 @@ struct RecordPaymentSheet: View {
                 }
             case .refund:
                 try stores.documents.recordRefund(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+                lastDate = date
             }
             dismiss()
         } catch {
@@ -180,24 +191,24 @@ struct ClosureSheet: View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Text(kind == .closedUnpaid ? L.closeAdvanceTitle : L.markForCreditNoteTitle).textRole(.screenTitle)
             Text(verbatim: (state.summary.number ?? "") + " · " + state.summary.customerName).textRole(.rowSecondary)
-            Text(L.closureExplanation).textRole(.body)
+            Text(L.closureExplanation).textRole(.body).fixedSize(horizontal: false, vertical: true)
             TextField(text: $reason, axis: .vertical) { Text(L.reasonPrompt) }
                 .lineLimit(2...4)
             if let error {
-                Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+                InlineMessage(error)
             }
             HStack {
                 Spacer()
                 Button { dismiss() } label: { Text(L.cancel) }
                     .keyboardShortcut(.cancelAction)
-                Button { close() } label: { Text(L.save) }
+                Button { close() } label: { Text(kind == .closedUnpaid ? L.closeAsUnpaidButton : L.markForCreditNoteButton) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 440)
+        .formSheetSized(minWidth: 460, maxWidth: 560)
     }
 
     private func close() {

@@ -207,6 +207,19 @@ import Testing
         let sparse = ExchangeRateTable(rates: [rate("2026-10-01", "24.1"), rate("2026-11-02", "24.3")])
         #expect(sparse.resolve(.eur, on: day("2026-10-15")).rule == .missing)
         #expect(sparse.resolve(.eur, on: day("2026-10-15")).rate == nil)
+
+        // A weekend whose publication day (Friday) the ČNB skipped takes the bridged rate as well.
+        let skippedFriday = ExchangeRateTable(rates: [rate("2026-11-05", "24.33"), rate("2026-11-09", "24.36")])
+        let saturday = skippedFriday.resolve(.eur, on: day("2026-11-07"))
+        #expect(saturday.rule == .noPublicationThatDay)
+        #expect(saturday.publicationDay == day("2026-11-06"))
+        #expect(saturday.fallbackFrom == day("2026-11-05"))
+        #expect(saturday.rate?.czkPerAmount == d("24.33"))
+        #expect(skippedFriday.resolve(.eur, on: day("2026-11-08")).rule == .noPublicationThatDay)
+        #expect(skippedFriday.resolve(.eur, on: day("2026-11-06")).rule == .noPublicationThatDay)
+        // Without the Monday import the Friday gap is just a missing row.
+        let openEnded = ExchangeRateTable(rates: [rate("2026-11-05", "24.33")])
+        #expect(openEnded.resolve(.eur, on: day("2026-11-07")).rule == .missing)
     }
 }
 

@@ -43,9 +43,27 @@ import Testing
     @Test func ratesAreNeverGrouped() {
         #expect(DecimalInput.parseRate("24,315") == d("24.315"))
         #expect(DecimalInput.parseRate("24.315") == d("24.315"))
+        #expect(DecimalInput.parseRate(" 24,315\n") == d("24.315"))
         #expect(DecimalInput.parseRate("1,234.5") == nil)
-        #expect(DecimalInput.parseRate("1 234") == d("1234"))
+        #expect(DecimalInput.parseRate("1 234") == nil)
+        #expect(DecimalInput.parseRate("24 315") == nil)
         #expect(DecimalInput.parseRate("") == nil)
         #expect(DecimalInput.parseRate("24,3x") == nil)
+    }
+
+    @Test func ratesArePositive() {
+        for text in ["0", "0,000", "-24,315", "\u{2212}5", "-0"] {
+            #expect(DecimalInput.parseRate(text) == nil, "\(text)")
+        }
+        #expect(DecimalInput.parseRate("0,001") == d("0.001"))
+    }
+
+    @Test func percentsAcceptZero() {
+        #expect(DecimalInput.parsePercent("0") == 0)
+        #expect(DecimalInput.parsePercent("21") == 21)
+        #expect(DecimalInput.parsePercent("12,0") == 12)
+        #expect(DecimalInput.parsePercent(" 21 ") == 21)
+        #expect(DecimalInput.parsePercent("2 1") == nil)
+        #expect(DecimalInput.parsePercent("1,2,3") == nil)
     }
 }

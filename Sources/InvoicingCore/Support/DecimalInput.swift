@@ -33,11 +33,19 @@ public enum DecimalInput {
         return plainDecimal(cleaned)
     }
 
-    /// Exchange rates are never grouped and have decimals, so "24,315" is 24.315 in every locale.
-    /// More than one separator is a typo.
+    /// Exchange rates are never grouped and have decimals, so "24,315" is 24.315 in every locale. More
+    /// than one separator, or a space inside the number ("24 315" would silently be a thousand times the
+    /// rate), is a typo, and a rate of zero or less is never a rate.
     public static func parseRate(_ text: String) -> Decimal? {
-        let cleaned = String(text.filter { !$0.isWhitespace }).replacingOccurrences(of: "\u{2212}", with: "-")
-        guard !cleaned.isEmpty else { return nil }
+        guard let value = parsePercent(text), value > 0 else { return nil }
+        return value
+    }
+
+    /// A percentage as typed in a rate cell: "21", "12,0" or "0"; never grouped, one separator at most,
+    /// no whitespace inside the number.
+    public static func parsePercent(_ text: String) -> Decimal? {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{2212}", with: "-")
+        guard !cleaned.isEmpty, !cleaned.contains(where: \.isWhitespace) else { return nil }
         guard cleaned.filter({ $0 == "," || $0 == "." }).count <= 1 else { return nil }
         return plainDecimal(cleaned.replacingOccurrences(of: ",", with: "."))
     }

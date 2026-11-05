@@ -1,6 +1,8 @@
-// The user-facing strings of the app shell. Every string is a LocalizedStringResource in the "App" table
-// (App.xcstrings: English defaults in sentence case, Czech translations), the same way the design system
-// keeps its status labels in the "DesignSystem" table. Legal and tax wording stays in InvoicingCore.
+// The user-facing strings of the app shell. Every string is a LocalizedStringResource in the "App" table,
+// the same way the design system keeps its status labels in the "DesignSystem" table. The UI is English
+// only (decision of 5 Nov 2026) and no string catalog ships, so counts with a singular are handled in
+// code (`Count`); sentence case for text, title case for menus, buttons and column headings. Legal and
+// tax wording stays in InvoicingCore.
 
 import Foundation
 
@@ -42,7 +44,9 @@ enum L {
     static let biggerText = r("menu.biggerText", "Bigger Text")
     static let smallerText = r("menu.smallerText", "Smaller Text")
     static let actualSize = r("menu.actualSize", "Actual Size")
-    static let toggleInspector = r("menu.toggleInspector", "Show or Hide Inspector")
+    static let toggleInspector = r("menu.toggleInspector", "Show or hide the inspector")
+    static let showInspector = r("menu.showInspector", "Show Inspector")
+    static let hideInspector = r("menu.hideInspector", "Hide Inspector")
     static let inspector = r("toolbar.inspector", "Inspector")
 
     // MARK: Table columns
@@ -59,14 +63,13 @@ enum L {
     static let colCurrency = r("column.currency", "Currency")
     static let colDate = r("column.date", "Date")
     static let colAmount = r("column.amount", "Amount")
-    static let colKind = r("column.kind", "Kind")
     static let colNote = r("column.note", "Note")
     static let colName = r("column.name", "Name")
     static let colCountry = r("column.country", "Country")
     static let colVATID = r("column.vatID", "VAT ID")
     static let colOverdue = r("column.overdue", "Overdue")
     static let colLastDocument = r("column.lastDocument", "Last document")
-    static let colRate = r("column.rate", "Rate (CZK)")
+    static let colRate = r("column.rate", "Rate")
     static let colSource = r("column.source", "Source")
     static let colDocument = r("column.document", "Document")
 
@@ -74,13 +77,19 @@ enum L {
 
     static let typeInvoice = r("type.invoice", "Invoice")
     static let typeAdvance = r("type.advance", "Advance")
-    static let typePaymentTaxDocument = r("type.paymentTaxDocument", "Tax doc. for payment")
+    static let typePaymentTaxDocument = r("type.paymentTaxDocument", "Tax doc (payment)")
     static let typeFinal = r("type.final", "Final")
 
-    /// The overdue badge detail (design-system.md §4.3): days late and the open balance.
+    /// The badge details (design-system.md §4.3): days late and the open balance, the due date, the surplus.
     static func overdueDetail(_ days: Int, _ left: String) -> LocalizedStringResource {
-        r("badge.overdueDetail", "+\(days) d · \(left)")
+        r("badge.overdueDetail", "+\(days) days · \(left) left")
     }
+    static func overdueDetailOne(_ left: String) -> LocalizedStringResource { r("badge.overdueDetailOne", "+1 day · \(left) left") }
+    static func dueInDays(_ days: Int) -> LocalizedStringResource { r("badge.dueInDays", "due in \(days) days") }
+    static let dueTomorrow = r("badge.dueTomorrow", "due tomorrow")
+    static let dueToday = r("badge.dueToday", "due today")
+    static func amountLeft(_ left: String) -> LocalizedStringResource { r("badge.amountLeft", "\(left) left") }
+    static func overpaidBy(_ amount: String) -> LocalizedStringResource { r("badge.overpaidBy", "\(amount) over") }
 
     // MARK: Payment kinds (ADR 0007)
 
@@ -111,25 +120,36 @@ enum L {
     static let tileOverdue = r("overview.tileOverdue", "Overdue")
     static func tileIssued(_ month: String) -> LocalizedStringResource { r("overview.tileIssued", "Issued in \(month)") }
     static func tileVAT(_ month: String) -> LocalizedStringResource { r("overview.tileVAT", "VAT for \(month) (CZK)") }
-    static let unpaidAdvances = r("overview.unpaidAdvances", "Unpaid advances")
-    static let overdueAdvances = r("overview.overdueAdvances", "Overdue advances")
     static func documentsCount(_ count: Int) -> LocalizedStringResource { r("overview.documentsCount", "\(count) documents") }
+    static let documentCountOne = r("overview.documentCountOne", "1 document")
     static func oldestOverdue(_ days: Int) -> LocalizedStringResource { r("overview.oldestOverdue", "oldest \(days) days") }
-    static let vatTileNote = r("overview.vatNote", "Tax documents by tax point month. Rule for the accountant to confirm.")
+    static let oldestOverdueOne = r("overview.oldestOverdueOne", "oldest 1 day")
+    static let vatTileNote = r("overview.vatNote", "Tax documents by the month of their date of taxable supply. Rule for the accountant to confirm.")
     static let revenueTaxDocuments = r("overview.revenueTaxDocuments", "Revenue from tax documents")
     static let needsAttention = r("overview.needsAttention", "Needs attention")
     static func daysOverdue(_ days: Int) -> LocalizedStringResource { r("queue.daysOverdue", "\(days) days overdue") }
+    static let dayOverdueOne = r("queue.dayOverdueOne", "1 day overdue")
     static let queueTaxDocumentMissing = r("queue.taxDocumentMissing", "Payment received, tax document missing")
     static let queueOldDraft = r("queue.oldDraft", "Draft waiting for more than a week")
     static let previousMonth = r("overview.previousMonth", "Previous month")
     static let nextMonth = r("overview.nextMonth", "Next month")
 
     static let gettingStarted = r("setup.title", "Getting started")
-    static let setupIntro = r("setup.intro", "Four steps before the first document can be issued. Each opens the matching settings.")
+    static let setupIntro = r("setup.intro", "Three steps before the first document can be issued. Each opens the matching settings.")
     static let stepCompany = r("setup.company", "Company profile")
     static let stepBank = r("setup.bank", "Bank accounts")
-    static let stepSeries = r("setup.series", "Number series")
-    static let stepRates = r("setup.rates", "ČNB rates for EUR")
+    static let stepSeries = r("setup.series", "Continue your number series")
+    static let stepRates = r("setup.rates", "ČNB rates (optional): rates are typed per document; the import fills the table")
+    static let stepFirstDocuments = r("setup.firstDocuments", "First client or first invoice (optional)")
+    static let noDocumentsDescription = r("empty.noDocumentsDescription", "Invoices, advance invoices and tax documents appear here. ⌘N creates a new invoice.")
+    static let noDraftsDescription = r("empty.noDraftsDescription", "New Invoice (⌘N) and New Advance Invoice (⇧⌘N) create drafts.")
+    static let noUnpaidDescription = r("empty.noUnpaidDescription", "Every issued invoice is paid.")
+    static let nothingOverdueDescription = r("empty.nothingOverdueDescription", "No invoice is past its due date.")
+    static let noThisMonthDescription = r("empty.noThisMonthDescription", "No document was issued this month.")
+    static let noOpenAdvancesDescription = r("empty.noOpenAdvancesDescription", "No advance invoice is waiting for a payment or its final invoice.")
+    static let noClientsDescription = r("empty.noClientsDescription", "Clients carry the defaults of their documents: currency, payment term, VAT treatment and language.")
+    static let noPaymentsDescription = r("empty.noPaymentsDescription", "Record Payment… (⌘R) on an issued document lists the payment here.")
+    static let noRatesDescription = r("empty.noRatesDescription", "Rates are typed per document; the ČNB file import fills this table.")
     static let openSettings = r("setup.openSettings", "Open Settings…")
     static let setUpCompanyFirst = r("setup.companyFirst", "Fill in the company profile in Settings before creating documents.")
 
@@ -143,32 +163,34 @@ enum L {
     static let paymentsSection = r("document.payments", "Payments")
     static let paid = r("document.paid", "Paid")
     static let outstanding = r("document.outstanding", "Outstanding")
-    static let issuedOn = r("document.issuedOn", "Issued")
-    static let dueOn = r("document.dueOn", "Due")
-    static let clientLabel = r("document.client", "Client")
+    static let issuedOn = r("document.issuedOn", "Issue date")
+    static let dueOn = r("document.dueOn", "Due date")
     static let variableSymbol = r("document.variableSymbol", "Variable symbol")
-    static func deductedBy(_ numbers: String) -> LocalizedStringResource { r("document.deductedBy", "Deducted in \(numbers)") }
     static let advancesDeducted = r("document.advancesDeducted", "Advances deducted")
     /// The inline error of the document list when its live observation stopped (ADR 0008).
     static let listStopped = r("document.listStopped", "The document list stopped updating.")
     static let retry = r("action.retry", "Try again")
-    static let closureReason = r("document.closureReason", "Reason")
     static func selectedCount(_ count: Int) -> LocalizedStringResource { r("document.selectedCount", "\(count) selected") }
     static let totalsPerCurrency = r("document.totalsPerCurrency", "Totals per currency")
     static let activity = r("document.activity", "Activity")
-    static let paymentDetails = r("document.paymentDetails", "Payment details")
+    static let paymentDetails = r("document.paymentDetails", "Payment Details")
     static let account = r("document.account", "Account")
-    static let chain = r("document.chain", "Related documents")
+    static let chain = r("document.chain", "Related Documents")
 
     // MARK: Sheets
 
     static let rpTitle = r("recordPayment.title", "Record payment")
-    static let rpKind = r("recordPayment.kind", "Kind")
-    static let rpDate = r("recordPayment.date", "Paid on")
+    static let rpDate = r("recordPayment.date", "Payment date")
+    static let rpRefundDate = r("recordPayment.refundDate", "Refund date")
+    static let rpRefundTitle = r("recordPayment.refundTitle", "Record refund")
+    static let rpRecordRefund = r("recordPayment.recordRefund", "Record Refund")
+    static let rpRefundNote = r("recordPayment.refundNote", "The overpaid part goes back to the client; the document keeps its payments.")
     static let rpAmount = r("recordPayment.amount", "Amount")
     static let rpNote = r("recordPayment.note", "Note")
     static let rpRecord = r("recordPayment.record", "Record")
     static let closeAdvanceTitle = r("closure.closeAdvanceTitle", "Close advance as unpaid")
+    static let closeAsUnpaidButton = r("closure.closeButton", "Close as Unpaid")
+    static let markForCreditNoteButton = r("closure.markButton", "Mark for Credit Note")
     static let markForCreditNoteTitle = r("closure.markForCreditNoteTitle", "Mark for credit note")
     static let closureExplanation = r("closure.explanation", "The document stays as issued. The event is recorded beside it with your reason and can be reopened.")
     static let reasonPrompt = r("closure.reasonPrompt", "Reason (required)")
@@ -190,7 +212,7 @@ enum L {
     static let fieldStreet = r("field.street", "Street")
     static let fieldCity = r("field.city", "City")
     static let fieldPostalCode = r("field.postalCode", "Postal code")
-    static let fieldCountry = r("field.country", "Country code")
+    static let fieldCountry = r("field.country", "Country")
     static let fieldICO = r("field.ico", "IČO")
     static let fieldVATID = r("field.vatID", "VAT ID (DIČ)")
     static let fieldCurrency = r("field.currency", "Currency")
@@ -210,7 +232,6 @@ enum L {
     static let invalidIBAN = r("validation.iban", "IBAN is not valid.")
     static let invalidBIC = r("validation.bic", "BIC is not valid.")
     static let invalidCzechAccount = r("validation.czechAccount", "Czech account number is not valid (prefix-number/bank code).")
-    static let invalidCurrency = r("validation.currency", "Currency must be a three-letter code, for example EUR, or empty.")
     static let invalidRegistry = r("validation.registry", "Commercial register entry needs a court, section and insert.")
 
     // MARK: Settings (screens-flows.md §2i)
@@ -222,7 +243,7 @@ enum L {
     static let settingsDocuments = r("settings.documents", "Documents & PDF")
     static let settingsVAT = r("settings.vat", "VAT defaults")
     static let settingsBackup = r("settings.backup", "Backup")
-    static let generalLanguageNote = r("settings.languageNote", "The app follows the language set for it in System Settings ▸ General ▸ Language & Region ▸ Applications. Czech and English are included.")
+    static let generalLanguageNote = r("settings.languageNote", "The app is in English. Documents print in Czech, or in Czech and English for foreign clients.")
     static let generalTextSizeNote = r("settings.textSizeNote", "Text size: View ▸ Bigger Text and Smaller Text scale every screen from 100 to 200 %.")
     static let dataFolder = r("settings.dataFolder", "Data file")
     static let showInFinder = r("settings.showInFinder", "Show in Finder")
@@ -239,7 +260,8 @@ enum L {
     static let bankIBAN = r("bank.iban", "IBAN")
     static let bankBIC = r("bank.bic", "BIC")
     static let bankName = r("bank.name", "Bank name")
-    static let bankCurrency = r("bank.currency", "Currency (empty = any)")
+    static let bankCurrency = r("bank.currency", "Currency")
+    static let bankCurrencyAny = r("bank.currencyAny", "Any")
     static let bankCzechAccount = r("bank.czechAccount", "Czech account number (prefix-number/bank code), instead of the IBAN")
     static let bankNote = r("bank.note", "The first account in a currency is printed on documents in that currency; an account without a currency serves the rest.")
     static let companyFirst = r("bank.companyFirst", "Fill in the company profile first.")
@@ -254,12 +276,13 @@ enum L {
     static let seriesVSPrefix = r("series.vsPrefix", "VS prefix (1 to 3 digits, no leading zero)")
     static let seriesNext = r("series.next", "Next number")
     static let seriesVSPreview = r("series.vsPreview", "Variable symbol")
-    static let seriesTitle = r("series.title", "Number series")
-    static let newSeries = r("series.new", "New series…")
-    static let createDefaultSeries = r("series.createDefaults", "Create the default series (FV with VS prefix 1, ZF with 2, DD without)")
+    static let seriesTitle = r("series.title", "Number Series")
+    static let newSeries = r("series.new", "New Series…")
+    static let createDefaultSeries = r("series.createDefaults", "Create Default Series")
+    static let defaultSeriesCaption = r("series.defaultsCaption", "FV for invoices and final invoices (VS prefix 1), ZF for advance invoices (prefix 2), DD for tax documents for payments (no prefix).")
     static let noSeries = r("series.none", "No number series yet")
     static let seriesPrefixCollision = r("series.collision", "Two series with the same pattern and the same prefix would give two documents the same variable symbol.")
-    static let documentsPaneNote = r("settings.documentsNote", "The default due days and the footer text are in Company. The QR default per client and the payment tolerance arrive with later steps.")
+    static let documentsPaneNote = r("settings.documentsNote", "The QR code default per client and the payment tolerance arrive with later steps.")
     static let vatPaneNote = r("settings.vatNote", "Rates 21 / 12 / 0 %, the treatments (Czech, EU reverse charge, outside the EU, exempt) and the default treatment by client country live in InvoicingCore. The pane to edit them arrives with the draft editor.")
     static let backupPaneNote = r("settings.backupNote", "Backup folder, automatic backups and Restore arrive with the export step. Until then: quit the app and copy the data file shown under General.")
 
@@ -267,7 +290,6 @@ enum L {
 
     static let importRates = r("rates.import", "Import ČNB Rates…")
     static func importedRates(_ count: Int) -> LocalizedStringResource { r("rates.imported", "\(count) rates imported") }
-    static func latestRate(_ day: String) -> LocalizedStringResource { r("rates.latest", "Latest rate: \(day)") }
     static let rateImportFailed = r("rates.importFailed", "The file could not be read as a ČNB daily or yearly file.")
     static func rateImportFailedAtLine(_ line: Int) -> LocalizedStringResource {
         r("rates.importFailedAtLine", "The file could not be read as a ČNB rate file: parsing stopped at line \(line). Nothing was imported.")
@@ -460,7 +482,7 @@ enum L {
     static func rateMissing(_ currency: String, _ day: String) -> LocalizedStringResource { r("editor.rateMissing", "\(currency) rate for \(day) missing") }
     static func rateFieldLabel(_ currency: String) -> LocalizedStringResource { r("editor.rateField", "CZK per 1 \(currency)") }
     static let rateDateLabel = r("editor.rateDate", "Rate date")
-    static let saveRate = r("editor.saveRate", "Save rate")
+    static let saveRate = r("editor.saveRate", "Save Rate")
     static let changeRate = r("editor.changeRate", "Change…")
     static func rateEquals(_ code: String, _ rate: String) -> LocalizedStringResource { r("editor.rateEquals", "1 \(code) = \(rate) CZK") }
     static func rateDetails(_ day: String, _ source: String) -> LocalizedStringResource { r("editor.rateDetails", "for \(day) · \(source)") }
@@ -562,4 +584,115 @@ enum L {
     static let deletePaymentWithDraftMessage = r("payment.deleteWithDraftMessage", "A draft tax document was created for this payment. Without the payment it documents nothing.")
     static let deletePaymentAndDraft = r("payment.deleteAndDraft", "Delete Payment and Draft")
     static let deletePaymentOnly = r("payment.deleteOnly", "Delete Payment Only")
+
+    // MARK: Follow-ups (design check of the app shell, PR 17)
+
+    static let menuRates = r("menu.rates", "Exchange Rates")
+    static let recordRefund = r("menu.recordRefund", "Record Refund…")
+    static let showClient = r("menu.showClient", "Show Client")
+    static let reopenAdvance = r("menu.reopenAdvance", "Reopen Advance")
+    static let removeCreditNoteMark = r("menu.removeCreditNoteMark", "Remove Credit Note Mark")
+    static let menuClient = r("menu.client", "Client")
+    static func newInvoiceFor(_ client: String) -> LocalizedStringResource { r("menu.newInvoiceFor", "New Invoice for \(client)") }
+    static func newAdvanceFor(_ client: String) -> LocalizedStringResource { r("menu.newAdvanceFor", "New Advance Invoice for \(client)") }
+    static let editClientDetails = r("menu.editClientDetails", "Edit Client Details…")
+    static let gettingStartedMenu = r("menu.gettingStarted", "Getting Started")
+    static let newInvoiceHelp = r("help.newInvoice", "Create a new invoice; the menu offers an advance invoice")
+    static let recordPaymentHelp = r("help.recordPayment", "Record a payment on the selected document")
+    static let newClientHelp = r("help.newClient", "Add a client")
+    static let importRatesHelp = r("help.importRates", "Import a ČNB daily or yearly rate file")
+    static let editClientHelp = r("help.editClient", "Edit the client's details")
+    static let deletePayment = r("menu.deletePayment", "Delete Payment")
+    static let undo = r("action.undo", "Undo")
+    static let draftDeleted = r("result.draftDeleted", "Draft deleted")
+    static func draftsDeleted(_ count: Int) -> LocalizedStringResource { r("result.draftsDeleted", "\(count) drafts deleted") }
+    static let paymentDeleted = r("result.paymentDeleted", "Payment deleted")
+    static let accountRemoved = r("result.accountRemoved", "Bank account removed")
+    static let importedRatesOne = r("rates.importedOne", "1 rate imported")
+    static let lockedNumber = r("document.locked", "Issued and locked")
+    static func paymentLockedBy(_ number: String) -> LocalizedStringResource {
+        r("payment.lockedBy", "Payment is the basis of \(number) and can't be deleted")
+    }
+    static let showDocument = r("action.showDocument", "Show Document")
+    static let colOpenBalance = r("column.openBalance", "Open balance")
+    static let sourceStatement = r("payment.sourceStatement", "Statement")
+    static let sourceCredit = r("payment.sourceCredit", "Credit")
+
+    // Activity (the audit log of one document, newest first)
+    static func activityIssued(_ number: String) -> LocalizedStringResource { r("activity.issued", "Issued as \(number)") }
+    static func activityPayment(_ kind: String, _ amount: String) -> LocalizedStringResource { r("activity.payment", "\(kind): \(amount)") }
+    static func activityPaymentDeleted(_ kind: String) -> LocalizedStringResource { r("activity.paymentDeleted", "\(kind) deleted") }
+    static let activityReceiptAttached = r("activity.receiptAttached", "Tax document linked to a payment")
+    static func activityClosed(_ reason: String) -> LocalizedStringResource { r("activity.closed", "Closed as unpaid: \(reason)") }
+    static func activityMarked(_ reason: String) -> LocalizedStringResource { r("activity.marked", "Marked for credit note: \(reason)") }
+    static let activityReopened = r("activity.reopened", "Reopened")
+    static let activityPDF = r("activity.pdf", "PDF rendered and stored")
+    static func activityPDFSaved(_ path: String) -> LocalizedStringResource { r("activity.pdfSaved", "PDF saved to \(path)") }
+    static let activityDeleted = r("activity.deleted", "Deleted")
+
+    // Clients
+    static let fieldVATTreatment = r("field.vatTreatment", "VAT treatment")
+    static let vatCzechPayer = r("vat.czechPayer", "Czech VAT payer")
+    static let vatCzechNonPayer = r("vat.czechNonPayer", "Czech business, not a VAT payer")
+    static let vatEUBusiness = r("vat.euBusiness", "EU business (reverse charge)")
+    static let vatEUConsumer = r("vat.euConsumer", "EU consumer")
+    static let vatNonEUBusiness = r("vat.nonEUBusiness", "Business outside the EU")
+    static let vatNonEUConsumer = r("vat.nonEUConsumer", "Consumer outside the EU")
+    static let reverseChargeNeedsVATID = r("client.reverseChargeNeedsVATID", "EU reverse charge needs the client's VAT ID; the validator will block issuing without it.")
+    static let clientDefaultsTitle = r("client.defaults", "Defaults")
+    static let clientContacts = r("client.contacts", "Contacts")
+    static func clientDocumentsCount(_ count: Int) -> LocalizedStringResource { r("client.documentsCount", "\(count) documents") }
+    static let clientDocumentsCountOne = r("client.documentsCountOne", "1 document")
+    static let fieldCompanyID = r("field.companyID", "Company ID (IČO)")
+
+    // Settings
+    static let seriesLockedNote = r("series.lockedNote", "Numbers were issued from this series, so its year and counter can no longer be edited here.")
+    static let seriesStoreKeptCounter = r("series.storeKeptCounter", "The stored counter was ahead and was kept; a counter never goes backwards.")
+    static let seriesYearInFuture = r("series.yearInFuture", "The year cannot be after this year.")
+    static let seriesKindsCaption = r("series.kindsCaption", "A document type numbered by two series picks one at issue.")
+    static let errorPatternMissingCounter = r("error.patternMissingCounter", "The pattern needs one counter token, such as {NNNN}.")
+    static let errorPatternMultipleCounters = r("error.patternMultipleCounters", "The pattern has more than one counter token.")
+    static func errorPatternUnknownToken(_ token: String) -> LocalizedStringResource {
+        r("error.patternUnknownToken", "Unknown token {\(token)} in the pattern; use {YYYY}, {YY} and {NNNN}.")
+    }
+    static let errorPatternUnterminated = r("error.patternUnterminated", "A { in the pattern has no closing }.")
+    static let errorSeriesNeedsYear = r("error.seriesNeedsYear", "A series that restarts every year needs {YYYY} or {YY} in its pattern.")
+    static let errorSeriesInvalidState = r("error.seriesInvalidState", "The year or the counter is not valid.")
+    static func errorInvalidVSPrefix(_ prefix: String) -> LocalizedStringResource {
+        r("error.invalidVSPrefix", "The VS prefix \(prefix) must be 1 to 3 digits without a leading zero.")
+    }
+    static let defaultSeriesInvoices = r("series.defaultInvoices", "Invoices")
+    static let defaultSeriesAdvances = r("series.defaultAdvances", "Advance invoices")
+    static let defaultSeriesReceipts = r("series.defaultReceipts", "Tax documents for payments")
+
+    // Exports and the database error
+    static let exportButton = r("exports.exportButton", "Export…")
+    static let backUpNow = r("exports.backUpNow", "Back Up Now…")
+    static let restoreFromBackup = r("exports.restore", "Restore from Backup…")
+    static let menuExportAccountant = r("menu.exportAccountant", "Export for Accountant…")
+
+    // Follow-ups (PR 18): the setup card, the tiles, the detail banners, the client header, the series sheet
+    static let done = r("setup.done", "Done")
+    static let notDone = r("setup.notDone", "Not done")
+    static func unpaidAdvancesCount(_ count: Int) -> LocalizedStringResource { r("overview.unpaidAdvancesCount", "Unpaid advances: \(count) ·") }
+    static func overdueAdvancesCount(_ count: Int) -> LocalizedStringResource { r("overview.overdueAdvancesCount", "Overdue advances: \(count)") }
+    static let menuKindInvoice = r("menu.kind.invoice", "Invoice")
+    static let menuKindAdvance = r("menu.kind.advance", "Advance Invoice")
+    static let menuKindFinal = r("menu.kind.final", "Final Invoice")
+    static let menuKindPaymentTaxDocument = r("menu.kind.paymentTaxDocument", "Tax Document for Received Payment")
+    static let fieldCompanyVATID = r("field.companyVATID", "VAT ID")
+    static func companyIDChip(_ value: String) -> LocalizedStringResource { r("client.companyIDChip", "IČO \(value)") }
+    static func vatIDChip(_ value: String) -> LocalizedStringResource { r("client.vatIDChip", "VAT ID \(value)") }
+    static let clientPaymentTerm = r("client.paymentTerm", "Payment term")
+    static let countryRequired = r("validation.countryRequired", "A country is required.")
+    static func seriesCollisionWith(_ name: String) -> LocalizedStringResource {
+        r("series.collisionWith", "Would give the same variable symbol as the series \(name). Change the pattern or the VS prefix.")
+    }
+    static let bannerClosedUnpaid = r("document.bannerClosedUnpaid", "Closed as unpaid")
+    static let bannerMarkedForCreditNote = r("document.bannerMarkedForCreditNote", "Marked for credit note – credit notes arrive in Phase 2")
+    static func rateEqualsAmount(_ amount: Int, _ code: String, _ rate: String) -> LocalizedStringResource {
+        r("rates.rateEqualsAmount", "\(amount) \(code) = \(rate) CZK")
+    }
+    static let documentDefaultsTitle = r("settings.documentDefaults", "Document defaults")
+    static let deductedByLabel = r("document.deductedByLabel", "Deducted in")
 }
