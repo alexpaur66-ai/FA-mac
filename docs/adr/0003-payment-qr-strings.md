@@ -44,3 +44,17 @@ Date: 2026-11-05 · Status: accepted, open to the adversarial review
 - The document layer decides what goes into MSG and remittance (document number, variable symbol),
   and chooses QR platba for CZK accounts and the EPC QR for EUR; both can be printed side by side.
 - Tests pin the specification example string from qr-platba.cz and the EPC element order.
+
+## Addendum 2026-11-05: a variable symbol prefix per numbering series
+
+The variable symbol was the document number's digits (the last 10). Two series with the same template,
+such as invoices `FV-{YYYY}-{NNN}` and advance requests `ZF-{YYYY}-{NNN}`, then give their n-th
+documents of a year the same symbol (FV-2026-003 and ZF-2026-003 both → 2026003), and a bank line with
+that symbol can no longer be matched to one document; the design thread raised this for the Numbering
+pane. A series may now carry a `variableSymbolPrefix` (1 to 3 digits, not starting with 0, which banks
+ignore): the symbol is the prefix followed by as many trailing digits of the number as still fit into 10
+(`PaymentSymbol.variable(fromDocumentNumber:prefix:)`, `PaymentInstructions.standard(…, variableSymbolPrefix:)`).
+The data layer stores the prefix with the series and applies it when a document is issued (ADR 0007).
+Suggested defaults for the Numbering pane: invoices 1, advance requests 2, none for payment tax
+documents, which carry no payment request. Rejected: deriving the prefix from the series id (not stable
+when a series is renamed) and letters in the symbol (banks accept digits only).

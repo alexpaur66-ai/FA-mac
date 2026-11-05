@@ -33,7 +33,9 @@ public struct PaymentInstructions: Hashable, Sendable, Codable {
 
     /// The usual instructions for a numbered document: the variable symbol and the ISO 11649 reference
     /// are derived from the number, the QR code is QR platba for CZK and the EPC code for EUR.
-    public static func standard(for number: String, bankConnection: BankConnection, currency: Currency) -> PaymentInstructions {
+    /// `variableSymbolPrefix` is the numbering series' prefix (`DocumentNumberSeries.variableSymbolPrefix`).
+    public static func standard(for number: String, bankConnection: BankConnection, currency: Currency,
+                                variableSymbolPrefix: String? = nil) -> PaymentInstructions {
         let alphanumeric = number.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
         let qrCode: PaymentQRKind
         switch currency {
@@ -43,7 +45,7 @@ public struct PaymentInstructions: Hashable, Sendable, Codable {
         }
         return PaymentInstructions(
             bankConnection: bankConnection,
-            variableSymbol: PaymentSymbol.variable(fromDocumentNumber: number),
+            variableSymbol: PaymentSymbol.variable(fromDocumentNumber: number, prefix: variableSymbolPrefix),
             creditorReference: alphanumeric.isEmpty ? nil : CreditorReference(reference: alphanumeric),
             qrCode: qrCode
         )

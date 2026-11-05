@@ -117,6 +117,18 @@ import GRDB
     }
 }
 
+@Suite struct NumberSeriesPrefixTests {
+    @Test func keepsTheVariableSymbolPrefix() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        try store.save(try Fixtures.invoiceSeries(variableSymbolPrefix: "1"), now: Fixtures.now)
+        #expect(try store.series(id: "fv")?.series.variableSymbolPrefix == "1")
+        // The prefix is a setting like the name: saving the series without one removes it.
+        try store.save(try Fixtures.invoiceSeries(), now: Fixtures.now)
+        #expect(try store.series(id: "fv")?.series.variableSymbolPrefix == nil)
+    }
+}
+
 @Suite struct RateStoreTests {
     @Test func importsDailyFileAndLooksUpTheRateTheCNBWay() throws {
         let database = try AppDatabase()
@@ -205,14 +217,52 @@ import GRDB
         #expect(throws: DataError.transactionHasPayments("tx-1")) {
             try store.setMatch(transactionID: "tx-1", documentID: nil, state: .unmatched, now: Fixtures.now)
         }
-        // Without its payment it can be unmatched, and then the statement can go; the cascade removes the lines.
+        // Deleting its last payment returns the line to the unmatched list; then the statement can go and the
+        // cascade removes the lines.
         let payment = try #require(try documents.payments(for: "doc-cz").first)
         try documents.deletePayment(id: payment.id, now: Fixtures.now)
+        #expect(try store.unmatchedIncoming().map(\.id) == ["tx-1"])
+        #expect(try store.transactions(matchedTo: "doc-cz").isEmpty)
         try store.setMatch(transactionID: "tx-1", documentID: nil, state: .unmatched, now: Fixtures.now)
         try store.deleteStatement(id: "st-1", now: Fixtures.now)
         #expect(try store.statements().isEmpty)
         #expect(try store.transactions(in: "st-1").isEmpty)
         #expect(try documents.payments(for: "doc-cz").isEmpty)
+    }
+
+    @Test func deletingTheLastPaymentOfALineReleasesIt() throws {
+        let database = try Fixtures.prepared()
+        let store = StatementStore(database)
+        let documents = DocumentStore(database)
+        try store.importStatement(Self.statement(), transactions: Self.transactions(), now: Fixtures.now)
+        try documents.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try documents.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        let day = Fixtures.day("2026-11-10")
+
+        // One line split across two payments: deleting one keeps the match, deleting the last releases it.
+        let first = try documents.recordPayment(documentID: "doc-cz", on: day, amount: Money(Fixtures.d("5000"), .czk),
+                                                bankTransactionID: "tx-1", now: Fixtures.now)
+        let second = try documents.recordPayment(documentID: "doc-cz", on: day, amount: Money(Fixtures.d("7100"), .czk),
+                                                 bankTransactionID: "tx-1", now: Fixtures.now)
+        try documents.deletePayment(id: first.id, now: Fixtures.now)
+        #expect(try store.unmatchedIncoming().isEmpty)
+        #expect(try store.transactions(matchedTo: "doc-cz").map { $0.id } == ["tx-1"])
+        try documents.deletePayment(id: second.id, now: Fixtures.now)
+        #expect(try store.unmatchedIncoming().map { $0.id } == ["tx-1"])
+        #expect(try store.transactions(matchedTo: "doc-cz").isEmpty)
+        let event = try #require(try AuditLog(database).events(entity: "bankTransaction", id: "tx-1").last)
+        #expect(event.action == "match")
+        #expect(event.details?["state"] == "unmatched")
+        #expect(event.details?["reason"] == "payment deleted")
+
+        // A refund from a debit line releases that line the same way.
+        try documents.recordPayment(documentID: "doc-cz", on: day, amount: Money(Fixtures.d("12100"), .czk), bankTransactionID: "tx-1", now: Fixtures.now)
+        let refund = try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
+                                                bankTransactionID: "tx-2", now: Fixtures.now)
+        #expect(try store.transactions(matchedTo: "doc-cz").map { $0.id }.sorted() == ["tx-1", "tx-2"])
+        try documents.deletePayment(id: refund.id, now: Fixtures.now)
+        #expect(try store.transactions(matchedTo: "doc-cz").map { $0.id } == ["tx-1"])
+        #expect(try store.transactions(in: "st-1").first { $0.id == "tx-2" }?.matchState == .unmatched)
     }
 
     @Test func aBankTransactionIsNeverCountedTwice() throws {
@@ -236,6 +286,7 @@ import GRDB
         }
         #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12100"), .czk))
         try documents.deletePayment(id: first.id, now: Fixtures.now)
+        #expect(try store.unmatchedIncoming().map { $0.id } == ["tx-1"])
         #expect(throws: DataError.transactionOverallocated(id: "tx-1", available: Money(Fixtures.d("12100"), .czk), requested: Money(Fixtures.d("99999"), .czk))) {
             try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("99999"), .czk),
                                         bankTransactionID: "tx-1", now: Fixtures.now)
@@ -253,10 +304,24 @@ import GRDB
         #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12100"), .czk))
 
         // A debit is no payment received, and an unknown line is reported as such.
-        #expect(throws: DataError.transactionOverallocated(id: "tx-2", available: Money(0, .czk), requested: Money(Fixtures.d("100"), .czk))) {
+        #expect(throws: DataError.transactionDirectionMismatch(id: "tx-2")) {
             try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
                                         bankTransactionID: "tx-2", now: Fixtures.now)
         }
+        // A refund comes from a debit line, allocated like a credit line; a credit line is no refund.
+        #expect(throws: DataError.transactionDirectionMismatch(id: "tx-1")) {
+            try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("1"), .czk),
+                                       bankTransactionID: "tx-1", now: Fixtures.now)
+        }
+        let refund = try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("60"), .czk),
+                                                bankTransactionID: "tx-2", now: Fixtures.now)
+        #expect(refund.amount == Money(Fixtures.d("-60"), .czk))
+        #expect(throws: DataError.transactionOverallocated(id: "tx-2", available: Money(Fixtures.d("40"), .czk), requested: Money(Fixtures.d("50"), .czk))) {
+            try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("50"), .czk),
+                                       bankTransactionID: "tx-2", now: Fixtures.now)
+        }
+        #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12040"), .czk))
+        try documents.deletePayment(id: refund.id, now: Fixtures.now)
         #expect(throws: DataError.transactionNotFound("nope")) {
             try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
                                         bankTransactionID: "nope", now: Fixtures.now)

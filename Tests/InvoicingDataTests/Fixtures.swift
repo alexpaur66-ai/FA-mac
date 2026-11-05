@@ -73,9 +73,10 @@ enum Fixtures {
                  exchangeRate: eurRate)
     }
 
-    static func invoiceSeries() throws -> StoredNumberSeries {
+    static func invoiceSeries(variableSymbolPrefix: String? = nil) throws -> StoredNumberSeries {
         StoredNumberSeries(name: "Faktury", kinds: [.invoice, .finalInvoice],
-                           series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2026))
+                           series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2026,
+                                                            variableSymbolPrefix: variableSymbolPrefix))
     }
 
     /// A database with the profile, both customers and the invoice series.
@@ -108,6 +109,26 @@ enum Fixtures {
         let store = DocumentStore(database)
         try store.saveDraft(request, now: now)
         return try store.issue(id: id, seriesID: "zf", now: now)
+    }
+
+    /// Records a payment of `amount` on the issued advance request, saves its payment tax document, links
+    /// and issues it from the "dd" series (see `addAdvanceSeries`) and returns the issued receipt.
+    static func issuedReceipt(_ database: AppDatabase, advance: Document, id: String = "dd1", amount: Decimal = d("12100"),
+                              on day: CalendarDay = day("2026-11-10")) throws -> Document {
+        let store = DocumentStore(database)
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(amount, .czk), now: now)
+        try store.saveDraft(Document.paymentTaxDocument(id: id, forAdvanceRequest: advance, received: amount, on: day), now: now)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: id, now: now)
+        return try store.issue(id: id, seriesID: "dd", now: now)
+    }
+
+    /// A final invoice draft for the supply of `czkDraft` (12 100 CZK gross) that deducts the issued
+    /// payment tax document `receipt`.
+    static func finalInvoiceDraft(id: String = "final", deducting receipt: Document) throws -> Document {
+        var document = czkDraft(id: id)
+        document.kind = .finalInvoice
+        document.advanceDeductions = receipt.advanceDeductions(totals: try DocumentTotals.compute(for: receipt))
+        return document
     }
 
     static let cnbDaily = """

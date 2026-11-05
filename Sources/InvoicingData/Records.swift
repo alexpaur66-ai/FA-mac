@@ -89,6 +89,7 @@ struct NumberSeriesRecord: Codable, FetchableRecord, PersistableRecord, Sendable
     var year: Int
     var lastCounter: Int
     var lastIssuedYear: Int?
+    var variableSymbolPrefix: String?
 
     init(_ stored: StoredNumberSeries) {
         id = stored.series.id
@@ -99,12 +100,14 @@ struct NumberSeriesRecord: Codable, FetchableRecord, PersistableRecord, Sendable
         year = stored.series.year
         lastCounter = stored.series.lastCounter
         lastIssuedYear = stored.series.lastIssuedYear
+        variableSymbolPrefix = stored.series.variableSymbolPrefix
     }
 
     func stored() throws -> StoredNumberSeries {
         do {
             let series = try DocumentNumberSeries(id: id, pattern: DocumentNumberPattern(template: template), resetsYearly: resetsYearly,
-                                                  year: year, lastCounter: lastCounter, lastIssuedYear: lastIssuedYear)
+                                                  year: year, lastCounter: lastCounter, lastIssuedYear: lastIssuedYear,
+                                                  variableSymbolPrefix: variableSymbolPrefix)
             let kinds = Set(self.kinds.split(separator: ",").compactMap { DocumentKind(rawValue: String($0)) })
             return StoredNumberSeries(name: name, kinds: kinds, series: series)
         } catch {
@@ -223,12 +226,30 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     }
 }
 
-/// A payment received against a document, entered by hand or taken from a bank statement.
+/// What a payment row records (ADR 0007). The amount's sign follows the kind: incoming kinds are positive,
+/// outgoing kinds negative, so the sum of a document's payments is what it has been paid net.
+public enum DocumentPaymentKind: String, Sendable, Codable, CaseIterable {
+    /// Money received, by hand or from a bank statement.
+    case received
+    /// Money returned to the customer (an overpayment paid back), negative.
+    case refund
+    /// Credit of an overpaid document applied here (`DocumentStore.applyCredit`), positive.
+    case creditIn
+    /// Credit of this overpaid document moved to another document, negative.
+    case creditOut
+
+    public var isIncoming: Bool { self == .received || self == .creditIn }
+}
+
+/// A payment received against a document, entered by hand or taken from a bank statement; or a refund or
+/// a credit moved between documents (see `kind`).
 public struct DocumentPayment: Hashable, Sendable, Identifiable {
     public let id: String
     public let documentID: String
     public let paidOn: CalendarDay
+    /// Signed: positive for `received` and `creditIn`, negative for `refund` and `creditOut`.
     public let amount: Money
+    public let kind: DocumentPaymentKind
     /// The imported bank statement line the payment was matched from; nil when typed in by the user.
     public let bankTransactionID: String?
     /// The payment tax document issued for this payment (an advance received against an advance
@@ -237,9 +258,12 @@ public struct DocumentPayment: Hashable, Sendable, Identifiable {
     /// True while `receiptDocumentID` points to an issued document: the receipt rests on this payment,
     /// so the payment can be neither changed nor deleted.
     public let receiptIssued: Bool
+    /// For `creditIn` and `creditOut`: the other leg of the same applied credit.
+    public let relatedPaymentID: String?
     public let note: String?
 
     public var isFromBankImport: Bool { bankTransactionID != nil }
+    public var isIncoming: Bool { kind.isIncoming }
 }
 
 struct DocumentPaymentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
@@ -249,17 +273,84 @@ struct DocumentPaymentRecord: Codable, FetchableRecord, PersistableRecord, Senda
     var paidOn: String
     var amount: Int64
     var currency: String
+    var kind: String
     var bankTransactionID: String?
     var receiptDocumentID: String?
+    var relatedPaymentID: String?
     var note: String?
     var createdAt: String
 
+    var paymentKind: DocumentPaymentKind? { DocumentPaymentKind(rawValue: kind) }
+
     func payment(receiptIssued: Bool) throws -> DocumentPayment {
-        DocumentPayment(id: id, documentID: documentID,
-                        paidOn: try CalendarDay.stored(paidOn, table: Self.databaseTableName, id: id),
-                        amount: MinorUnits.money(amount, Currency(code: currency)),
-                        bankTransactionID: bankTransactionID, receiptDocumentID: receiptDocumentID,
-                        receiptIssued: receiptIssued, note: note)
+        guard let paymentKind else { throw DataError.corruptRecord(table: Self.databaseTableName, id: id, detail: "kind \(kind)") }
+        return DocumentPayment(id: id, documentID: documentID,
+                               paidOn: try CalendarDay.stored(paidOn, table: Self.databaseTableName, id: id),
+                               amount: MinorUnits.money(amount, Currency(code: currency)), kind: paymentKind,
+                               bankTransactionID: bankTransactionID, receiptDocumentID: receiptDocumentID,
+                               receiptIssued: receiptIssued, relatedPaymentID: relatedPaymentID, note: note)
+    }
+}
+
+/// Which payment tax document an issued final invoice deducted, and the advance request it belongs to.
+public struct AdvanceDeductionLink: Hashable, Sendable, Identifiable {
+    public let id: String
+    public let finalInvoiceID: String
+    public let finalInvoiceNumber: String
+    public let receiptDocumentID: String
+    public let receiptNumber: String
+    /// The advance request the receipt's payment was received on; nil when the receipt has no payment.
+    public let advanceRequestID: String?
+    /// ISO 8601 UTC, the issue of the final invoice.
+    public let createdAt: String
+}
+
+struct AdvanceDeductionRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
+    static let databaseTableName = "advanceDeduction"
+    var id: String
+    var finalInvoiceID: String
+    var finalInvoiceNumber: String
+    var receiptDocumentID: String
+    var receiptNumber: String
+    var advanceRequestID: String?
+    var createdAt: String
+
+    func link() -> AdvanceDeductionLink {
+        AdvanceDeductionLink(id: id, finalInvoiceID: finalInvoiceID, finalInvoiceNumber: finalInvoiceNumber,
+                             receiptDocumentID: receiptDocumentID, receiptNumber: receiptNumber,
+                             advanceRequestID: advanceRequestID, createdAt: createdAt)
+    }
+}
+
+/// The two closing events of screens-flows.md §2d.
+public enum DocumentClosureKind: String, Sendable, Codable, CaseIterable {
+    /// An issued advance request the customer will never pay ("Uzavřít zálohu bez úhrady…").
+    case closedUnpaid
+    /// An issued tax document to be corrected by a credit note in Phase 2 ("Označit k opravě dobropisem…").
+    case markedForCreditNote
+}
+
+/// A dated closing event beside an issued document. The document itself stays as issued.
+public struct DocumentClosure: Hashable, Sendable {
+    public let documentID: String
+    public let kind: DocumentClosureKind
+    public let reason: String
+    /// ISO 8601 UTC.
+    public let closedAt: String
+}
+
+struct DocumentClosureRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
+    static let databaseTableName = "documentClosure"
+    var documentID: String
+    var kind: String
+    var reason: String
+    var closedAt: String
+
+    func closure() throws -> DocumentClosure {
+        guard let kind = DocumentClosureKind(rawValue: kind) else {
+            throw DataError.corruptRecord(table: Self.databaseTableName, id: documentID, detail: "kind \(self.kind)")
+        }
+        return DocumentClosure(documentID: documentID, kind: kind, reason: reason, closedAt: closedAt)
     }
 }
 

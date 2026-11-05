@@ -9,6 +9,8 @@ public struct DocumentNumberSeries: Hashable, Sendable {
         case resettingSeriesRequiresYearInPattern
         /// The year is below 1 or the counter is negative; no series can reach that state.
         case invalidState(year: Int, lastCounter: Int)
+        /// The variable symbol prefix must be 1 to 3 digits and must not start with 0, which banks ignore.
+        case invalidVariableSymbolPrefix(String)
     }
 
     /// Identifier of the series, e.g. "invoice", "advance", "paymentReceipt".
@@ -21,13 +23,28 @@ public struct DocumentNumberSeries: Hashable, Sendable {
     /// The year the last issued number was formatted with; nil when unknown, then `year` is used.
     /// Differs from `year` only for a series that does not reset yearly.
     public private(set) var lastIssuedYear: Int?
+    /// Digits put in front of the number's digits in the variable symbol (ADR 0003 addendum), so that two
+    /// series with the same template never give two documents of a year the same symbol. Nil: the symbol
+    /// is the number's digits alone. 1 to 3 digits, not starting with 0.
+    public let variableSymbolPrefix: String?
 
-    /// Throws when a yearly-resetting pattern has no year token, or the year or counter is out of range.
-    public init(id: String, pattern: DocumentNumberPattern, resetsYearly: Bool = true, year: Int, lastCounter: Int = 0, lastIssuedYear: Int? = nil) throws {
+    /// Throws when a yearly-resetting pattern has no year token, the year or counter is out of range, or
+    /// the variable symbol prefix is not 1 to 3 digits (an empty or blank prefix counts as none).
+    public init(id: String, pattern: DocumentNumberPattern, resetsYearly: Bool = true, year: Int, lastCounter: Int = 0, lastIssuedYear: Int? = nil,
+                variableSymbolPrefix: String? = nil) throws {
         guard year >= 1, lastCounter >= 0, (lastIssuedYear ?? 1) >= 1 else {
             throw NumberingError.invalidState(year: year, lastCounter: lastCounter)
         }
         guard !resetsYearly || pattern.containsYear else { throw NumberingError.resettingSeriesRequiresYearInPattern }
+        let prefix = variableSymbolPrefix?.trimmingWhitespace() ?? ""
+        if prefix.isEmpty {
+            self.variableSymbolPrefix = nil
+        } else {
+            guard prefix.count <= 3, prefix.allSatisfy(\.isASCIIDigit), prefix.first != "0" else {
+                throw NumberingError.invalidVariableSymbolPrefix(prefix)
+            }
+            self.variableSymbolPrefix = prefix
+        }
         self.id = id
         self.pattern = pattern
         self.resetsYearly = resetsYearly
@@ -67,7 +84,7 @@ public struct DocumentNumberSeries: Hashable, Sendable {
 /// Decoding runs the same checks as the initializer, so a corrupted or hand-edited stored series
 /// (negative counter, year-less pattern for a resetting series) throws instead of issuing numbers.
 extension DocumentNumberSeries: Codable {
-    private enum CodingKeys: String, CodingKey { case id, pattern, resetsYearly, year, lastCounter, lastIssuedYear }
+    private enum CodingKeys: String, CodingKey { case id, pattern, resetsYearly, year, lastCounter, lastIssuedYear, variableSymbolPrefix }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -77,8 +94,10 @@ extension DocumentNumberSeries: Codable {
         let year = try container.decode(Int.self, forKey: .year)
         let lastCounter = try container.decode(Int.self, forKey: .lastCounter)
         let lastIssuedYear = try container.decodeIfPresent(Int.self, forKey: .lastIssuedYear)
+        let prefix = try container.decodeIfPresent(String.self, forKey: .variableSymbolPrefix)
         do {
-            try self.init(id: id, pattern: pattern, resetsYearly: resetsYearly, year: year, lastCounter: lastCounter, lastIssuedYear: lastIssuedYear)
+            try self.init(id: id, pattern: pattern, resetsYearly: resetsYearly, year: year, lastCounter: lastCounter, lastIssuedYear: lastIssuedYear,
+                          variableSymbolPrefix: prefix)
         } catch {
             throw DecodingError.dataCorruptedError(forKey: .lastCounter, in: container, debugDescription: "Invalid numbering series \(id): \(error)")
         }
@@ -92,5 +111,6 @@ extension DocumentNumberSeries: Codable {
         try container.encode(year, forKey: .year)
         try container.encode(lastCounter, forKey: .lastCounter)
         try container.encodeIfPresent(lastIssuedYear, forKey: .lastIssuedYear)
+        try container.encodeIfPresent(variableSymbolPrefix, forKey: .variableSymbolPrefix)
     }
 }
