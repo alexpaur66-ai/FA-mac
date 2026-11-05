@@ -18,6 +18,7 @@ struct MainActions {
     var issue: (@MainActor () -> Void)?
     var duplicate: (@MainActor () -> Void)?
     var createFinalInvoice: (@MainActor () -> Void)?
+    var createTaxDocument: (@MainActor () -> Void)?
 }
 
 private struct MainActionsKey: FocusedValueKey {
@@ -87,6 +88,8 @@ struct AppCommands: Commands {
                 .disabled(actions?.duplicate == nil)
             Button { actions?.createFinalInvoice?() } label: { Text(L.createFinalInvoice) }
                 .disabled(actions?.createFinalInvoice == nil)
+            Button { actions?.createTaxDocument?() } label: { Text(L.createTaxDocumentForPayment) }
+                .disabled(actions?.createTaxDocument == nil)
             Divider()
             Button { actions?.closeAdvanceUnpaid?() } label: { Text(L.closeAdvanceUnpaid) }
                 .disabled(actions?.closeAdvanceUnpaid == nil)

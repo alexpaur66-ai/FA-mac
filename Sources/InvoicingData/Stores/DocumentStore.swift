@@ -359,6 +359,11 @@ public struct DocumentStore: Sendable {
         guard receipt.currency == payment.currency else {
             throw DataError.currencyMismatch(expected: currency, actual: Currency(code: receipt.currency))
         }
+        // § 29 odst. 1 písm. h) ZDPH: a payment tax document states the day the payment was received.
+        guard receipt.taxPointDate == payment.paidOn else {
+            throw DataError.receiptMismatch(paymentID: payment.id,
+                                            detail: "the document's tax point is \(receipt.taxPointDate ?? "missing"), the payment was received on \(payment.paidOn)")
+        }
         guard let paid = try DocumentRecord.fetchOne(db, key: payment.documentID) else { throw DataError.documentNotFound(payment.documentID) }
         guard paid.kind == DocumentKind.advanceRequest.rawValue else {
             throw DataError.receiptMismatch(paymentID: payment.id,

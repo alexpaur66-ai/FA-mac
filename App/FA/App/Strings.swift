@@ -423,4 +423,21 @@ enum L {
     static func vatID(_ value: String) -> LocalizedStringResource { r("issue.vatID", "VAT ID \(value)") }
     static let noVATExempt = r("issue.noVATExempt", "no VAT, exempt")
     static let taxPointOtherMonth = r("issue.taxPointOtherMonth", "The tax point is in a different month from the issue date")
+    static let vatAfterAdvances = r("editor.vatAfterAdvances", "VAT after advances")
+    static let invalidNumber = r("editor.invalidNumber", "Not a number. The previous value is kept until this is fixed.")
+    static let taxPointIsPaymentDate = r("editor.taxPointIsPaymentDate", "the day the payment was received")
+    static func advanceAlreadyDeductedIn(_ receipt: String, _ finalInvoice: String) -> LocalizedStringResource {
+        r("issue.advanceAlreadyDeducted", "Tax document \(receipt) is already deducted in final invoice \(finalInvoice). Remove it from Advances deducted.")
+    }
+    static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {
+        r("error.dayBeforeSeriesYear", "The issue date is before the series year \(year). Change the issue date or pick another series.")
+    }
+    static func finalInvoiceReceiptsPending(_ days: String) -> LocalizedStringResource {
+        r("finalInvoice.receiptsPending", "Issue the tax document for the payment of \(days) first; otherwise its amount would not be deducted.")
+    }
+    static func draftChangesNotSaved(_ error: String) -> LocalizedStringResource {
+        r("editor.changesNotSaved", "The last changes to the draft were not saved: \(error)")
+    }
+    static let createTaxDocumentForPayment = r("menu.createTaxDocumentForPayment", "Create Tax Document for Payment")
+    static let openTaxDocument = r("document.openTaxDocument", "Open Tax Document")
 }

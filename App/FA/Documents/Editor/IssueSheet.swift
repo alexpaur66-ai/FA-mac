@@ -58,8 +58,10 @@ struct IssueSheet: View {
         .frame(minWidth: 560, maxWidth: 720)
         .defaultFocus($focus, .checkbox)
         .onAppear {
-            // Settings may have gained or lost a series while the editor was open.
-            model.refreshSeries()
+            // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
+            // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the tax point's rate).
+            model.refreshReferenceData()
+            model.refreshRate()
             if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
                 seriesID = model.series.first?.id
             }
@@ -135,8 +137,17 @@ struct IssueSheet: View {
         guard let totals = model.totals else { return String(localized: L.totalsUnavailable) }
         let code = document.currency.code
         var parts = [MoneyText.format(totals.totalGross, currency: code, locale: locale)]
+        if document.kind == .finalInvoice, totals.totalGross != totals.amountDue {
+            parts.append(String(localized: L.advancesDeducted) + " "
+                + MoneyText.format(-(totals.totalGross - totals.amountDue), currency: code, locale: locale))
+        }
         if totals.rows.contains(where: { $0.treatment.chargesVAT }) {
-            parts.append(String(localized: L.vat) + " " + MoneyText.format(totals.totalVAT, currency: code, locale: locale))
+            // On a final invoice the VAT after the deduction, the same base as the VAT in CZK.
+            if document.kind == .finalInvoice {
+                parts.append(String(localized: L.vatAfterAdvances) + " " + MoneyText.format(totals.taxableVAT, currency: code, locale: locale))
+            } else {
+                parts.append(String(localized: L.vat) + " " + MoneyText.format(totals.totalVAT, currency: code, locale: locale))
+            }
             if let czk = totals.taxableVATCZK, document.currency != .czk {
                 parts.append(String(localized: L.vatInCZK) + " " + MoneyText.format(czk, currency: "CZK", locale: locale))
             }
@@ -183,14 +194,21 @@ struct IssueSheet: View {
     @ViewBuilder private func problems(_ document: Document) -> some View {
         let today = CalendarDay(Date(), in: .current)
         // The missing rate shows as the inline form, not as a second row.
-        let errors = model.errors.filter { !(model.rateIsMissing && $0.code == .exchangeRateMissing) }
+        let errors = model.blockingErrors
+        let numberingProblem = model.numberingProblem(seriesID: seriesID)
         let warnings = model.warnings
         let dateNotToday = document.issueDate != today
         let infos = infoLines(document)
-        if !errors.isEmpty || model.rateIsMissing || model.series.isEmpty {
+        if model.blockingCount(seriesID: seriesID) > 0 {
             section(L.blockingTitle) {
                 ForEach(errors) { issue in
                     problemRow(issue.message(language: .ui(locale)), symbol: "xmark.octagon.fill", tint: .red)
+                }
+                ForEach(model.deductionConflicts, id: \.self) { conflict in
+                    problemRow(conflict, symbol: "xmark.octagon.fill", tint: .red)
+                }
+                if let numberingProblem {
+                    problemRow(numberingProblem, symbol: "xmark.octagon.fill", tint: .red)
                 }
                 if model.rateIsMissing {
                     RateEntryForm(model: model)
@@ -259,7 +277,8 @@ struct IssueSheet: View {
     // MARK: Issue
 
     private func canIssue(_ document: Document) -> Bool {
-        guard seriesID != nil, model.errors.isEmpty, !model.rateIsMissing else { return false }
+        // The same count as the ⛔ section and the editor's readiness chip.
+        guard seriesID != nil, model.blockingCount(seriesID: seriesID) == 0 else { return false }
         let needsCheck = !model.warnings.isEmpty || document.issueDate != CalendarDay(Date(), in: .current)
         return !needsCheck || checked
     }

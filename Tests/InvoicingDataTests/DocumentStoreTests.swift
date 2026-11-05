@@ -347,6 +347,39 @@ import InvoicingCore
         #expect(try store.payments(for: "adv").first?.receiptIssued == true)
     }
 
+    @Test func aReceiptStatesTheDayItsPaymentWasReceived() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try Fixtures.addAdvanceSeries(database)
+        let request = try Fixtures.issuedAdvance(database)
+        let payment = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+
+        // § 29 odst. 1 písm. h) ZDPH: the tax point of the payment tax document is the day of the payment.
+        var moved = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: request, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        moved.taxPointDate = Fixtures.day("2026-11-12")
+        try store.saveDraft(moved, now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+            Issue.record("a receipt dated on another day than its payment was accepted")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        #expect(try store.payments(for: "adv").first?.receiptDocumentID == nil)
+
+        // Linked with the payment's day, the draft cannot move its tax point afterwards.
+        let receipt = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: request, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(receipt, now: Fixtures.now)
+        #expect(try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now).receiptDocumentID == "dd1")
+        do {
+            try store.saveDraft(moved, now: Fixtures.now)
+            Issue.record("a linked receipt moved its tax point off the payment date")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        #expect(try store.document(id: "dd1")?.taxPointDate == Fixtures.day("2026-11-10"))
+        try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+    }
+
     @Test func aReceiptBelongsToOnePayment() throws {
         let database = try Fixtures.prepared()
         let store = DocumentStore(database)

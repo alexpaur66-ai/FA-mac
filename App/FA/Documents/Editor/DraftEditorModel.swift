@@ -74,6 +74,14 @@ enum DraftEditorError: Error, CustomStringConvertible {
     private(set) var loadError: String?
     private(set) var saveError: String?
     private(set) var saveState: SaveState = .saved
+    /// Why the last rate lookup or typed rate failed; shown beside the rate line.
+    private(set) var rateError: String?
+    /// Why the last "Add tax document…" failed; shown in the advances section.
+    private(set) var deductionError: String?
+    /// Deductions of receipts that another issued final invoice already deducts (screens-flows.md §2c, ⛔).
+    private(set) var deductionConflicts: [String] = []
+    /// True once the user picked an explicit tax point; otherwise the tax point follows the issue date.
+    private(set) var taxPointExplicit = false
     private(set) var customers: [Customer] = []
     private(set) var series: [StoredNumberSeries] = []
     private(set) var profile: CompanyProfile?
@@ -84,6 +92,8 @@ enum DraftEditorError: Error, CustomStringConvertible {
     private(set) var rateFallbackFrom: CalendarDay?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// Set when the draft was deleted: nothing is written any more (a pending save would re-create it).
+    @ObservationIgnored private var discarded = false
 
     init(stores: Stores, documentID: String) {
         self.stores = stores
@@ -113,7 +123,14 @@ enum DraftEditorError: Error, CustomStringConvertible {
             } else if let customer = customers.first(where: { $0.id == document.customerID }) {
                 treatmentChoice = TreatmentChoice(customer.vatStatus.defaultServiceTreatment)
             }
+            // A payment tax document's tax point is the day of its payment and never follows the issue date.
+            taxPointExplicit = document.kind == .paymentTaxDocument || document.taxPointDate.map { $0 != document.issueDate } ?? false
             recompute()
+            // A draft saved without its tax point (an older draft) gets the issue date, which the validator needs.
+            if document.kind.isTaxDocument && document.taxPointDate == nil {
+                update { Self.followIssueDate(&$0, explicitTaxPoint: false) }
+            }
+            refreshDeductionConflicts()
             refreshRate()
         } catch {
             loadError = ErrorText.message(error)
@@ -122,7 +139,7 @@ enum DraftEditorError: Error, CustomStringConvertible {
 
     /// Applies one change to the draft, recomputes totals and issues, and schedules the save.
     func update(_ change: (inout Document) -> Void) {
-        guard var document else { return }
+        guard !discarded, var document else { return }
         change(&document)
         self.document = document
         recompute()
@@ -131,7 +148,8 @@ enum DraftEditorError: Error, CustomStringConvertible {
 
     private func recompute() {
         guard let document else { return }
-        issues = DocumentValidator.validate(document, forIssue: true)
+        // The number is assigned and checked by `DocumentStore.issue`; a draft never has one.
+        issues = DocumentValidator.validate(Self.validationPreview(of: document, profile: profile), forIssue: false)
         do {
             totals = try DocumentTotals.compute(for: document)
             totalsError = nil
@@ -151,19 +169,77 @@ enum DraftEditorError: Error, CustomStringConvertible {
         }
     }
 
-    /// Writes the draft now; the editor calls it when it goes away and before Issue.
-    func saveNow() {
+    /// Writes the draft now; the editor calls it when it goes away and before Issue. False when the
+    /// save failed (`saveError` says why), so the caller can tell the user before the edits are dropped.
+    @discardableResult
+    func saveNow() -> Bool {
         saveTask?.cancel()
         saveTask = nil
-        guard saveState != .saved, let document, document.status == .draft else { return }
+        guard !discarded, saveState != .saved, let document, document.status == .draft else { return true }
         do {
-            try stores.documents.saveDraft(document)
+            try stores.documents.saveDraft(Self.strippingBlankTrailingLine(document))
             saveState = .saved
             saveError = nil
+            return true
         } catch {
             saveState = .failed
             saveError = ErrorText.message(error)
+            return false
         }
+    }
+
+    /// The draft was deleted: drop the pending save and never write again, or the upsert of `saveDraft`
+    /// would bring the deleted draft back.
+    func discard() {
+        saveTask?.cancel()
+        saveTask = nil
+        discarded = true
+        saveState = .saved
+    }
+
+    // MARK: Pure helpers (testable without SwiftUI)
+
+    /// A fully empty trailing line (Add Line left untouched) is dropped on save and at issue and never
+    /// counts as invalid (screens-flows.md §2c).
+    nonisolated static func isBlankLine(_ line: DocumentLine) -> Bool {
+        line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (line.quantity == 1 || line.quantity == 0) && line.unitPrice == 0 && line.discountPercent == 0
+            && (line.unit ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    nonisolated static func strippingBlankTrailingLine(_ document: Document) -> Document {
+        var copy = document
+        if let last = copy.lines.last, isBlankLine(last) { copy.lines.removeLast() }
+        return copy
+    }
+
+    /// What the validator sees: the draft without its blank trailing line and, when no account is
+    /// picked, with the company's account for the currency that `DocumentStore.issue` will fill in.
+    nonisolated static func validationPreview(of document: Document, profile: CompanyProfile?) -> Document {
+        var preview = strippingBlankTrailingLine(document)
+        if preview.payment == nil, let account = profile?.bankConnection(for: preview.currency) {
+            preview.payment = PaymentInstructions.standard(for: "", bankConnection: account, currency: preview.currency)
+        }
+        return preview
+    }
+
+    /// "Same as the issue date" stores the issue date as the tax point, because a tax document needs a
+    /// stored one (§ 29 odst. 1 písm. h) ZDPH, `taxPointDateMissing`); an advance has none.
+    nonisolated static func followIssueDate(_ document: inout Document, explicitTaxPoint: Bool) {
+        guard document.kind.isTaxDocument else {
+            document.taxPointDate = nil
+            return
+        }
+        // A payment tax document states the day the payment was received (§ 29 odst. 1 písm. h) ZDPH); the
+        // store checks that day against the payment, so the editor never moves it.
+        if document.kind == .paymentTaxDocument { return }
+        if !explicitTaxPoint || document.taxPointDate == nil { document.taxPointDate = document.issueDate }
+    }
+
+    /// The types the header offers: a payment tax document comes only from a payment on an advance
+    /// (screens-flows.md §1.4, §2d), so it is listed only for such a draft, which cannot change type.
+    nonisolated static func kindOptions(for current: DocumentKind) -> [DocumentKind] {
+        current == .paymentTaxDocument ? [.paymentTaxDocument] : [.invoice, .advanceRequest, .finalInvoice]
     }
 
     // MARK: Header fields
@@ -176,6 +252,8 @@ enum DraftEditorError: Error, CustomStringConvertible {
     func setCustomer(_ id: String?) {
         let chosen = customers.first { $0.id == id }
         update { doc in
+            // Deductions belong to the previous client's receipts; the store would refuse them at issue.
+            if chosen?.id != doc.customerID { doc.advanceDeductions = [] }
             doc.customerID = chosen?.id
             doc.customer = chosen?.party
                 ?? Party(name: "", address: PostalAddress(street: "", city: "", postalCode: "", countryCode: "CZ"))
@@ -190,37 +268,60 @@ enum DraftEditorError: Error, CustomStringConvertible {
                 doc.lines[index].treatment = treatmentChoice.apply(to: doc.lines[index].treatment, exemptReference: exemptReference)
             }
         }
+        refreshDeductionConflicts()
         refreshRate()
     }
 
-    /// Re-reads the series that number the draft's kind; Settings may have changed while the editor is open.
-    func refreshSeries() {
-        guard let document else { return }
+    /// Re-reads the clients, the company profile and the series that number the draft's kind: a client
+    /// sheet or Settings may have changed them while the editor is open.
+    func refreshReferenceData() {
+        guard !discarded, let document else { return }
+        if let fresh = try? stores.customers.all() { customers = fresh }
+        if let fresh = try? stores.profile.load() { profile = fresh }
         series = (try? stores.series.series(for: document.kind)) ?? []
+        refreshDeductionConflicts()
+        recompute()
     }
 
     func setKind(_ kind: DocumentKind) {
+        guard let current = document?.kind, Self.kindOptions(for: current).contains(kind) else { return }
         update { doc in
             doc.kind = kind
-            if kind == .advanceRequest { doc.taxPointDate = nil }
+            Self.followIssueDate(&doc, explicitTaxPoint: taxPointExplicit)
             if kind != .finalInvoice { doc.advanceDeductions = [] }
         }
         series = (try? stores.series.series(for: kind)) ?? []
+        refreshDeductionConflicts()
         refreshRate()
     }
 
-    /// Moving the issue date keeps the due days, so the due date moves with it.
+    /// Moving the issue date keeps the due days, so the due date moves with it, and so does a tax point
+    /// that is "same as the issue date".
     func setIssueDate(_ day: CalendarDay) {
         update { doc in
             let term = doc.dueDate.days(since: doc.issueDate)
             doc.issueDate = day
             doc.dueDate = day.adding(days: max(term, 0))
+            Self.followIssueDate(&doc, explicitTaxPoint: taxPointExplicit)
         }
         refreshRate()
     }
 
-    func setTaxPointDate(_ day: CalendarDay?) {
+    /// An explicit tax point picked in the header.
+    func setTaxPointDate(_ day: CalendarDay) {
+        guard document?.kind != .paymentTaxDocument else { return }
+        taxPointExplicit = true
         update { $0.taxPointDate = day }
+        refreshRate()
+    }
+
+    var taxPointSameAsIssue: Bool { !taxPointExplicit }
+
+    /// On: the tax point is the issue date and follows it. Off: the current day stays as an explicit date.
+    func setTaxPointSameAsIssue(_ same: Bool) {
+        guard document?.kind != .paymentTaxDocument else { return }
+        taxPointExplicit = !same
+        update { Self.followIssueDate(&$0, explicitTaxPoint: !same) }
         refreshRate()
     }
 
@@ -368,7 +469,8 @@ enum DraftEditorError: Error, CustomStringConvertible {
     }
 
     func refreshRate() {
-        guard let document else { return }
+        guard !discarded, let document else { return }
+        rateError = nil
         guard needsExchangeRate else {
             rateFallbackFrom = nil
             if document.exchangeRate != nil { update { $0.exchangeRate = nil } }
@@ -379,21 +481,28 @@ enum DraftEditorError: Error, CustomStringConvertible {
             rateFallbackFrom = rate.flatMap { $0.validFor != document.taxPoint ? $0.validFor : nil }
             if rate != document.exchangeRate { update { $0.exchangeRate = rate } }
         } catch {
-            saveError = ErrorText.message(error)
+            rateError = ErrorText.message(error)
         }
     }
 
-    /// Saves a typed rate for the tax point (source "typed in") and puts it on the document.
+    /// Saves a typed rate for the tax point (source "typed in") and puts it on the document. A rate
+    /// already stored for that day (imported meanwhile) is never overwritten: the document takes it.
     func saveManualRate(_ czkPerUnit: Decimal) {
         guard let document, czkPerUnit > 0 else { return }
+        rateError = nil
         let rate = ExchangeRate(currency: document.currency, amount: 1, czkPerAmount: czkPerUnit,
                                 validFor: document.taxPoint, source: .manual)
         do {
+            if let stored = try stores.rates.rate(for: document.currency, on: document.taxPoint),
+               stored.validFor == document.taxPoint {
+                refreshRate()
+                return
+            }
             try stores.rates.save(rate)
             rateFallbackFrom = nil
             update { $0.exchangeRate = rate }
         } catch {
-            saveError = ErrorText.message(error)
+            rateError = ErrorText.message(error)
         }
     }
 
@@ -425,18 +534,49 @@ enum DraftEditorError: Error, CustomStringConvertible {
     /// Adds the deductions the receipt carries: one per VAT summary row, with the rate and the exchange
     /// rate the advance was taxed at (§ 37a odst. 2 písm. b) ZDPH, InvoicingCore).
     func addDeduction(receiptID: String) {
+        deductionError = nil
         do {
-            guard let receipt = try stores.documents.document(id: receiptID), receipt.status != .draft else { return }
+            guard let receipt = try stores.documents.document(id: receiptID), receipt.status != .draft else {
+                deductionError = String(localized: L.errorNotFound)
+                return
+            }
             let receiptTotals = try DocumentTotals.compute(for: receipt)
             let deductions = receipt.advanceDeductions(totals: receiptTotals)
             update { doc in doc.advanceDeductions.append(contentsOf: deductions) }
         } catch {
-            saveError = ErrorText.message(error)
+            deductionError = ErrorText.message(error)
         }
+        refreshDeductionConflicts()
     }
 
     func removeDeductions(ofDocumentNumber number: String) {
+        deductionError = nil
         update { doc in doc.advanceDeductions.removeAll { $0.documentNumber == number } }
+        refreshDeductionConflicts()
+    }
+
+    /// The listed receipts that another issued final invoice already deducts (one final invoice per
+    /// receipt, `linkDeductions`): a ⛔ row naming that invoice instead of a refusal after the click.
+    private func refreshDeductionConflicts() {
+        guard let document, document.kind == .finalInvoice, !document.advanceDeductions.isEmpty else {
+            deductionConflicts = []
+            return
+        }
+        let numbers = Set(document.advanceDeductions.map(\.documentNumber))
+        do {
+            var conflicts: [String] = []
+            let receipts = try stores.documents.summaries(DocumentFilter(kinds: [.paymentTaxDocument], status: .issued))
+            for receipt in receipts {
+                guard let number = receipt.number, numbers.contains(number),
+                      let link = try stores.documents.deduction(ofReceipt: receipt.id), link.finalInvoiceID != documentID
+                else { continue }
+                conflicts.append(String(localized: L.advanceAlreadyDeductedIn(number, link.finalInvoiceNumber)))
+            }
+            deductionConflicts = conflicts
+        } catch {
+            deductionConflicts = []
+            deductionError = ErrorText.message(error)
+        }
     }
 
     // MARK: Issue
@@ -449,14 +589,43 @@ enum DraftEditorError: Error, CustomStringConvertible {
         issues.filter { !$0.isError }
     }
 
+    /// The validator's errors that block Issue; a missing rate counts once, as the inline form.
+    var blockingErrors: [ValidationIssue] {
+        errors.filter { !(rateIsMissing && $0.code == .exchangeRateMissing) }
+    }
+
+    /// Why the series cannot number the draft on its issue date (an issue date before the series year).
+    func numberingProblem(seriesID: String?) -> String? {
+        guard let document, let seriesID else { return nil }
+        do {
+            _ = try stores.series.peekNextNumber(seriesID: seriesID, on: document.issueDate)
+            return nil
+        } catch let error as DocumentNumberSeries.NumberingError {
+            return ErrorText.message(error)
+        } catch {
+            // A series that disappeared is caught by the sheet's own list and by the store.
+            return nil
+        }
+    }
+
+    /// Every ⛔ row the review sheet shows for `seriesID`; the readiness chip shows the same count.
+    func blockingCount(seriesID: String?) -> Int {
+        blockingErrors.count + (rateIsMissing ? 1 : 0) + (series.isEmpty ? 1 : 0) + deductionConflicts.count
+            + (numberingProblem(seriesID: seriesID) == nil ? 0 : 1)
+    }
+
     func predictedNumber(seriesID: String) -> String? {
         guard let document else { return nil }
         return try? stores.series.peekNextNumber(seriesID: seriesID, on: document.issueDate)
     }
 
     /// Writes the draft, then issues it in the data layer's one transaction (ADR 0005): number, symbol,
-    /// validation, totals, hash, audit. The returned document carries its number.
+    /// validation, totals, hash, audit. The rate of the tax point is read again first (§ 4 odst. 8 ZDPH),
+    /// a day's file may have been imported since the editor opened. The returned document carries its number.
     func issue(seriesID: String) throws -> Document {
+        refreshRate()
+        // A draft stored before blank trailing lines were dropped is written again without it.
+        if let last = document?.lines.last, Self.isBlankLine(last), saveState == .saved { saveState = .pending }
         saveNow()
         if saveState == .failed { throw DraftEditorError.saveFailed(saveError ?? "") }
         let issued = try stores.documents.issue(id: documentID, seriesID: seriesID)

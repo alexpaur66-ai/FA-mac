@@ -17,7 +17,6 @@ struct DraftEditorView: View {
     @Environment(\.locale) private var locale
     @Binding var issueSheetPresented: Bool
 
-    private static let kinds: [DocumentKind] = [.invoice, .advanceRequest, .finalInvoice, .paymentTaxDocument]
     private static let rateKinds: [VATRateKind] = [.standard, .reduced, .zero]
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
     private static let qtyWidth: CGFloat = 72
@@ -92,35 +91,72 @@ struct DraftEditorView: View {
 
     // MARK: Totals bar
 
+    /// One row when the detail column is wide enough; at the minimum width the chip moves below the
+    /// figures, and the figures wrap.
     private func totalsBar(_ document: Document) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
-                if let totals = model.totals {
-                    figure(L.base, totals.totalBase, document.currency)
-                    if totals.rows.contains(where: { $0.treatment.chargesVAT }) {
-                        figure(L.vat, totals.totalVAT, document.currency)
-                    }
-                    figure(L.total, totals.totalGross, document.currency)
-                    if document.kind == .finalInvoice {
-                        figure(L.amountDue, totals.amountDue, document.currency)
-                    }
-                    if let vatCZK = totals.taxableVATCZK, document.currency != .czk {
-                        figure(L.vatInCZK, vatCZK, .czk)
-                    }
-                } else {
-                    Text(L.totalsUnavailable).textRole(.rowSecondary)
+        // The same count as the sheet's ⛔ section, so the chip never says ready while Issue is blocked.
+        let blocking = model.blockingCount(seriesID: model.series.first?.id)
+        return VStack(alignment: .leading, spacing: Spacing.s) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
+                    figures(document)
+                    Spacer(minLength: Spacing.l)
+                    readinessChip(blocking)
                 }
-                Spacer()
-                readinessChip
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
+                        figures(document)
+                    }
+                    readinessChip(blocking)
+                }
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: Spacing.l, alignment: .leading)],
+                              alignment: .leading, spacing: Spacing.s) {
+                        figures(document)
+                    }
+                    readinessChip(blocking)
+                }
             }
             if model.rateIsMissing {
                 RateEntryForm(model: model)
             } else if model.needsExchangeRate, let rate = document.exchangeRate {
                 rateLine(rate, document: document)
             }
+            if let rateError = model.rateError {
+                Text(verbatim: rateError).textRole(.caption).foregroundStyle(.red)
+            }
         }
         .padding(Spacing.l)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: Radius.l))
+    }
+
+    /// Base and Total are the lines before any deduction; a final invoice then shows the advances
+    /// deducted, the amount due and the VAT after the deduction, the base of the VAT in CZK
+    /// (screens-flows.md §2d, step 4: Total → − advances → Amount due).
+    @ViewBuilder private func figures(_ document: Document) -> some View {
+        if let totals = model.totals {
+            let chargesVAT = totals.rows.contains(where: { $0.treatment.chargesVAT })
+            figure(L.base, totals.totalBase, document.currency)
+            if chargesVAT && document.kind != .finalInvoice {
+                figure(L.vat, totals.totalVAT, document.currency)
+            }
+            figure(L.total, totals.totalGross, document.currency)
+            if document.kind == .finalInvoice {
+                let deducted = totals.totalGross - totals.amountDue
+                if deducted != 0 {
+                    figure(L.advancesDeducted, -deducted, document.currency)
+                }
+                figure(L.amountDue, totals.amountDue, document.currency)
+                if chargesVAT {
+                    figure(L.vatAfterAdvances, totals.taxableVAT, document.currency)
+                }
+            }
+            if let vatCZK = totals.taxableVATCZK, document.currency != .czk {
+                figure(L.vatInCZK, vatCZK, .czk)
+            }
+        } else {
+            Text(L.totalsUnavailable).textRole(.rowSecondary)
+        }
     }
 
     private func figure(_ label: LocalizedStringResource, _ amount: Decimal, _ currency: Currency) -> some View {
@@ -130,9 +166,8 @@ struct DraftEditorView: View {
         }
     }
 
-    private var readinessChip: some View {
-        let count = model.errors.count
-        return Button { openIssueSheet() } label: {
+    private func readinessChip(_ count: Int) -> some View {
+        Button { openIssueSheet() } label: {
             if count == 0 {
                 Label { Text(L.readyToIssue) } icon: { Image(systemName: "checkmark.circle.fill") }
             } else {
@@ -185,7 +220,7 @@ struct DraftEditorView: View {
             GridRow {
                 Text(L.fieldType).textRole(.label)
                 Picker(selection: Binding(get: { document.kind }, set: { model.setKind($0) })) {
-                    ForEach(Self.kinds, id: \.self) { kind in
+                    ForEach(DraftEditorModel.kindOptions(for: document.kind), id: \.self) { kind in
                         Text(kind.shortTitle).tag(kind)
                     }
                 } label: {
@@ -193,6 +228,8 @@ struct DraftEditorView: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: 320)
+                // A payment tax document belongs to its payment; another type would orphan the link.
+                .disabled(document.kind == .paymentTaxDocument)
             }
             GridRow {
                 Text(L.fieldIssueDate).textRole(.label)
@@ -204,16 +241,25 @@ struct DraftEditorView: View {
             if document.kind != .advanceRequest {
                 GridRow {
                     Text(L.fieldTaxPoint).textRole(.label)
-                    HStack(spacing: Spacing.m) {
-                        Toggle(isOn: Binding(get: { document.taxPointDate == nil },
-                                             set: { same in model.setTaxPointDate(same ? nil : document.issueDate) })) {
-                            Text(L.sameAsIssueDate)
+                    if document.kind == .paymentTaxDocument {
+                        // The day the payment was received; the store refuses any other day (checkReceipt).
+                        HStack(spacing: Spacing.m) {
+                            DayText(document.taxPointDate ?? document.issueDate)
+                            Text(L.taxPointIsPaymentDate).textRole(.rowSecondary)
                         }
-                        if let taxPoint = document.taxPointDate {
-                            DatePicker(selection: dayBinding(taxPoint) { model.setTaxPointDate($0) }, displayedComponents: .date) {
-                                Text(L.fieldTaxPoint)
+                    } else {
+                        HStack(spacing: Spacing.m) {
+                            Toggle(isOn: Binding(get: { model.taxPointSameAsIssue },
+                                                 set: { same in model.setTaxPointSameAsIssue(same) })) {
+                                Text(L.sameAsIssueDate)
                             }
-                            .labelsHidden()
+                            if !model.taxPointSameAsIssue {
+                                DatePicker(selection: dayBinding(document.taxPointDate ?? document.issueDate) { model.setTaxPointDate($0) },
+                                           displayedComponents: .date) {
+                                    Text(L.fieldTaxPoint)
+                                }
+                                .labelsHidden()
+                            }
                         }
                     }
                 }
@@ -339,14 +385,28 @@ struct DraftEditorView: View {
     private func lines(_ document: Document) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.linesTitle).textRole(.sectionTitle)
-            lineHeader
-            ForEach(Array(document.lines.enumerated()), id: \.element.id) { index, line in
-                lineRow(line, index: index, document: document)
+            // The columns need about 800 pt; a narrower detail column scrolls the grid sideways instead of
+            // clipping the rate and the line total.
+            ViewThatFits(in: .horizontal) {
+                lineGrid(document)
+                ScrollView(.horizontal) {
+                    lineGrid(document)
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
             Button { model.addLine() } label: {
                 Label { Text(L.addLine) } icon: { Image(systemName: "plus") }
             }
             .keyboardShortcut("l", modifiers: .command)
+        }
+    }
+
+    private func lineGrid(_ document: Document) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            lineHeader
+            ForEach(Array(document.lines.enumerated()), id: \.element.id) { index, line in
+                lineRow(line, index: index, document: document)
+            }
         }
     }
 
@@ -368,11 +428,9 @@ struct DraftEditorView: View {
             TextField(text: lineText(line.id)) { Text(L.colDescription) }
                 .labelsHidden()
                 .frame(minWidth: 200, maxWidth: .infinity)
-            TextField(value: lineDecimal(line.id, \.quantity), format: Decimal.FormatStyle.number.precision(.fractionLength(0...3))) {
-                Text(L.colQty)
+            AmountField(label: L.colQty, value: line.quantity, fractionLength: 0...3) { value in
+                model.setLine(line.id) { $0.quantity = value }
             }
-            .labelsHidden()
-            .multilineTextAlignment(.trailing)
             .frame(width: Self.qtyWidth)
             HStack(spacing: 0) {
                 TextField(text: lineUnit(line.id)) { Text(L.colUnit) }
@@ -391,17 +449,13 @@ struct DraftEditorView: View {
                 .accessibilityLabel(Text(L.colUnit))
             }
             .frame(width: Self.unitWidth)
-            TextField(value: lineDecimal(line.id, \.unitPrice), format: Decimal.FormatStyle.number.precision(.fractionLength(0...2))) {
-                Text(L.colUnitPrice)
+            AmountField(label: L.colUnitPrice, value: line.unitPrice, fractionLength: 0...2) { value in
+                model.setLine(line.id) { $0.unitPrice = value }
             }
-            .labelsHidden()
-            .multilineTextAlignment(.trailing)
             .frame(width: Self.priceWidth)
-            TextField(value: lineDecimal(line.id, \.discountPercent), format: Decimal.FormatStyle.number.precision(.fractionLength(0...2))) {
-                Text(L.colDiscount)
+            AmountField(label: L.colDiscount, value: line.discountPercent, fractionLength: 0...2) { value in
+                model.setLine(line.id) { $0.discountPercent = value }
             }
-            .labelsHidden()
-            .multilineTextAlignment(.trailing)
             .frame(width: Self.discountWidth)
             rateCell(line, document: document)
                 .frame(width: Self.rateWidth, alignment: .leading)
@@ -464,12 +518,6 @@ struct DraftEditorView: View {
             set: { value in model.setLine(id) { $0.unit = value.isEmpty ? nil : value } })
     }
 
-    private func lineDecimal(_ id: String, _ keyPath: WritableKeyPath<DocumentLine, Decimal>) -> Binding<Decimal> {
-        Binding(
-            get: { model.document?.lines.first(where: { $0.id == id })?[keyPath: keyPath] ?? 0 },
-            set: { value in model.setLine(id) { $0[keyPath: keyPath] = value } })
-    }
-
     // MARK: Advances deducted
 
     private func deductions(_ document: Document) -> some View {
@@ -506,6 +554,16 @@ struct DraftEditorView: View {
             if candidates.isEmpty && document.advanceDeductions.isEmpty {
                 Text(L.noReceiptsToDeduct).textRole(.rowSecondary)
             }
+            ForEach(model.deductionConflicts, id: \.self) { conflict in
+                Label {
+                    Text(verbatim: conflict).textRole(.caption)
+                } icon: {
+                    Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                }
+            }
+            if let deductionError = model.deductionError {
+                Text(verbatim: deductionError).textRole(.caption).foregroundStyle(.red)
+            }
         }
     }
 
@@ -539,30 +597,43 @@ struct RateEntryForm: View {
     let model: DraftEditorModel
 
     @Environment(\.locale) private var locale
-    @State private var manualRate: Decimal = 0
+    /// The typed text, parsed on every change, so Save works without leaving the field first and a
+    /// text that is not a number stays visible with its error.
+    @State private var text = ""
+
+    private var manualRate: Decimal? { DecimalInput.parse(text, locale: locale) }
+    private var invalid: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && manualRate == nil }
 
     var body: some View {
         if let document = model.document {
-            HStack(spacing: Spacing.m) {
-                Label {
-                    Text(L.rateMissing(document.currency.code, document.taxPoint.formatted(locale)))
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.m) {
+                    Label {
+                        Text(L.rateMissing(document.currency.code, document.taxPoint.formatted(locale)))
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .foregroundStyle(.orange)
+                    TextField(text: $text) {
+                        Text(L.rateFieldLabel(document.currency.code))
+                    }
+                    .frame(width: 150)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
+                    }
+                    .onSubmit { save() }
+                    Button { save() } label: { Text(L.saveRate) }
+                        .disabled((manualRate ?? 0) <= 0)
                 }
-                .foregroundStyle(.orange)
-                TextField(value: $manualRate, format: Decimal.FormatStyle.number.precision(.fractionLength(0...3))) {
-                    Text(L.rateFieldLabel(document.currency.code))
+                if invalid {
+                    Text(L.invalidNumber).textRole(.caption).foregroundStyle(.red)
                 }
-                .frame(width: 150)
-                .onSubmit { save() }
-                Button { save() } label: { Text(L.saveRate) }
-                    .disabled(manualRate <= 0)
             }
         }
     }
 
     private func save() {
-        guard manualRate > 0 else { return }
+        guard let manualRate, manualRate > 0 else { return }
         model.saveManualRate(manualRate)
     }
 
@@ -573,5 +644,106 @@ struct RateEntryForm: View {
         case .manual: String(localized: L.sourceManual)
         case .fixedAccounting: String(localized: L.sourceFixed)
         }
+    }
+}
+
+/// Parses a typed amount: spaces (incl. the no-break spaces of the Czech format) are ignored, a decimal
+/// comma or point is accepted, and anything else is not a number (nil) instead of a silently cut value.
+enum DecimalInput {
+    static func parse(_ text: String, locale: Locale) -> Decimal? {
+        var cleaned = String(text.filter { !$0.isWhitespace }).replacingOccurrences(of: "\u{2212}", with: "-")
+        guard !cleaned.isEmpty else { return nil }
+        let separators = cleaned.filter { $0 == "," || $0 == "." }
+        if Set(separators).count == 2, let decimalMark = separators.last {
+            // Both kinds: the last one is the decimal mark, the other one groups thousands.
+            let grouping: Character = decimalMark == "," ? "." : ","
+            cleaned = String(cleaned.filter { $0 != grouping }).replacingOccurrences(of: ",", with: ".")
+        } else if let mark = separators.first {
+            if separators.count > 1 || String(mark) == locale.groupingSeparator {
+                cleaned = String(cleaned.filter { $0 != mark })
+            } else {
+                cleaned = cleaned.replacingOccurrences(of: String(mark), with: ".")
+            }
+        }
+        let unsigned = cleaned.hasPrefix("-") ? cleaned.dropFirst() : Substring(cleaned)
+        let parts = unsigned.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count <= 2, parts.contains(where: { !$0.isEmpty }),
+              parts.allSatisfy({ part in part.allSatisfy { $0.isASCII && $0.isNumber } })
+        else { return nil }
+        return Decimal(string: cleaned, locale: Locale(identifier: "en_US_POSIX"))
+    }
+}
+
+/// A numeric cell of the lines grid (screens-flows.md §2c, fast entry): a valid number is written as it
+/// is typed; text that is not a number stays in the field with a red outline and is never written, so
+/// the user sees it was not taken instead of watching it revert.
+struct AmountField: View {
+    let label: LocalizedStringResource
+    let value: Decimal
+    let fractionLength: ClosedRange<Int>
+    let commit: @MainActor (Decimal) -> Void
+
+    @Environment(\.locale) private var locale
+    @State private var text = ""
+    @State private var edited = false
+    @State private var invalid = false
+    @FocusState private var focused: Bool
+
+    init(label: LocalizedStringResource, value: Decimal, fractionLength: ClosedRange<Int>,
+         commit: @escaping @MainActor (Decimal) -> Void) {
+        self.label = label
+        self.value = value
+        self.fractionLength = fractionLength
+        self.commit = commit
+    }
+
+    var body: some View {
+        TextField(text: $text) { Text(label) }
+            .labelsHidden()
+            .multilineTextAlignment(.trailing)
+            .focused($focused)
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
+            }
+            .help(invalid ? Text(L.invalidNumber) : Text(verbatim: ""))
+            .onAppear { text = formatted(value) }
+            .onChange(of: value) { _, newValue in
+                guard !focused else { return }
+                text = formatted(newValue)
+                invalid = false
+            }
+            .onChange(of: text) { _, newText in
+                guard focused else { return }
+                edited = true
+                if let parsed = parse(newText) {
+                    invalid = false
+                    if parsed != value { commit(parsed) }
+                }
+            }
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused { finish() }
+            }
+            .onSubmit { finish() }
+    }
+
+    /// An empty cell is zero.
+    private func parse(_ text: String) -> Decimal? {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : DecimalInput.parse(text, locale: locale)
+    }
+
+    private func finish() {
+        guard edited else { return }
+        if let parsed = parse(text) {
+            edited = false
+            invalid = false
+            if parsed != value { commit(parsed) }
+            text = formatted(parsed)
+        } else {
+            invalid = true
+        }
+    }
+
+    private func formatted(_ amount: Decimal) -> String {
+        amount.formatted(Decimal.FormatStyle(locale: locale).precision(.fractionLength(fractionLength)))
     }
 }

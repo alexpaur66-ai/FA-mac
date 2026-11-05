@@ -82,7 +82,8 @@ struct RecordPaymentSheet: View {
     }
 
     /// Step 2 of the advance flow: the money is in, and the tax document for it is due within 15 days of
-    /// the payment (§ 28 odst. 8 ZDPH). Create its draft now, or later from the Overview queue.
+    /// the payment (§ 28 odst. 8 ZDPH). Create its draft now, or later with Create Tax Document in the
+    /// payment's row of the advance's detail (the Overview queue selects that advance) or the Document menu.
     private func recordedStep(_ payment: DocumentPayment) -> some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Label {
@@ -126,21 +127,41 @@ struct RecordPaymentSheet: View {
         }
     }
 
-    /// The draft tax document for the payment, linked to it at once (`attachReceipt`), so the editor and
-    /// the lists know which payment it records; the link is checked again when the draft is issued.
     private func createTaxDocument(_ payment: DocumentPayment) {
         do {
-            guard let advance = try stores.documents.document(id: state.id) else { return }
-            let today = CalendarDay(Date(), in: .current)
-            let receipt = Document.paymentTaxDocument(forAdvanceRequest: advance, received: payment.amount.amount,
-                                                      on: payment.paidOn, issueDate: today)
-            try stores.documents.saveDraft(receipt)
-            try stores.documents.attachReceipt(paymentID: payment.id, documentID: receipt.id)
+            guard let id = try TaxDocumentDraft.create(stores: stores, advanceID: state.id, payment: payment) else { return }
             dismiss()
-            openDraft(receipt.id)
+            openDraft(id)
         } catch {
             self.error = ErrorText.message(error, locale: locale)
         }
+    }
+}
+
+/// The draft tax document for a payment received on an advance, linked to it at once (`attachReceipt`),
+/// so the editor and the lists know which payment it records; the link is checked again when the draft
+/// is issued. Used by Record Payment's last step and by Create Tax Document on a payment without one.
+@MainActor enum TaxDocumentDraft {
+    /// The new draft's id; nil when the advance no longer exists. A draft that cannot be linked is
+    /// deleted again, so no unlinked tax document is left behind.
+    static func create(stores: Stores, advanceID: String, payment: DocumentPayment) throws -> String? {
+        guard let advance = try stores.documents.document(id: advanceID) else { return nil }
+        let today = CalendarDay(Date(), in: .current)
+        let receipt = Document.paymentTaxDocument(forAdvanceRequest: advance, received: payment.amount.amount,
+                                                  on: payment.paidOn, issueDate: today)
+        try stores.documents.saveDraft(receipt)
+        do {
+            try stores.documents.attachReceipt(paymentID: payment.id, documentID: receipt.id)
+        } catch {
+            try? stores.documents.deleteDraft(id: receipt.id)
+            throw error
+        }
+        return receipt.id
+    }
+
+    /// The received payments of an advance that have no tax document yet, not even a draft.
+    static func paymentsWithoutReceipt(_ payments: [DocumentPayment]) -> [DocumentPayment] {
+        payments.filter { $0.kind == .received && $0.receiptDocumentID == nil }
     }
 }
 

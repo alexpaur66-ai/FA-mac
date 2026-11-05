@@ -25,6 +25,7 @@ struct MainSplitView: View {
     /// The editor of the selected draft; replaced when another draft is selected (ADR 0009).
     @State private var editor: DraftEditorModel?
     @State private var issueSheetPresented = false
+    @Environment(\.locale) private var locale
 
     init(stores: Stores) {
         self.stores = stores
@@ -78,7 +79,8 @@ struct MainSplitView: View {
         .onChange(of: selectedDraftID, initial: true) { _, id in
             syncEditor(id)
         }
-        .sheet(item: $sheet) { sheet in
+        // A client created or edited from the sheet must reach the open editor's Client picker.
+        .sheet(item: $sheet, onDismiss: { editor?.refreshReferenceData() }) { sheet in
             sheetView(sheet)
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
@@ -164,7 +166,8 @@ struct MainSplitView: View {
             DocumentDetailView(
                 stores: stores, documents: documents, documentID: id,
                 recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft,
-                createFinalInvoice: { createFinalInvoice(from: $0) })
+                createFinalInvoice: { createFinalInvoice(from: $0) },
+                createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft)
         }
     }
 
@@ -192,10 +195,13 @@ struct MainSplitView: View {
         return id
     }
 
-    /// One editor per selected draft; the old one writes its draft before it goes.
+    /// One editor per selected draft; the old one writes its draft before it goes. When that save fails
+    /// (the store refused it), the user is told the edits were not kept instead of losing them silently.
     private func syncEditor(_ id: String?) {
         guard editor?.documentID != id else { return }
-        editor?.saveNow()
+        if let old = editor, !old.saveNow() {
+            resultLine = String(localized: L.draftChangesNotSaved(old.saveError ?? ""))
+        }
         issueSheetPresented = false
         editor = id.map { DraftEditorModel(stores: stores, documentID: $0) }
     }
@@ -219,6 +225,13 @@ struct MainSplitView: View {
         }
         if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
+        }
+        // One received payment without a tax document: the menu creates it; with several, the payment rows do.
+        if summary.kind == .advanceRequest, let payments = try? stores.documents.payments(for: id) {
+            let missing = TaxDocumentDraft.paymentsWithoutReceipt(payments)
+            if missing.count == 1, let payment = missing.first {
+                actions.createTaxDocument = { createTaxDocument(advanceID: id, payment: payment) }
+            }
         }
         if state.acceptsPayment {
             actions.recordPayment = { sheet = .recordPayment(id) }
@@ -262,7 +275,7 @@ struct MainSplitView: View {
             let document = Document(
                 kind: kind, supplier: profile.supplier, customer: customerParty, customerID: customer?.id,
                 language: customer?.language ?? .czech, currency: customer?.currency ?? profile.defaultCurrency,
-                issueDate: today, dueDate: today.adding(days: customer?.paymentTermDays ?? profile.defaultPaymentTermDays),
+                issueDate: today, taxPointDate: kind.isTaxDocument ? today : nil, dueDate: today.adding(days: customer?.paymentTermDays ?? profile.defaultPaymentTermDays),
                 footer: profile.footer)
             try stores.documents.saveDraft(document)
             openDraft(document.id)
@@ -307,7 +320,8 @@ struct MainSplitView: View {
             let copy = Document(
                 kind: source.kind, supplier: profile?.supplier ?? source.supplier, customer: customer?.party ?? source.customer,
                 customerID: source.customerID, language: source.language, currency: source.currency, pricing: source.pricing,
-                issueDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(source.lines),
+                issueDate: today, taxPointDate: source.kind.isTaxDocument ? today : nil, dueDate: today.adding(days: term),
+                lines: Self.copiedLines(source.lines),
                 orderReference: source.orderReference, note: source.note, footer: source.footer)
             try stores.documents.saveDraft(copy)
             openDraft(copy.id)
@@ -319,10 +333,18 @@ struct MainSplitView: View {
     /// Create Final Invoice… on an issued advance (screens-flows.md §2d, step 4): a final invoice draft
     /// with the advance's lines and client, deducting every issued tax document of its payments that no
     /// other final invoice deducts (§ 37a ZDPH; the deductions carry the advance's rate and exchange rate).
+    /// Refused with the reason while a received payment has no issued tax document: its amount would not
+    /// be deducted and the customer would be billed for money already received.
     private func createFinalInvoice(from advanceID: String) {
         do {
             guard let advance = try stores.documents.document(id: advanceID),
                   advance.kind == .advanceRequest, advance.status != .draft else { return }
+            let pending = try stores.documents.payments(for: advanceID).filter { $0.kind == .received && !$0.receiptIssued }
+            guard pending.isEmpty else {
+                let days = pending.map { $0.paidOn.formatted(locale) }.joined(separator: ", ")
+                resultLine = String(localized: L.finalInvoiceReceiptsPending(days))
+                return
+            }
             let profile = try stores.profile.load()
             let customer = try advance.customerID.flatMap { try stores.customers.customer(id: $0) }
             let today = CalendarDay(Date(), in: .current)
@@ -338,7 +360,7 @@ struct MainSplitView: View {
             let final = Document(
                 kind: .finalInvoice, supplier: profile?.supplier ?? advance.supplier, customer: customer?.party ?? advance.customer,
                 customerID: advance.customerID, language: advance.language, currency: advance.currency, pricing: advance.pricing,
-                issueDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(advance.lines),
+                issueDate: today, taxPointDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(advance.lines),
                 advanceDeductions: deductions, relatedDocumentNumber: advance.number,
                 orderReference: advance.orderReference, note: advance.note, footer: advance.footer)
             try stores.documents.saveDraft(final)
@@ -355,11 +377,29 @@ struct MainSplitView: View {
         }
     }
 
+    /// A pending or failed autosave of the deleted draft must not write it back (`saveDraft` inserts a
+    /// missing id): the editor is discarded before the selection change runs `syncEditor`.
     private func deleteDraft(_ id: String) {
         do {
             try stores.documents.deleteDraft(id: id)
+            if let open = editor, open.documentID == id {
+                open.discard()
+                editor = nil
+                issueSheetPresented = false
+            }
             documentSelection.remove(id)
             if overviewSelection == id { overviewSelection = nil }
+        } catch {
+            resultLine = ErrorText.message(error)
+        }
+    }
+
+    /// Create Tax Document for a received payment on an advance that has none (screens-flows.md §2d,
+    /// step 3): the draft opens in the editor.
+    private func createTaxDocument(advanceID: String, payment: DocumentPayment) {
+        do {
+            guard let id = try TaxDocumentDraft.create(stores: stores, advanceID: advanceID, payment: payment) else { return }
+            openDraft(id)
         } catch {
             resultLine = ErrorText.message(error)
         }
