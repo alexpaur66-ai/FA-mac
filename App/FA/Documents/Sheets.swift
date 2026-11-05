@@ -78,7 +78,7 @@ struct RecordPaymentSheet: View {
             }
             dismiss()
         } catch {
-            self.error = String(describing: error)
+            self.error = ErrorText.message(error, locale: locale)
         }
     }
 }
@@ -90,6 +90,7 @@ struct ClosureSheet: View {
     let kind: DocumentClosureKind
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @State private var reason = ""
     @State private var error: String?
 
@@ -127,7 +128,7 @@ struct ClosureSheet: View {
             }
             dismiss()
         } catch {
-            self.error = String(describing: error)
+            self.error = ErrorText.message(error, locale: locale)
         }
     }
 }

@@ -221,7 +221,7 @@ struct CompanyPane: View {
             isError = false
             message = L.saved
         } catch {
-            message = LocalizedStringResource(stringLiteral: String(describing: error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 }
@@ -302,6 +302,8 @@ struct BankAccountsPane: View {
             parsedBIC = parsed
         }
         let currencyText = currencyCode.trimmingCharacters(in: .whitespaces).uppercased()
+        // CompanyProfile.bankConnection(for:) matches the code exactly, so "EURO" would never be used.
+        guard currencyText.isEmpty || Self.isCurrencyCode(currencyText) else { message = L.invalidCurrency; return }
         let currency: Currency? = currencyText.isEmpty ? nil : Currency.known(currencyText)
         let name = bankName.trimmingCharacters(in: .whitespaces)
         let connection: BankConnection
@@ -326,6 +328,11 @@ struct BankAccountsPane: View {
         }
     }
 
+    /// Three ASCII letters, the form of an ISO 4217 code.
+    static func isCurrencyCode(_ text: String) -> Bool {
+        text.count == 3 && text.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) }
+    }
+
     private func remove(at index: Int) {
         guard var updated = profile, updated.bankConnections.indices.contains(index) else { return }
         updated.bankConnections.remove(at: index)
@@ -340,7 +347,7 @@ struct BankAccountsPane: View {
             message = L.saved
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: String(describing: error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 }
@@ -408,7 +415,7 @@ struct NumberingPane: View {
             series = try stores.series.all()
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: String(describing: error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 
@@ -452,7 +459,7 @@ struct NumberingPane: View {
             load()
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: String(describing: error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 }
@@ -572,7 +579,7 @@ struct SeriesFormSheet: View {
             onSave()
             dismiss()
         } catch {
-            self.error = LocalizedStringResource(stringLiteral: String(describing: error))
+            self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 }

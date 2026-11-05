@@ -13,6 +13,8 @@ struct DocumentDetailView: View {
     let deleteDraft: @MainActor (String) -> Void
 
     @State private var payments: [DocumentPayment] = []
+    /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
+    @State private var deductions: [AdvanceDeductionLink] = []
     @State private var loadError: String?
     @Environment(\.locale) private var locale
 
@@ -42,10 +44,12 @@ struct DocumentDetailView: View {
     private func load() {
         do {
             payments = try stores.documents.payments(for: documentID)
+            deductions = try DocumentInspectorView.deductions(stores, state: documents.state(id: documentID))
             loadError = nil
         } catch {
             payments = []
-            loadError = String(describing: error)
+            deductions = []
+            loadError = ErrorText.message(error, locale: locale)
         }
     }
 
@@ -56,7 +60,24 @@ struct DocumentDetailView: View {
             Grid(alignment: .leading, horizontalSpacing: Spacing.xl, verticalSpacing: Spacing.s) {
                 GridRow {
                     Text(L.colTotal).textRole(.label)
-                    MoneyText(amount: summary.totalGross?.amount ?? 0, currency: summary.currency.code, locale: locale, role: .total)
+                    if let total = summary.totalGross {
+                        MoneyText(amount: total.amount, currency: summary.currency.code, locale: locale, role: .total)
+                    } else {
+                        // A draft whose totals cannot be computed yet (for example a missing rate).
+                        Text(verbatim: "—").textRole(.total)
+                    }
+                }
+                if summary.kind == .finalInvoice, let deducted = Self.deductedAmount(summary), !deducted.isZero {
+                    // Total − advances = amount due (screens-flows.md §2d), so the figures reconcile.
+                    GridRow {
+                        Text(L.advancesDeducted).textRole(.label)
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            MoneyText(amount: -deducted.amount, currency: summary.currency.code, locale: locale)
+                            if !deductions.isEmpty {
+                                Text(verbatim: deductions.map(\.receiptNumber).joined(separator: ", ")).textRole(.rowSecondary)
+                            }
+                        }
+                    }
                 }
                 if summary.status == .issued && summary.kind != .paymentTaxDocument {
                     GridRow {
@@ -110,6 +131,13 @@ struct DocumentDetailView: View {
                 Text(verbatim: loadError).textRole(.caption).foregroundStyle(.red)
             }
         }
+    }
+
+    /// What a final invoice deducts: its gross before deductions minus its amount due. Nil when either
+    /// figure is missing.
+    static func deductedAmount(_ summary: DocumentSummary) -> Money? {
+        guard let total = summary.totalGross, let due = summary.amountDue, total.currency == due.currency else { return nil }
+        return total - due
     }
 
     private func header(_ state: DocumentState) -> some View {
@@ -185,7 +213,7 @@ struct DocumentDetailView: View {
             try stores.documents.deletePayment(id: id)
             load()
         } catch {
-            loadError = String(describing: error)
+            loadError = ErrorText.message(error, locale: locale)
         }
     }
 }
@@ -199,6 +227,7 @@ struct DocumentInspectorView: View {
 
     @State private var document: Document?
     @State private var payments: [DocumentPayment] = []
+    @State private var deductions: [AdvanceDeductionLink] = []
     @State private var events: [AuditEvent] = []
     @Environment(\.locale) private var locale
 
@@ -233,9 +262,12 @@ struct DocumentInspectorView: View {
             } header: {
                 Text(L.paymentsSection)
             }
-            if let state = documents.state(id: documentID), !state.deductedBy.isEmpty {
+            // An advance lists the final invoices that deducted it, a final invoice the payment tax
+            // documents it deducts.
+            let chain = (documents.state(id: documentID)?.deductedBy ?? []) + deductions.map(\.receiptNumber)
+            if !chain.isEmpty {
                 Section {
-                    ForEach(state.deductedBy, id: \.self) { number in
+                    ForEach(chain, id: \.self) { number in
                         Text(verbatim: number)
                     }
                 } header: {
@@ -256,8 +288,15 @@ struct DocumentInspectorView: View {
         .task(id: LoadKey(id: documentID, states: documents.states)) {
             document = try? stores.documents.document(id: documentID)
             payments = (try? stores.documents.payments(for: documentID)) ?? []
+            deductions = (try? Self.deductions(stores, state: documents.state(id: documentID))) ?? []
             events = (try? stores.audit.events(entity: "document", id: documentID)) ?? []
         }
+    }
+
+    /// The deduction links of an issued final invoice; empty for every other document.
+    static func deductions(_ stores: Stores, state: DocumentState?) throws -> [AdvanceDeductionLink] {
+        guard let state, state.summary.kind == .finalInvoice, state.summary.status == .issued else { return [] }
+        return try stores.documents.deductions(ofFinalInvoice: state.id)
     }
 
     /// The stored ISO 8601 timestamp in the UI locale; the raw text when it cannot be parsed.

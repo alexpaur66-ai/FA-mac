@@ -117,6 +117,8 @@ struct OverviewView: View {
 
     private func tiles(_ figures: OverviewFigures) -> some View {
         let name = monthName(month)
+        // The This month filter is the month of today; for another month the tile has no list to open.
+        let isCurrentMonth = month.year == documents.today.year && month.month == documents.today.month
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.l, alignment: .top)],
                          alignment: .leading, spacing: Spacing.l) {
             Tile(symbol: "clock", title: L.tileUnpaid,
@@ -138,14 +140,13 @@ struct OverviewView: View {
             }
             Tile(symbol: Symbols.document, title: L.tileIssued(name),
                  value: figures.issuedCountsText,
-                 lines: [String(localized: L.revenueTaxDocuments) + ": " + MoneyList.text(figures.revenue, locale: locale)]) {
-                show(.filter(.thisMonth))
-            }
+                 lines: [String(localized: L.revenueTaxDocuments) + ": " + MoneyList.text(figures.revenue, locale: locale)],
+                 action: isCurrentMonth ? { show(.filter(.thisMonth)) } : nil)
+            // By tax point, not by issue date, so no document filter matches it; the tile opens nothing.
             Tile(symbol: "percent", title: L.tileVAT(name),
                  value: MoneyText.format(figures.vatCZK, currency: "CZK", locale: locale),
-                 lines: [String(localized: L.vatTileNote)]) {
-                show(.filter(.thisMonth))
-            }
+                 lines: [String(localized: L.vatTileNote)],
+                 action: nil)
         }
     }
 
@@ -168,30 +169,37 @@ struct OverviewView: View {
     }
 }
 
-/// One number tile: symbol, label, value and up to two secondary lines. Clicking opens the matching filter.
+/// One number tile: symbol, label, value and up to two secondary lines. Clicking opens the matching filter;
+/// a tile without an action is not a button.
 private struct Tile: View {
     let symbol: String
     let title: LocalizedStringResource
     let value: String
     let lines: [String]
-    let action: @MainActor () -> Void
+    let action: (@MainActor () -> Void)?
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: Spacing.s) {
-                Label { Text(title) } icon: { Image(systemName: symbol) }
-                    .textRole(.label)
-                Text(verbatim: value).textRole(.total)
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    Text(verbatim: line).textRole(.rowSecondary)
-                }
-            }
-            .padding(Spacing.l)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.l))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.l))
+        if let action {
+            Button(action: action) { card }
+                .buttonStyle(.plain)
+        } else {
+            card
         }
-        .buttonStyle(.plain)
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Label { Text(title) } icon: { Image(systemName: symbol) }
+                .textRole(.label)
+            Text(verbatim: value).textRole(.total)
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(verbatim: line).textRole(.rowSecondary)
+            }
+        }
+        .padding(Spacing.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.l))
+        .contentShape(RoundedRectangle(cornerRadius: Radius.l))
     }
 }
 
@@ -213,7 +221,9 @@ private struct QueueRow: View {
                 Text(item.detail).textRole(.rowSecondary)
             }
             Spacer()
-            MoneyText(amount: item.state.outstanding.amount, currency: summary.currency.code, locale: locale)
+            if let amount = item.amount {
+                MoneyText(amount: amount.amount, currency: amount.currency.code, locale: locale)
+            }
         }
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.s)
@@ -233,6 +243,12 @@ struct OverviewFigures {
         let state: DocumentState
 
         var id: String { state.id + "/" + String(describing: kind) }
+
+        /// The amount the row shows: the open balance, or a draft's total (a draft has nothing outstanding).
+        /// Nil for a draft whose totals cannot be computed yet.
+        var amount: Money? {
+            kind == .oldDraft ? state.summary.totalGross : state.outstanding
+        }
 
         var symbol: String {
             switch kind {
@@ -293,7 +309,7 @@ struct OverviewFigures {
                 }
                 if summary.issueDate.year == month.year && summary.issueDate.month == month.month {
                     issuedCounts[summary.kind, default: 0] += 1
-                    if summary.kind.isTaxDocument, let total = summary.totalGross {
+                    if let total = Self.revenueAmount(summary) {
                         revenue.append(total)
                     }
                 }
@@ -302,7 +318,7 @@ struct OverviewFigures {
                    let vatCZK = summary.taxableVATCZK {
                     vat += vatCZK.amount
                 }
-                if state.isOverdue {
+                if Self.queuesAsOverdue(state) {
                     overdueItems.append(QueueItem(kind: .overdue, state: state))
                 }
                 if summary.kind == .advanceRequest && state.taxDocumentRequired && !state.taxDocumentIssued
@@ -328,6 +344,20 @@ struct OverviewFigures {
         self.queue = overdueItems.sorted { $0.state.daysOverdue > $1.state.daysOverdue }
             + taxItems.sorted { $0.state.summary.issueDate < $1.state.summary.issueDate }
             + draftItems.sorted { $0.state.summary.issueDate < $1.state.summary.issueDate }
+    }
+
+    /// What an issued document adds to the month's revenue: tax documents only, and a final invoice net of
+    /// the advances it deducts (their payment tax documents count already), so the advance money is never
+    /// counted twice (§2a). `amountDue` is the supply's gross minus the deducted advances.
+    static func revenueAmount(_ summary: DocumentSummary) -> Money? {
+        guard summary.kind.isTaxDocument else { return nil }
+        return summary.kind == .finalInvoice ? summary.amountDue : summary.totalGross
+    }
+
+    /// The overdue group of the queue: every overdue document except an advance an issued final invoice
+    /// already deducted (§2a never counts it as overdue).
+    static func queuesAsOverdue(_ state: DocumentState) -> Bool {
+        state.isOverdue && !(state.summary.kind == .advanceRequest && state.deductedInFinal)
     }
 
     /// "Faktura 6 · Zálohová 2 · DDPP 1", or "0".

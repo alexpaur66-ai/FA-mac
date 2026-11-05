@@ -22,7 +22,7 @@ final class ClientsModel {
             customers = try stores.customers.all()
             error = nil
         } catch {
-            self.error = String(describing: error)
+            self.error = ErrorText.message(error)
         }
     }
 
@@ -217,10 +217,14 @@ struct ClientDetailView: View {
         .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.m))
     }
 
+    /// Each supply once: invoices and final invoices (the full supply). Payment tax documents are left
+    /// out, because the final invoice's gross already contains the advances they record.
     private func invoicedThisYear(_ rows: [DocumentRow]) -> [Money] {
         let year = documents.today.year
-        return rows.filter { !$0.isDraft && $0.kind.isTaxDocument && $0.issueDate.year == year }
-            .compactMap { $0.summary.totalGross }
+        return rows.filter {
+            !$0.isDraft && $0.kind.isTaxDocument && $0.kind != .paymentTaxDocument && $0.issueDate.year == year
+        }
+        .compactMap { $0.summary.totalGross }
     }
 }
 
@@ -342,7 +346,7 @@ struct ClientFormSheet: View {
             clients.reload()
             dismiss()
         } catch {
-            self.error = LocalizedStringResource(stringLiteral: String(describing: error))
+            self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
 }

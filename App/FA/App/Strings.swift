@@ -93,6 +93,7 @@ enum L {
     // MARK: Empty states and placeholders
 
     static let noDocuments = r("empty.noDocuments", "No documents yet")
+    static let noMatchingDocuments = r("empty.noMatchingDocuments", "No matching documents")
     static let nothingOverdue = r("empty.nothingOverdue", "Nothing overdue")
     static let noDrafts = r("empty.noDrafts", "No drafts")
     static let noClients = r("empty.noClients", "No clients yet")
@@ -147,6 +148,10 @@ enum L {
     static let clientLabel = r("document.client", "Client")
     static let variableSymbol = r("document.variableSymbol", "Variable symbol")
     static func deductedBy(_ numbers: String) -> LocalizedStringResource { r("document.deductedBy", "Deducted in \(numbers)") }
+    static let advancesDeducted = r("document.advancesDeducted", "Advances deducted")
+    /// The inline error of the document list when its live observation stopped (ADR 0008).
+    static let listStopped = r("document.listStopped", "The document list stopped updating.")
+    static let retry = r("action.retry", "Try again")
     static let closureReason = r("document.closureReason", "Reason")
     static func selectedCount(_ count: Int) -> LocalizedStringResource { r("document.selectedCount", "\(count) selected") }
     static let totalsPerCurrency = r("document.totalsPerCurrency", "Totals per currency")
@@ -206,6 +211,7 @@ enum L {
     static let invalidIBAN = r("validation.iban", "IBAN is not valid.")
     static let invalidBIC = r("validation.bic", "BIC is not valid.")
     static let invalidCzechAccount = r("validation.czechAccount", "Czech account number is not valid (prefix-number/bank code).")
+    static let invalidCurrency = r("validation.currency", "Currency must be a three-letter code, for example EUR, or empty.")
     static let invalidRegistry = r("validation.registry", "Commercial register entry needs a court, section and insert.")
 
     // MARK: Settings (screens-flows.md §2i)
@@ -264,6 +270,10 @@ enum L {
     static func importedRates(_ count: Int) -> LocalizedStringResource { r("rates.imported", "\(count) rates imported") }
     static func latestRate(_ day: String) -> LocalizedStringResource { r("rates.latest", "Latest rate: \(day)") }
     static let rateImportFailed = r("rates.importFailed", "The file could not be read as a ČNB daily or yearly file.")
+    static func rateImportFailedAtLine(_ line: Int) -> LocalizedStringResource {
+        r("rates.importFailedAtLine", "The file could not be read as a ČNB rate file: parsing stopped at line \(line). Nothing was imported.")
+    }
+    static let rateImportBadHeader = r("rates.importBadHeader", "The first line is not the header of a ČNB daily or yearly file. Nothing was imported.")
     static let ratesCoverage = r("rates.coverage", "Coverage")
     static let ratesNote = r("rates.note", "The app makes no network calls. Download the ČNB daily or yearly text file and import it here; drag and drop arrives later.")
     static let sourceCNB = r("rates.sourceCNB", "ČNB")
@@ -282,5 +292,29 @@ enum L {
     // MARK: Errors
 
     static let dbCannotOpen = r("error.dbCannotOpen", "Data can't be opened")
+    static let errorGeneric = r("error.generic", "That did not work. Nothing was changed.")
+    static let errorNotFound = r("error.notFound", "The record no longer exists. It may have been deleted in the meantime.")
+    static let errorFrozen = r("error.frozen", "The document is issued and locked. Corrections go through a credit note (Phase 2).")
+    static let errorNotIssued = r("error.notIssued", "Issue the document first.")
+    static let errorCustomerHasDocuments = r("error.customerHasDocuments", "Documents refer to this client, so it can only be archived.")
+    static func errorValidation(_ issues: String) -> LocalizedStringResource { r("error.validation", "Check the entries: \(issues)") }
+    static let errorAmountOutOfRange = r("error.amountOutOfRange", "The amount is too large.")
+    static func errorCurrencyMismatch(_ code: String) -> LocalizedStringResource { r("error.currencyMismatch", "The amount must be in \(code).") }
+    static let errorSeriesKind = r("error.seriesKind", "This number series does not number this document type. Choose another series in Settings ▸ Numbering.")
+    static let errorAmountNotPositive = r("error.amountNotPositive", "Enter an amount greater than zero.")
+    static func errorCreditAvailable(_ amount: String) -> LocalizedStringResource { r("error.creditAvailable", "At most \(amount) of credit is available.") }
+    static func errorCreditOutstanding(_ amount: String) -> LocalizedStringResource { r("error.creditOutstanding", "At most \(amount) is still open on the document.") }
+    static let errorHasPayments = r("error.hasPayments", "Payments are recorded on this advance, so it cannot be closed as unpaid. Delete them first.")
+    static let errorDeducted = r("error.deducted", "A final invoice deducted this advance, so it cannot be closed as unpaid.")
+    static let errorAlreadyClosed = r("error.alreadyClosed", "The document is closed. Reopen it first.")
+    static let errorNotClosed = r("error.notClosed", "The document is not closed.")
+    static let errorClosureNotApplicable = r("error.closureNotApplicable", "This closing event does not apply to this document type.")
+    static let errorReasonRequired = r("error.reasonRequired", "Enter a reason.")
+    static func errorRefundExceeds(_ amount: String) -> LocalizedStringResource { r("error.refundExceeds", "A refund can be at most \(amount).") }
+    static let errorNotPayable = r("error.notPayable", "A tax document for a payment takes no payments. Record the payment on its advance request.")
+    static let errorDuplicateStatement = r("error.duplicateStatement", "This statement was imported before.")
+    static let errorCorruptRecord = r("error.corruptRecord", "A stored record cannot be read. Quit, restore a copy of the data file and try again.")
+    static let errorAdvanceDeducted = r("error.advanceDeducted", "This tax document for a payment is already deducted by another final invoice.")
+    static let errorCreditCustomer = r("error.creditCustomer", "Credit moves only between documents of the same client.")
     static let dbCannotOpenDetail = r("error.dbCannotOpenDetail", "The database file could not be opened or migrated. Nothing was changed. Quit, restore a copy of the file and try again.")
 }

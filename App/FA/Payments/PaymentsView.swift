@@ -80,7 +80,7 @@ struct PaymentsView: View {
             loadError = nil
         } catch {
             rows = collected
-            loadError = String(describing: error)
+            loadError = ErrorText.message(error)
         }
     }
 }

@@ -29,7 +29,13 @@ existing data to import.
 - **Navigation**: one three-column `NavigationSplitView`. The sidebar holds the sections and the
   document smart filters as `SidebarItem`, a raw-representable value restored with `@SceneStorage`; the
   inspector is the design's right column. `DocumentSmartFilter.matches` is the single definition of each
-  filter, shared by the list, the sidebar badges and the menu.
+  filter, shared by the list, the sidebar badges and the menu. The document selection is cut down to
+  the rows the filter and the search show, so the detail column, the menu bar and ⌫ act only on
+  visible rows.
+- **Errors are sentences.** A failed action shows one line from `ErrorText` (what happened, how to fix
+  it) beside the place it was taken: in the sheet, in the detail, or in the result line under the
+  content column of every section. If the live observation fails, the document list shows the error
+  inline with a Try again button that restarts it.
 - **Menu bar through focused scene values.** `MainActions` carries closures; `AppCommands` reads
   `@FocusedValue(\.mainActions)`, so menu items enable per window. Shortcuts follow
   screens-flows.md: ⌘N / ⇧⌘N / ⌥⌘N new documents, ⌘1–⌘6 sections, ⌥⌘I inspector, ⌘R record payment,

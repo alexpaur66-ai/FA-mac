@@ -26,6 +26,8 @@ struct RateRow: Identifiable, Hashable {
 
 struct RatesView: View {
     let stores: Stores
+    /// Bumped after each import; the window holds it so the coverage column reloads too.
+    @Binding var version: Int
 
     static let currencies: [Currency] = [.eur, .usd, .gbp, .chf, .pln]
 
@@ -33,7 +35,6 @@ struct RatesView: View {
     @State private var rows: [RateRow] = []
     @State private var importing = false
     @State private var resultLine: String?
-    @State private var version = 0
     @State private var sortOrder = [KeyPathComparator(\RateRow.day, order: .reverse)]
     @Environment(\.locale) private var locale
 
@@ -110,7 +111,8 @@ struct RatesView: View {
         rows = ((try? stores.rates.rates(for: Currency.known(currencyCode))) ?? []).map { RateRow(rate: $0) }
     }
 
-    /// Reads the chosen file as UTF-8 or Windows-1250 text and tries the daily format, then the yearly one.
+    /// Reads the chosen file as UTF-8 or Windows-1250 text and imports it with the parser its first line
+    /// names, so a parse error reports the line of the format the file really has (§2g).
     private func handleImport(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
@@ -121,23 +123,32 @@ struct RatesView: View {
                 resultLine = String(localized: L.rateImportFailed)
                 return
             }
-            let count: Int
-            if let daily = try? stores.rates.importDaily(text) {
-                count = daily
-            } else {
-                count = try stores.rates.importYearly(text)
-            }
+            let count = try Self.isYearlyFile(text) ? stores.rates.importYearly(text) : stores.rates.importDaily(text)
             resultLine = String(localized: L.importedRates(count))
             version += 1
         } catch {
-            resultLine = String(localized: L.rateImportFailed) + " (" + String(describing: error) + ")"
+            resultLine = ErrorText.message(error, locale: locale)
         }
+    }
+
+    /// A yearly file ("rok.txt") starts with a "Datum|1 AUD|…" header; a daily file with "04.11.2026 #212".
+    static func isYearlyFile(_ text: String) -> Bool {
+        let firstLine = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+        guard var firstLine else { return false }
+        if firstLine.unicodeScalars.first == "\u{FEFF}" { firstLine.unicodeScalars.removeFirst() }
+        let firstCell = firstLine.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        return firstCell == "Datum" || firstCell == "Date"
     }
 }
 
 /// The detail column of the rates section: the latest stored day per currency.
 struct RatesCoverageView: View {
     let stores: Stores
+    /// The window's import counter; a change reloads the latest days.
+    let version: Int
     @State private var latest: [(Currency, CalendarDay?)] = []
     @Environment(\.locale) private var locale
 
@@ -155,7 +166,7 @@ struct RatesCoverageView: View {
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
+        .task(id: version) {
             latest = RatesView.currencies.map { ($0, try? stores.rates.latestDay(for: $0)) }
         }
     }

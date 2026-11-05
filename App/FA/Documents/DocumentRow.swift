@@ -18,7 +18,10 @@ struct DocumentRow: Identifiable, Hashable {
     var customerName: String { summary.customerName }
     var issueDate: CalendarDay { summary.issueDate }
     var dueDate: CalendarDay { summary.dueDate }
+    /// The sort key of the Total column; a draft without computable totals sorts as zero.
     var total: Decimal { summary.totalGross?.amount ?? 0 }
+    /// The total to display: nil on a draft whose totals cannot be computed yet (a missing rate).
+    var totalOrNil: Decimal? { summary.totalGross?.amount }
     var outstanding: Decimal { state.outstanding.amount }
     var currencyCode: String { summary.currency.code }
     var variableSymbol: String { summary.variableSymbol ?? "" }
@@ -41,8 +44,16 @@ struct DocumentRow: Identifiable, Hashable {
     func matches(search: String) -> Bool {
         let needle = search.folded
         guard !needle.isEmpty else { return true }
-        return [number, customerName, variableSymbol, total.description, outstanding.description]
+        return [number, customerName, variableSymbol, totalOrNil?.description ?? "", outstanding.description]
             .contains { $0.folded.contains(needle) }
+    }
+}
+
+extension DocumentState {
+    /// Record Payment applies: an issued document that is not a payment tax document (the store refuses
+    /// those) and not an advance closed as unpaid. Shared by the toolbar, the context menu and the menu bar.
+    var acceptsPayment: Bool {
+        summary.status == .issued && summary.kind != .paymentTaxDocument && closure?.kind != .closedUnpaid
     }
 }
 

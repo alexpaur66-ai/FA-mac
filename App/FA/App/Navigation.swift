@@ -61,7 +61,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// The smart filters under Documents. The rules follow the aggregation table in screens-flows.md §2a:
-/// Unpaid counts invoices and final invoices only; advances have their own filter.
+/// Unpaid and Overdue count invoices and final invoices only; advances have their own filter.
 enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
     case all, drafts, unpaid, overdue, thisMonth, openAdvances
 
@@ -107,7 +107,11 @@ enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
                 && (state.settlement == .open || state.settlement == .partlyPaid)
                 && !state.markedForCreditNote
         case .overdue:
+            // Like Unpaid: invoices and final invoices only. Overdue advances are counted on their own
+            // line (Open advances), and an advance deducted by a final invoice is never overdue (§2a).
             return state.isOverdue
+                && (summary.kind == .invoice || summary.kind == .finalInvoice)
+                && !state.markedForCreditNote
         case .thisMonth:
             return summary.issueDate.year == today.year && summary.issueDate.month == today.month
         case .openAdvances:

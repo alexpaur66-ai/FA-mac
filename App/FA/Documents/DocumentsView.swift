@@ -31,14 +31,24 @@ struct DocumentsView: View {
     /// The one issued document selected, for Record Payment.
     private var singleIssued: String? {
         guard selection.count == 1, let id = selection.first, let state = documents.state(id: id),
-              state.summary.status == .issued, state.summary.kind != .paymentTaxDocument,
-              state.closure?.kind != .closedUnpaid else { return nil }
+              state.acceptsPayment else { return nil }
         return id
+    }
+
+    /// The selection without the documents the filter or the search hides, so the detail column, the
+    /// menu bar and ⌫ act only on rows the user can see. An id without a state yet (a draft just created,
+    /// before the observation delivered it) stays selected.
+    static func pruned(_ selection: Set<String>, visible: Set<String>, known: (String) -> Bool) -> Set<String> {
+        selection.filter { visible.contains($0) || !known($0) }
     }
 
     var body: some View {
         let rows = self.rows
         VStack(spacing: 0) {
+            if let error = documents.error {
+                listError(error)
+                Divider()
+            }
             if documents.loaded && rows.isEmpty {
                 emptyState
             } else {
@@ -62,6 +72,10 @@ struct DocumentsView: View {
         .searchable(text: $search, placement: .toolbar)
         .onChange(of: filter, initial: true) { _, newFilter in
             sortOrder = newFilter.defaultSortOrder
+        }
+        .onChange(of: rows.map(\.id), initial: true) { _, ids in
+            let kept = Self.pruned(selection, visible: Set(ids), known: { documents.state(id: $0) != nil })
+            if kept != selection { selection = kept }
         }
         .toolbar { toolbar }
     }
@@ -110,7 +124,11 @@ struct DocumentsView: View {
             .customizationID("due")
 
             TableColumn(Text(L.colTotal), value: \.total) { row in
-                MoneyText(amount: row.total, currency: row.currencyCode, locale: locale)
+                if let total = row.totalOrNil {
+                    MoneyText(amount: total, currency: row.currencyCode, locale: locale)
+                } else {
+                    Text(verbatim: "—").textRole(.amountSecondary)
+                }
             }
             .width(min: 100, ideal: 130)
             .alignment(.trailing)
@@ -135,21 +153,39 @@ struct DocumentsView: View {
             contextMenu(ids)
         }
         .onDeleteCommand {
-            for id in selection where documents.state(id: id)?.summary.status == .draft {
-                deleteDraft(id)
+            // Only the selected drafts the table shows; a hidden id is never deleted.
+            for row in rows where selection.contains(row.id) && row.isDraft {
+                deleteDraft(row.id)
             }
         }
     }
 
     @ViewBuilder private func contextMenu(_ ids: Set<String>) -> some View {
         if ids.count == 1, let id = ids.first, let state = documents.state(id: id) {
-            if state.summary.status == .issued && state.summary.kind != .paymentTaxDocument {
+            if state.acceptsPayment {
                 Button { recordPayment(id) } label: { Text(L.recordPayment) }
             }
             if state.summary.status == .draft {
                 Button(role: .destructive) { deleteDraft(id) } label: { Text(L.deleteDraft) }
             }
         }
+    }
+
+    /// The observation stopped: the text and a retry, above the last states the list received.
+    private func listError(_ error: String) -> some View {
+        HStack(spacing: Spacing.m) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(L.listStopped).textRole(.body)
+                Text(verbatim: error).textRole(.caption).textSelection(.enabled)
+            }
+            Spacer()
+            Button { documents.restart() } label: { Text(L.retry) }
+        }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
     }
 
     /// Information only, no buttons (HIG: nothing critical in a bottom bar).
@@ -175,13 +211,17 @@ struct DocumentsView: View {
                 ContentUnavailableView {
                     Label { Text(L.noDrafts) } icon: { Image(systemName: "pencil.circle") }
                 }
-            case .all, .unpaid, .thisMonth, .openAdvances:
+            case .all:
                 ContentUnavailableView {
                     Label { Text(L.noDocuments) } icon: { Image(systemName: Symbols.document) }
                 } description: {
                     EmptyView()
                 } actions: {
                     Button { newDocument(.invoice) } label: { Text(L.newInvoice) }
+                }
+            case .unpaid, .thisMonth, .openAdvances:
+                ContentUnavailableView {
+                    Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
                 }
             }
         }

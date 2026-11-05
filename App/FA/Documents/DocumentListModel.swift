@@ -9,6 +9,7 @@ import Observation
 @MainActor @Observable
 final class DocumentListModel {
     private(set) var states: [DocumentState] = []
+    /// Set when the observation failed and stopped; the list keeps its last states until `restart()`.
     private(set) var error: String?
     /// The day the states were computed for; the observation restarts when the calendar day changes.
     private(set) var today: CalendarDay
@@ -28,7 +29,8 @@ final class DocumentListModel {
         task?.cancel()
     }
 
-    /// Restarts the observation for today's date (the main window calls it at midnight).
+    /// Restarts the observation for today's date (the main window calls it at midnight, the list's
+    /// Try again button after an error).
     func restart() {
         start()
     }
@@ -48,8 +50,10 @@ final class DocumentListModel {
                     self.error = nil
                 }
             } catch {
-                guard !Task.isCancelled else { return }
-                self?.error = String(describing: error)
+                guard !Task.isCancelled, let self else { return }
+                self.error = ErrorText.message(error)
+                // The list is settled, so an empty list shows the error, not an endless empty table.
+                self.loaded = true
             }
         }
     }

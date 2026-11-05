@@ -18,7 +18,10 @@ struct MainSplitView: View {
     @State private var paymentDocumentSelection: String?
     @State private var inspectorPresented = false
     @State private var sheet: MainSheet?
+    /// An inline result or error line from the last menu or window action; cleared when the user navigates.
     @State private var resultLine: String?
+    /// Bumped after every rate import, so the coverage column reloads beside the rates table.
+    @State private var ratesVersion = 0
 
     init(stores: Stores) {
         self.stores = stores
@@ -41,6 +44,21 @@ struct MainSplitView: View {
                     min: LayoutMetrics.sidebar.min, ideal: LayoutMetrics.sidebar.ideal, max: LayoutMetrics.sidebar.max)
         } content: {
             contentColumn
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    // Documents shows the line itself, in place of its selection bar.
+                    if let resultLine, sidebar.section != .documents {
+                        VStack(spacing: 0) {
+                            Divider()
+                            Text(verbatim: resultLine)
+                                .textRole(.caption)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, Spacing.m)
+                                .padding(.vertical, Spacing.xs)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .background(.bar)
+                    }
+                }
                 .navigationSplitViewColumnWidth(
                     min: LayoutMetrics.content.min, ideal: LayoutMetrics.content.ideal, max: LayoutMetrics.content.max)
         } detail: {
@@ -78,7 +96,7 @@ struct MainSplitView: View {
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection)
         case .rates:
-            RatesView(stores: stores)
+            RatesView(stores: stores, version: $ratesVersion)
         case .exports:
             ExportsView(stores: stores)
         }
@@ -113,7 +131,7 @@ struct MainSplitView: View {
                 placeholder(L.noSelection, symbol: "banknote")
             }
         case .rates:
-            RatesCoverageView(stores: stores)
+            RatesCoverageView(stores: stores, version: ratesVersion)
         case .exports:
             ExportsDetailView(stores: stores)
         }
@@ -163,13 +181,15 @@ struct MainSplitView: View {
             actions.deleteDraft = { deleteDraft(id) }
             return actions
         }
-        if summary.kind != .paymentTaxDocument && state.closure?.kind != .closedUnpaid {
+        if state.acceptsPayment {
             actions.recordPayment = { sheet = .recordPayment(id) }
         }
         if state.closure != nil {
             actions.reopen = { reopen(id) }
         } else {
-            if summary.kind == .advanceRequest && state.paid.isZero && !state.deductedInFinal {
+            // The store refuses while any payment row exists, even a payment and its refund that net to zero.
+            if summary.kind == .advanceRequest && state.paid.isZero && !state.deductedInFinal
+                && (try? stores.documents.payments(for: id).isEmpty) == true {
                 actions.closeAdvanceUnpaid = { sheet = .closure(id, .closedUnpaid) }
             }
             if summary.kind.isTaxDocument {
@@ -190,8 +210,9 @@ struct MainSplitView: View {
     private func newDraft(_ kind: DocumentKind) {
         do {
             guard let profile = try stores.profile.load() else {
-                resultLine = String(localized: L.setUpCompanyFirst)
+                // show() clears the line, so it comes first; the Overview carries the setup card.
                 show(.section(.overview))
+                resultLine = String(localized: L.setUpCompanyFirst)
                 return
             }
             let selectedClient = sidebar.section == .clients ? clientSelection : nil
@@ -208,7 +229,7 @@ struct MainSplitView: View {
             sidebar = .filter(.drafts)
             documentSelection = [document.id]
         } catch {
-            resultLine = String(describing: error)
+            resultLine = ErrorText.message(error)
         }
     }
 
@@ -218,7 +239,7 @@ struct MainSplitView: View {
             documentSelection.remove(id)
             if overviewSelection == id { overviewSelection = nil }
         } catch {
-            resultLine = String(describing: error)
+            resultLine = ErrorText.message(error)
         }
     }
 
@@ -226,7 +247,7 @@ struct MainSplitView: View {
         do {
             try stores.documents.reopen(id: id)
         } catch {
-            resultLine = String(describing: error)
+            resultLine = ErrorText.message(error)
         }
     }
 
