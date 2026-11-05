@@ -136,7 +136,7 @@ enum L {
     // MARK: Document detail (screens-flows.md §2b)
 
     static let draftTitle = r("document.draft", "Draft")
-    static let draftNote = r("document.draftNote", "The draft editor arrives in the next step. This draft carries the client's defaults and can be deleted.")
+    static let draftNote = r("document.draftNote", "Drafts open in the editor. This draft carries the client's defaults and can be deleted.")
     static func lockLine(_ issued: String) -> LocalizedStringResource {
         r("document.lockLine", "Issued \(issued) · locked. Corrections via credit note (Phase 2).")
     }
@@ -317,4 +317,127 @@ enum L {
     static let errorAdvanceDeducted = r("error.advanceDeducted", "This tax document for a payment is already deducted by another final invoice.")
     static let errorCreditCustomer = r("error.creditCustomer", "Credit moves only between documents of the same client.")
     static let dbCannotOpenDetail = r("error.dbCannotOpenDetail", "The database file could not be opened or migrated. Nothing was changed. Quit, restore a copy of the file and try again.")
+
+    // MARK: Draft editor (screens-flows.md §2c, ADR 0009)
+
+    static let editorDraftSaved = r("editor.saved", "Draft · saved")
+    static let editorDraftSaving = r("editor.saving", "Draft · saving…")
+    static func editorDraftNotSaved(_ error: String) -> LocalizedStringResource { r("editor.notSaved", "Draft · not saved: \(error)") }
+    static let readyToIssue = r("editor.ready", "Ready to issue")
+    static let oneProblem = r("editor.oneProblem", "1 problem")
+    static func problems(_ count: Int) -> LocalizedStringResource { r("editor.problems", "\(count) problems") }
+    static let issueButton = r("editor.issueButton", "Issue")
+    static let duplicate = r("menu.duplicate", "Duplicate as Draft")
+    static let createFinalInvoice = r("menu.createFinalInvoice", "Create Final Invoice…")
+    static let createTaxDocument = r("menu.createTaxDocument", "Create Tax Document")
+    static let later = r("action.later", "Later")
+    static let paymentRecordedAdvance = r("rp.recordedAdvance", "Payment recorded. Each payment on an advance needs its own tax document, within 15 days of the payment.")
+
+    static let fieldClient = r("editor.client", "Client")
+    static let newClientEllipsis = r("editor.newClient", "New Client…")
+    static let vatIDMissing = r("editor.vatIDMissing", "VAT ID missing")
+    static let addressMissing = r("editor.addressMissing", "Address missing")
+    static let fieldType = r("editor.type", "Type")
+    static let fieldIssueDate = r("editor.issueDate", "Issue date")
+    static let fieldTaxPoint = r("editor.taxPoint", "Tax point (DUZP)")
+    static let sameAsIssueDate = r("editor.sameAsIssueDate", "Same as the issue date")
+    static let fieldDue = r("editor.due", "Due")
+    static func dueDays(_ days: Int) -> LocalizedStringResource { r("editor.dueDays", "\(days) days") }
+    static let fieldTreatment = r("editor.treatment", "VAT treatment")
+    static let treatmentCzechVAT = r("editor.treatment.czech", "Czech VAT (rate per line)")
+    static let treatmentReverseCharge = r("editor.treatment.reverseCharge", "EU reverse charge (customer pays the VAT)")
+    static let treatmentOutsideEU = r("editor.treatment.outsideEU", "Outside the EU (not subject to Czech VAT)")
+    static let treatmentExempt = r("editor.treatment.exempt", "Exempt")
+    static let exemptReference = r("editor.exemptReference", "Exemption reference (§)")
+    static let fieldBankAccount = r("editor.bankAccount", "Bank account")
+    static let defaultAccount = r("editor.defaultAccount", "Default account for the currency")
+    static let fieldOrderReference = r("editor.orderReference", "Order reference")
+    static let fieldRelatedDocument = r("editor.relatedDocument", "Related document number")
+    static let notesOnPDF = r("editor.notesOnPDF", "Notes on the PDF")
+    static let fieldNote = r("editor.note", "Note above the lines")
+    static let notATaxDocument = r("editor.notATaxDocument", "An advance invoice is not a tax document. The tax document is issued when the payment arrives.")
+
+    static let linesTitle = r("editor.lines", "Lines")
+    static let colDescription = r("editor.col.description", "Description")
+    static let colQty = r("editor.col.qty", "Qty")
+    static let colUnit = r("editor.col.unit", "Unit")
+    static let colUnitPrice = r("editor.col.unitPrice", "Unit price")
+    static let colDiscount = r("editor.col.discount", "Discount %")
+    static let colVATRate = r("editor.col.vatRate", "VAT rate")
+    static let colLineTotal = r("editor.col.lineTotal", "Line total")
+    static let addLine = r("editor.addLine", "Add Line Item")
+    static let deleteLine = r("editor.deleteLine", "Delete Line")
+    static let insertLineBelow = r("editor.insertLineBelow", "Insert Line Below")
+    static let moveLineUp = r("editor.moveLineUp", "Move Line Up")
+    static let moveLineDown = r("editor.moveLineDown", "Move Line Down")
+    static let rateReverseCharge = r("editor.rate.rc", "RC")
+    static let rateOutsideEU = r("editor.rate.outsideEU", "—")
+    static let rateExempt = r("editor.rate.exempt", "exempt")
+
+    static let base = r("editor.base", "Base")
+    static let vat = r("editor.vat", "VAT")
+    static let total = r("editor.total", "Total")
+    static let amountDue = r("editor.amountDue", "Amount due")
+    static let vatInCZK = r("editor.vatInCZK", "VAT in CZK")
+    static let totalsUnavailable = r("editor.totalsUnavailable", "Totals cannot be computed yet")
+
+    static func rateMissing(_ currency: String, _ day: String) -> LocalizedStringResource { r("editor.rateMissing", "Rate \(currency) for \(day) is missing") }
+    static func rateFieldLabel(_ currency: String) -> LocalizedStringResource { r("editor.rateField", "CZK per 1 \(currency)") }
+    static let saveRate = r("editor.saveRate", "Save rate")
+    static func rateLine(_ label: String, _ day: String, _ source: String) -> LocalizedStringResource { r("editor.rateLine", "\(label) · for \(day) · \(source)") }
+    static func rateFallback(_ wanted: String, _ used: String) -> LocalizedStringResource { r("editor.rateFallback", "No rate published for \(wanted); the last published rate, \(used), is used") }
+
+    static let deductionsTitle = r("editor.deductions", "Advances deducted")
+    static let addReceipt = r("editor.addReceipt", "Add tax document…")
+    static let noReceiptsToDeduct = r("editor.noReceipts", "No issued tax documents of this client in this currency are open")
+
+    static func issueTitle(_ type: String, _ number: String) -> LocalizedStringResource { r("issue.title", "Issue \(type) \(number)?") }
+    static let issueSubtitle = r("issue.subtitle", "Once issued, the document can't be edited or deleted.")
+    static let seriesLabel = r("issue.series", "Numbering series")
+    static let noSeriesForKind = r("issue.noSeries", "No numbering series numbers this document type. Set one up in Settings ▸ Numbering.")
+    static let summaryType = r("issue.type", "Type")
+    static let summaryClient = r("issue.client", "Client")
+    static let summaryDates = r("issue.dates", "Dates")
+    static let summaryTotal = r("issue.total", "Total")
+    static let summaryRate = r("issue.rate", "Rate")
+    static let summaryPayment = r("issue.payment", "Payment")
+    static let noVATReverseCharge = r("issue.noVATReverseCharge", "no VAT, the customer pays it")
+    static let noVATOutsideEU = r("issue.noVATOutsideEU", "no VAT, not subject to Czech VAT")
+    static func issuedOnDay(_ day: String) -> LocalizedStringResource { r("issue.issuedOn", "Issued \(day)") }
+    static func taxPointOn(_ day: String) -> LocalizedStringResource { r("issue.taxPointOn", "Tax point \(day)") }
+    static func dueOnDay(_ day: String) -> LocalizedStringResource { r("issue.dueOn", "Due \(day)") }
+    static func vsPredicted(_ vs: String) -> LocalizedStringResource { r("issue.vs", "VS \(vs)") }
+    static let paymentFromProfile = r("issue.paymentFromProfile", "the company's account for this currency")
+    static let noPayment = r("issue.noPayment", "no bank account for this currency")
+    static let blockingTitle = r("issue.blocking", "Fix before issuing")
+    static let checkTitle = r("issue.check", "Check before issuing")
+    static let infoTitle = r("issue.info", "Notes")
+    static let checkedLabel = r("issue.checked", "Checked")
+    static func issueDateNotToday(_ day: String) -> LocalizedStringResource { r("issue.dateNotToday", "The issue date \(day) is not today") }
+    static let setToToday = r("issue.setToToday", "Set to today")
+    static func issueFailed(_ error: String) -> LocalizedStringResource { r("issue.failed", "Issue failed: \(error)") }
+    static func issuedResult(_ number: String) -> LocalizedStringResource { r("issue.result", "Issued \(number)") }
+    static let goToSettings = r("issue.goToSettings", "Open Settings")
+    static let draftGone = r("editor.gone", "This draft no longer exists.")
+    static func issueTitleNoNumber(_ type: String) -> LocalizedStringResource { r("issue.titleNoNumber", "Issue \(type)?") }
+    static func vatID(_ value: String) -> LocalizedStringResource { r("issue.vatID", "VAT ID \(value)") }
+    static let noVATExempt = r("issue.noVATExempt", "no VAT, exempt")
+    static let taxPointOtherMonth = r("issue.taxPointOtherMonth", "The tax point is in a different month from the issue date")
+    static let vatAfterAdvances = r("editor.vatAfterAdvances", "VAT after advances")
+    static let invalidNumber = r("editor.invalidNumber", "Not a number. The previous value is kept until this is fixed.")
+    static let taxPointIsPaymentDate = r("editor.taxPointIsPaymentDate", "the day the payment was received")
+    static func advanceAlreadyDeductedIn(_ receipt: String, _ finalInvoice: String) -> LocalizedStringResource {
+        r("issue.advanceAlreadyDeducted", "Tax document \(receipt) is already deducted in final invoice \(finalInvoice). Remove it from Advances deducted.")
+    }
+    static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {
+        r("error.dayBeforeSeriesYear", "The issue date is before the series year \(year). Change the issue date or pick another series.")
+    }
+    static func finalInvoiceReceiptsPending(_ days: String) -> LocalizedStringResource {
+        r("finalInvoice.receiptsPending", "Issue the tax document for the payment of \(days) first; otherwise its amount would not be deducted.")
+    }
+    static func draftChangesNotSaved(_ error: String) -> LocalizedStringResource {
+        r("editor.changesNotSaved", "The last changes to the draft were not saved: \(error)")
+    }
+    static let createTaxDocumentForPayment = r("menu.createTaxDocumentForPayment", "Create Tax Document for Payment")
+    static let openTaxDocument = r("document.openTaxDocument", "Open Tax Document")
 }

@@ -1,5 +1,5 @@
-// The detail column for one document: the issued view (read-only header, lock line, payments, the
-// prominent Record Payment), or the draft placeholder until the editor arrives (screens-flows.md §2b).
+// The detail column for one issued document: read-only header, lock line, payments, the prominent
+// Record Payment and the next step of the chain (screens-flows.md §2b). Drafts open in DraftEditorView.
 
 import InvoicingCore
 import InvoicingData
@@ -11,6 +11,13 @@ struct DocumentDetailView: View {
     let documentID: String
     let recordPayment: @MainActor (String) -> Void
     let deleteDraft: @MainActor (String) -> Void
+    /// Step 4 of the advance flow (screens-flows.md §2d): a final invoice draft that deducts this advance.
+    var createFinalInvoice: (@MainActor (String) -> Void)? = nil
+    /// Step 3 of the advance flow: the tax document for a received payment that has none (after "Later",
+    /// or after its draft was deleted).
+    var createTaxDocument: (@MainActor (DocumentPayment) -> Void)? = nil
+    /// Opens a payment's draft tax document in the editor.
+    var openDraft: (@MainActor (String) -> Void)? = nil
 
     @State private var payments: [DocumentPayment] = []
     /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
@@ -124,7 +131,7 @@ struct DocumentDetailView: View {
                 closureLine(closure)
             }
             if summary.status == .issued {
-                paymentsSection
+                paymentsSection(state)
             }
             actions(state)
             if let loadError {
@@ -165,7 +172,7 @@ struct DocumentDetailView: View {
         }
     }
 
-    private var paymentsSection: some View {
+    private func paymentsSection(_ state: DocumentState) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.paymentsSection).textRole(.sectionTitle)
             if payments.isEmpty {
@@ -184,9 +191,21 @@ struct DocumentDetailView: View {
                         Image(systemName: "lock.fill")
                             .foregroundStyle(.secondary)
                             .help(Text(L.paymentLocked))
+                    } else if state.summary.kind == .advanceRequest, payment.kind == .received {
+                        if let receiptID = payment.receiptDocumentID {
+                            if let openDraft {
+                                Button { openDraft(receiptID) } label: { Text(L.openTaxDocument) }
+                            }
+                        } else if let createTaxDocument {
+                            Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
+                        }
                     }
                 }
                 .contextMenu {
+                    if state.summary.kind == .advanceRequest, payment.kind == .received, payment.receiptDocumentID == nil,
+                       let createTaxDocument {
+                        Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
+                    }
                     if !payment.receiptIssued {
                         Button(role: .destructive) { deletePayment(payment.id) } label: { Text(L.delete) }
                     }
@@ -204,6 +223,11 @@ struct DocumentDetailView: View {
                     Label { Text(L.recordPayment) } icon: { Image(systemName: "banknote") }
                 }
                 .buttonStyle(.borderedProminent)
+                if state.summary.kind == .advanceRequest, !state.deductedInFinal, let createFinalInvoice {
+                    Button { createFinalInvoice(documentID) } label: {
+                        Label { Text(L.createFinalInvoice) } icon: { Image(systemName: Symbols.finalInvoice) }
+                    }
+                }
             }
         }
     }

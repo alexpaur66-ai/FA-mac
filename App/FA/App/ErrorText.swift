@@ -22,6 +22,10 @@ enum ErrorText {
                 return String(localized: L.rateImportFailed)
             }
         }
+        if let numbering = error as? DocumentNumberSeries.NumberingError,
+           case .dayBeforeSeriesYear(_, let seriesYear) = numbering {
+            return String(localized: L.errorDayBeforeSeriesYear(String(seriesYear)))
+        }
         var text = String(localized: L.errorGeneric)
         if let detail = (error as? LocalizedError)?.errorDescription, !detail.isEmpty {
             text += " (" + detail + ")"
