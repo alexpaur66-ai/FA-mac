@@ -446,7 +446,8 @@ public struct DocumentStore: Sendable {
     /// matched by hand to this document (as `insertPayment` does), so the money does not drop out of every list.
     /// With `deletingDraftReceipt`, the draft payment tax document created for the payment is deleted in the
     /// same transaction instead of staying behind as a receipt of nothing; the `paymentDeleted` event names the
-    /// draft either way (`receiptDeleted` or `receiptKept`).
+    /// draft either way (`receiptDeleted` or `receiptKept`). The other leg of an applied credit keeps its draft
+    /// receipt, and its own `paymentDeleted` event names it (`receiptKept`).
     public func deletePayment(id: String, deletingDraftReceipt: Bool = false, now: Date = Date()) throws {
         try database.queue.write { db in
             guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
@@ -462,9 +463,12 @@ public struct DocumentStore: Sendable {
             }
             if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
                 if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
+                // The other leg's draft receipt stays behind (the flag is about the clicked payment's receipt); its event names it.
+                var relatedDetails = ["payment": relatedID, "kind": related.kind]
+                if let receiptID = related.receiptDocumentID { relatedDetails["receiptKept"] = receiptID }
                 try related.delete(db)
                 try AuditLog.append(db, entity: "document", id: related.documentID, action: "paymentDeleted",
-                                    details: ["payment": relatedID, "kind": related.kind], at: stamp)
+                                    details: relatedDetails, at: stamp)
             }
             try payment.delete(db)
             try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted", details: details, at: stamp)

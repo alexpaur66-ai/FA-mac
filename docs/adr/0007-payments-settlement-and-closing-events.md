@@ -92,5 +92,6 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
 - Amendment (PR 19, November 2026): `recordPayment` and `recordRefund` take the row's `id` (a new UUID by
   default) so the app's Undo records a deleted payment again under its old id and the audit trail names one
   payment; `deletePayment` names the draft payment tax document it deleted (`receiptDeleted`) or left behind
-  (`receiptKept`); `DocumentState.deductedBy` names a final invoice once, however many receipts of the
-  advance it deducted.
+  (`receiptKept`), and the other leg of an applied credit keeps its draft, which that leg's own event names
+  the same way; `DocumentState.deductedBy` names a final invoice once, however many receipts of the advance
+  it deducted.

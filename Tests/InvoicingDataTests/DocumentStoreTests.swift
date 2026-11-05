@@ -1096,6 +1096,37 @@ import InvoicingCore
         #expect(try store.payments(for: advance.id).count == 1)
     }
 
+    @Test func deletingTheOtherLegOfACreditNamesItsKeptDraftReceipt() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        func czk(_ text: String) -> Money { Money(Fixtures.d(text), .czk) }
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        // An overpaid invoice of the same customer pays 500 CZK of the advance request by credit.
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        try store.recordPayment(documentID: "doc-cz", on: day, amount: czk("12600"), now: Fixtures.now)
+        let creditIn = try store.applyCredit(from: "doc-cz", to: advance.id, amount: czk("500"), on: day, now: Fixtures.now)
+        #expect(creditIn.kind == .creditIn)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("500"), on: day), now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: creditIn.id, documentID: "dd1", now: Fixtures.now)
+
+        // Deleting the creditOut leg on the invoice deletes the creditIn leg too; its draft receipt stays and is named.
+        let creditOutID = creditIn.relatedPaymentID ?? ""
+        #expect(try store.payments(for: "doc-cz").contains(where: { $0.id == creditOutID && $0.kind == .creditOut }))
+        try store.deletePayment(id: creditOutID, deletingDraftReceipt: true, now: Fixtures.now)
+        #expect(try store.payments(for: advance.id).isEmpty)
+        #expect(try store.document(id: "dd1")?.status == .draft)
+        let deleted = try AuditLog(database).events(entity: "document", id: advance.id).last(where: { $0.action == "paymentDeleted" })
+        #expect(deleted?.details?["payment"] == creditIn.id)
+        #expect(deleted?.details?["receiptKept"] == "dd1")
+        #expect(deleted?.details?["receiptDeleted"] == nil)
+        let source = try AuditLog(database).events(entity: "document", id: "doc-cz").last(where: { $0.action == "paymentDeleted" })
+        #expect(source?.details?["payment"] == creditOutID)
+        #expect(source?.details?["receiptKept"] == nil)
+    }
+
     @Test func anAdvancePaidInTwoPartsNamesItsFinalInvoiceOnce() throws {
         let database = try Fixtures.prepared()
         try Fixtures.addAdvanceSeries(database)
