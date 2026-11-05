@@ -36,8 +36,10 @@ public struct DocumentState: Hashable, Sendable, Identifiable {
     /// Days since the due date while overdue, otherwise 0.
     public let daysOverdue: Int
     /// Advance requests: each payment received needs a payment tax document. False for an issued advance
-    /// whose lines are all § 64 goods, which a final invoice settles as paid in advance instead (ADR 0012);
-    /// true for every other one until the customer setting exists (screens-flows.md §6, question 5).
+    /// whose lines are all § 64 goods, which a final invoice settles as paid in advance instead (ADR 0012),
+    /// unless a payment of it already has a payment tax document (a draft or an issued one, from before v3):
+    /// such an advance keeps that flow. True for every other one until the customer setting exists
+    /// (screens-flows.md §6, question 5).
     public let taxDocumentRequired: Bool
     /// Advance requests: at least one payment was received and every received payment has an issued
     /// payment tax document.

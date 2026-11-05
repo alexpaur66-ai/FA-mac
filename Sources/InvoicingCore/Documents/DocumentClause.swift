@@ -10,8 +10,11 @@ public enum DocumentClause: Hashable, Sendable {
     case intraCommunitySupply
     /// A service with the place of supply outside the Czech Republic (§ 9 odst. 1 ZDPH); informative.
     case outsideScope
-    /// Printed on every advance request.
+    /// Printed on every advance request but one for § 64 goods alone.
     case notATaxDocument
+    /// Printed on an advance request whose lines are all § 64 goods: money received on it takes no payment
+    /// tax document (ADR 0012), so the sentence that promises one is left out.
+    case notATaxDocumentForGoods
     /// The opening sentence of a payment tax document.
     case paymentReceived(on: CalendarDay, advanceNumber: String?)
     /// The advances a final invoice deducts (§ 37a ZDPH).
@@ -47,6 +50,10 @@ public enum DocumentClause: Hashable, Sendable {
             return "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby."
         case (.notATaxDocument, .english):
             return "This is not a tax document. A tax document will be issued upon receipt of the payment."
+        case (.notATaxDocumentForGoods, .czech):
+            return "Toto není daňový doklad."
+        case (.notATaxDocumentForGoods, .english):
+            return "This is not a tax document."
         case (.paymentReceived(let day, let advanceNumber), .czech):
             let reference = advanceNumber.map { " na základě zálohové faktury č. \($0)" } ?? ""
             return "Daňový doklad k platbě přijaté dne \(day.czechString)\(reference)."
@@ -74,7 +81,7 @@ public enum DocumentClause: Hashable, Sendable {
     public static func clauses(for document: Document, totals: DocumentTotals? = nil) -> [DocumentClause] {
         var result: [DocumentClause] = []
         if !document.kind.isTaxDocument {
-            result.append(.notATaxDocument)
+            result.append(document.isIntraCommunityGoodsOnly ? .notATaxDocumentForGoods : .notATaxDocument)
         }
         if document.kind == .paymentTaxDocument, let day = document.taxPointDate {
             result.append(.paymentReceived(on: day, advanceNumber: document.relatedDocumentNumber))

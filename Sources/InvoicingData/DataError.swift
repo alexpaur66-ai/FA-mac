@@ -81,6 +81,15 @@ public enum DataError: Error, Equatable, Sendable {
     /// A payment is settled as paid in advance by one final invoice only.
     case advanceAlreadySettled(advanceNumber: String, by: String)
     /// The advances paid listed for an advance request exceed what it holds: its payments net of refunds,
-    /// less what other final invoices settled; `available` is that amount.
+    /// less what other final invoices settled and what its payments with an issued payment tax document
+    /// received (deducted under § 37a ZDPH instead); `available` is that amount.
     case paidAdvancesExceedPaid(advanceNumber: String, available: Money, listed: Money)
+    /// The payment is one leg of an applied credit; an issued final invoice settled the other leg as paid in
+    /// advance (ADR 0012), so the credit cannot go.
+    case relatedPaymentSettled(paymentID: String, relatedPaymentID: String, finalInvoiceNumber: String)
+    /// Issued final invoices settled payments of the advance request as paid in advance (ADR 0012), and
+    /// deleting the payment would leave the advance holding less than they settled (with what its payments with
+    /// an issued payment tax document received), or holding money no final invoice can list any more (a refund
+    /// or credit moved away that a payment was settled net of). `finalInvoiceNumber` names the last of them.
+    case paymentBacksSettlement(paymentID: String, finalInvoiceNumber: String)
 }

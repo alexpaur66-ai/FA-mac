@@ -113,6 +113,18 @@ import Testing
         #expect(!advance.isIntraCommunityGoodsOnly)
     }
 
+    @Test func aGoodsAdvanceRequestPromisesNoTaxDocument() {
+        // Money received on it takes no payment tax document (ADR 0012), so it does not promise one.
+        var advance = DocumentFixtures.euGoodsInvoice()
+        advance.kind = .advanceRequest
+        #expect(DocumentClause.clauses(for: advance) == [.notATaxDocumentForGoods, .intraCommunitySupply])
+        #expect(DocumentClause.notATaxDocumentForGoods.text(language: .czech) == "Toto není daňový doklad.")
+        #expect(DocumentClause.notATaxDocumentForGoods.text(language: .english) == "This is not a tax document.")
+        // With a line under another treatment it keeps the payment tax document and the sentence promising it.
+        advance.lines.append(DocumentLine(text: "Transport", unitPrice: 50, treatment: .reverseChargeEU))
+        #expect(DocumentClause.clauses(for: advance).first == .notATaxDocument)
+    }
+
     @Test func documentsSavedBeforeTheFieldDecode() throws {
         let document = Self.goodsFinalInvoice(paid: [Self.paid("400")])
         let data = try JSONEncoder().encode(document)

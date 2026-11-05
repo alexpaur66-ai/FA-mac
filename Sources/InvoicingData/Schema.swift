@@ -297,6 +297,13 @@ enum Schema {
                 CREATE TRIGGER paidAdvance_frozen_delete BEFORE DELETE ON paidAdvance
                 BEGIN SELECT RAISE(ABORT, 'advances settled by an issued final invoice are frozen'); END
                 """)
+            // REPLACE removes the conflicting row without firing the delete trigger (recursive_triggers is off), so
+            // an insert that would overwrite a link (same id) or take its payment (unique) is aborted before it starts.
+            try db.execute(sql: """
+                CREATE TRIGGER paidAdvance_frozen_replace BEFORE INSERT ON paidAdvance
+                WHEN EXISTS (SELECT 1 FROM paidAdvance WHERE id = NEW.id OR paymentID = NEW.paymentID)
+                BEGIN SELECT RAISE(ABORT, 'advances settled by an issued final invoice are frozen'); END
+                """)
             // A settled payment rests under the final invoice: its money may not change and it may not go. Its
             // links may (a draft tax document deleted, a bank line unmatched); the store refuses a tax document.
             try db.execute(sql: """

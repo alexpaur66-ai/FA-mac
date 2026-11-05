@@ -119,6 +119,10 @@ enum ErrorText {
             return L.errorAdvanceSettled(advanceNumber, finalInvoiceNumber)
         case .paidAdvancesExceedPaid(let advanceNumber, let available, _):
             return L.errorPaidAdvancesExceed(advanceNumber, amount(available))
+        case .relatedPaymentSettled(_, _, let finalInvoiceNumber):
+            return L.errorRelatedPaymentSettled(finalInvoiceNumber)
+        case .paymentBacksSettlement(_, let finalInvoiceNumber):
+            return L.errorPaymentBacksSettlement(finalInvoiceNumber)
         default:
             return L.errorGeneric
         }

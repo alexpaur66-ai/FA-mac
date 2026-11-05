@@ -209,7 +209,8 @@ public struct DocumentStore: Sendable {
     /// Records money paid back to the customer, usually an overpayment: `amount` is the positive sum
     /// returned, stored as a negative `refund` payment. It may not exceed what the document holds: its net
     /// paid amount or, for a final invoice whose advances exceed the supply, the credit the customer holds,
-    /// and on an advance request less what final invoices settled as paid in advance (`refundExceedsAvailable`).
+    /// and on an advance request less what final invoices settled as paid in advance and, once they did, what
+    /// its payments with an issued payment tax document received (`refundExceedsAvailable`).
     /// From a bank statement it must be a debit line in the document's
     /// currency, allocated like a credit line (`transactionOverallocated`). `id` as in `recordPayment`.
     @discardableResult
@@ -273,11 +274,11 @@ public struct DocumentStore: Sendable {
     /// (`documentNotPayable`) and in the amount's currency; the amount is not zero and has the sign of its
     /// kind; a refund does not exceed what the document holds (`refundExceedsAvailable`: the net paid
     /// amount, or the credit of a final invoice whose advances exceed the supply), and a refund or credit moved
-    /// away from an advance request leaves what final invoices settled as paid in advance on it (ADR 0012,
-    /// `refundExceedsAvailable` too); a bank transaction, when given, is in
-    /// the currency, in the same direction (a credit line for money received, a debit line for a refund) and
-    /// not used up by earlier payments, allocation being checked on absolute values. An unmatched or ignored
-    /// transaction becomes matched to the document.
+    /// away from an advance request leaves what final invoices settled as paid in advance on it, with what its
+    /// issued payment tax documents cover (ADR 0012, `leftToList`, `refundExceedsAvailable` too); a bank
+    /// transaction, when given, is in the currency, in the same direction (a credit line for money received, a
+    /// debit line for a refund) and not used up by earlier payments, allocation being checked on absolute
+    /// values. An unmatched or ignored transaction becomes matched to the document.
     static func insertPayment(_ db: Database, id: String = UUID().uuidString, documentID: String, on day: CalendarDay, amount: Money,
                               kind: DocumentPaymentKind, bankTransactionID: String?, relatedPaymentID: String?,
                               note: String?, at stamp: String) throws -> DocumentPayment {
@@ -295,13 +296,13 @@ public struct DocumentStore: Sendable {
         guard units != 0, (units > 0) == kind.isIncoming else { throw DataError.invalidPaymentAmount(amount) }
         if !kind.isIncoming, record.kind == DocumentKind.advanceRequest.rawValue {
             // Money a final invoice settled as paid in advance stays on the advance (ADR 0012): a refund or a
-            // credit moved away may take only the rest.
+            // credit moved away may take only the rest, less what payments with an issued payment tax document
+            // received, which a final invoice deducts under § 37a ZDPH instead.
             let settled = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM paidAdvance WHERE advanceRequestID = ?",
                                              arguments: [documentID]) ?? 0
             if settled > 0 {
-                let held = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM documentPayment WHERE documentID = ?",
-                                              arguments: [documentID]) ?? 0
-                let available = max(held - settled, 0)
+                let left = try Self.leftToList(db, advanceRequestID: documentID)
+                let available = max(left, 0)
                 guard -units <= available else {
                     throw DataError.refundExceedsAvailable(documentID: documentID, available: MinorUnits.money(available, currency),
                                                            requested: MinorUnits.money(-units, currency))
@@ -466,7 +467,12 @@ public struct DocumentStore: Sendable {
 
     /// Deletes a payment; refused while its payment tax document is issued (`paymentLocked`) or once a final
     /// invoice settled it as paid in advance (`paymentSettled`). Deleting one leg of an applied
-    /// credit deletes the other leg too, so both documents stay consistent. A bank transaction the payment
+    /// credit deletes the other leg too, so both documents stay consistent; refused while the other leg's tax
+    /// document is issued (`relatedPaymentLocked`) or a final invoice settled the other leg
+    /// (`relatedPaymentSettled`). On an advance request that final invoices settled payments of (ADR 0012), a
+    /// deletion that would leave it holding less than they settled, or holding money no final invoice can list
+    /// (a refund or credit moved away that a payment was settled net of), is refused as well
+    /// (`paymentBacksSettlement`, see `checkSettledAfterDeletion`). A bank transaction the payment
     /// was taken from goes back to the unmatched list once no payment is taken from it any more, when it was
     /// matched by hand to this document (as `insertPayment` does), so the money does not drop out of every list.
     /// With `deletingDraftReceipt`, the draft payment tax document created for the payment is deleted in the
@@ -487,10 +493,11 @@ public struct DocumentStore: Sendable {
             } else if let receiptID = payment.receiptDocumentID {
                 details["receiptKept"] = receiptID
             }
+            var deletedRelated: DocumentPaymentRecord?
             if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
                 if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
-                if try PaidAdvanceRecord.filter(Column("paymentID") == relatedID).fetchCount(db) > 0 {
-                    throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID)
+                if let settled = try PaidAdvanceRecord.filter(Column("paymentID") == relatedID).fetchOne(db) {
+                    throw DataError.relatedPaymentSettled(paymentID: id, relatedPaymentID: relatedID, finalInvoiceNumber: settled.finalInvoiceNumber)
                 }
                 // The other leg's draft receipt stays behind (the flag is about the clicked payment's receipt); its event names it.
                 var relatedDetails = ["payment": relatedID, "kind": related.kind]
@@ -498,8 +505,15 @@ public struct DocumentStore: Sendable {
                 try related.delete(db)
                 try AuditLog.append(db, entity: "document", id: related.documentID, action: "paymentDeleted",
                                     details: relatedDetails, at: stamp)
+                deletedRelated = related
             }
             try payment.delete(db)
+            // What final invoices settled as paid in advance stays covered on each advance the deletion touched (ADR 0012).
+            try Self.checkSettledAfterDeletion(db, documentID: payment.documentID, deletedOutgoing: payment.amount < 0, paymentID: id)
+            if let deletedRelated {
+                try Self.checkSettledAfterDeletion(db, documentID: deletedRelated.documentID, deletedOutgoing: deletedRelated.amount < 0,
+                                                   paymentID: id)
+            }
             try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted", details: details, at: stamp)
             try Self.releaseTransaction(db, of: payment, at: stamp)
         }

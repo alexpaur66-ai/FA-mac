@@ -52,16 +52,14 @@ extension DocumentStore {
     /// The payments of one issued advance request that a final invoice can still list as paid in advance:
     /// received (or credited) without an issued payment tax document and settled by no final invoice, oldest
     /// first, when all of the advance's lines are § 64 goods. Each is offered for at most what the advance
-    /// still holds (payments net of refunds and credit moved away, less what final invoices settled), so a
-    /// refund is never listed as paid; a payment with nothing left is left out.
+    /// still holds (`leftToList`: payments net of refunds and credit moved away, less what final invoices
+    /// settled and what the payments with an issued payment tax document received, which a final invoice
+    /// deducts under § 37a ZDPH instead), so a refund is never listed as paid; a payment with nothing left is
+    /// left out.
     static func candidates(_ db: Database, advance: DocumentRecord) throws -> [PaidAdvanceCandidate] {
         guard let number = advance.number, try advance.isIntraCommunityGoodsOnly() else { return [] }
         let currency = Currency(code: advance.currency)
-        let held = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM documentPayment WHERE documentID = ?",
-                                      arguments: [advance.id]) ?? 0
-        let settled = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM paidAdvance WHERE advanceRequestID = ?",
-                                         arguments: [advance.id]) ?? 0
-        var left = held - settled
+        var left = try Self.leftToList(db, advanceRequestID: advance.id)
         var result: [PaidAdvanceCandidate] = []
         let payments = try DocumentPaymentRecord.filter(Column("documentID") == advance.id)
             .order(Column("paidOn"), Column("createdAt")).fetchAll(db)
@@ -77,14 +75,31 @@ extension DocumentStore {
         return result
     }
 
+    /// What an advance request still holds for final invoices to list as paid in advance (ADR 0012), in minor
+    /// units: its payments net of refunds and credit moved away, less what final invoices settled, and less what
+    /// its payments with an issued payment tax document received, which a final invoice deducts under § 37a
+    /// ZDPH instead (an advance that took such documents before v3). Below zero when refunds took more.
+    static func leftToList(_ db: Database, advanceRequestID id: String) throws -> Int64 {
+        let held = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM documentPayment WHERE documentID = ?",
+                                      arguments: [id]) ?? 0
+        let settled = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM paidAdvance WHERE advanceRequestID = ?",
+                                         arguments: [id]) ?? 0
+        let covered = try Int64.fetchOne(db, sql: """
+            SELECT COALESCE(SUM(p.amount), 0) FROM documentPayment p JOIN document r ON r.id = p.receiptDocumentID
+            WHERE p.documentID = ? AND r.status = 'issued'
+            """, arguments: [id]) ?? 0
+        return held - settled - covered
+    }
+
     /// Records which payments the final invoice settled as paid in advance. An advance number that is not in
     /// the database (an advance from before the app) is allowed without a payment and returned, so the audit
     /// event can name it. Every other row must name its stored payment (`PaidAdvance.paymentID`): money
     /// received on the issued advance request of that number, for the final invoice's customer and in its
     /// currency, on the row's day and for at least the row's amount, without an issued payment tax document
     /// (such an advance is deducted, § 37a ZDPH) and settled by no other final invoice (`advanceAlreadySettled`).
-    /// What the final invoices settle on an advance request may not exceed its payments net of refunds
-    /// (`paidAdvancesExceedPaid`). Throws `paidAdvanceInvalid` for anything else; other kinds return no links.
+    /// What the final invoices settle on an advance request may not exceed its payments net of refunds, less
+    /// what its payments with an issued payment tax document received (`leftToList`, `paidAdvancesExceedPaid`).
+    /// Throws `paidAdvanceInvalid` for anything else; other kinds return no links.
     static func linkPaidAdvances(_ db: Database, finalInvoice: DocumentRecord, document: Document, at stamp: String) throws -> [String] {
         guard document.kind.deductsAdvances else { return [] }
         let currency = Currency(code: finalInvoice.currency)
@@ -148,17 +163,16 @@ extension DocumentStore {
                 linkedAdvances.append((id: advance.id, number: number))
             }
         }
-        // What the final invoices settle on an advance request stays within what it holds, refunds included.
+        // What the final invoices settle on an advance request stays within what it holds, refunds included and
+        // what its issued payment tax documents cover left out (those are deducted, so never credited twice).
         for advance in linkedAdvances {
-            let held = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM documentPayment WHERE documentID = ?",
-                                          arguments: [advance.id]) ?? 0
-            let settled = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM paidAdvance WHERE advanceRequestID = ?",
-                                             arguments: [advance.id]) ?? 0
-            guard settled > held else { continue }
+            // Counts this final invoice's rows as settled already.
+            let left = try Self.leftToList(db, advanceRequestID: advance.id)
+            guard left < 0 else { continue }
             let listed = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM paidAdvance WHERE advanceRequestID = ? AND finalInvoiceID = ?",
                                             arguments: [advance.id, finalInvoice.id]) ?? 0
             throw DataError.paidAdvancesExceedPaid(advanceNumber: advance.number,
-                                                   available: MinorUnits.money(max(held - (settled - listed), 0), currency),
+                                                   available: MinorUnits.money(max(left + listed, 0), currency),
                                                    listed: MinorUnits.money(listed, currency))
         }
         return external
@@ -169,6 +183,33 @@ extension DocumentStore {
     static func checkNotSettled(_ db: Database, payment: DocumentPaymentRecord) throws {
         if let settled = try PaidAdvanceRecord.filter(Column("paymentID") == payment.id).fetchOne(db) {
             throw DataError.paymentSettled(paymentID: payment.id, finalInvoiceNumber: settled.finalInvoiceNumber)
+        }
+    }
+
+    /// Checks the document of a payment row `deletePayment` just deleted, inside its transaction (a throw rolls
+    /// the deletion back). On an advance request that final invoices settled payments of as paid in advance:
+    /// a deleted payment may not leave it holding less than they settled and its issued payment tax documents
+    /// cover (`leftToList` below zero); and a deleted refund or credit moved away may not leave money on it that
+    /// no final invoice can list, which is the part of a settled payment its final invoice did not take beyond
+    /// what the remaining refunds and credit moved away took (a settled payment is listed once). Either throws
+    /// `paymentBacksSettlement` naming the deleted payment `paymentID`. Any other document passes.
+    static func checkSettledAfterDeletion(_ db: Database, documentID: String, deletedOutgoing: Bool, paymentID: String) throws {
+        guard let last = try PaidAdvanceRecord.filter(Column("advanceRequestID") == documentID)
+            .order(Column("createdAt").desc).fetchOne(db) else { return }
+        let refused: Bool
+        if deletedOutgoing {
+            let untaken = try Int64.fetchOne(db, sql: """
+                SELECT COALESCE(SUM(p.amount - s.amount), 0) FROM paidAdvance s JOIN documentPayment p ON p.id = s.paymentID
+                WHERE s.advanceRequestID = ?
+                """, arguments: [documentID]) ?? 0
+            let movedAway = try Int64.fetchOne(db, sql: "SELECT COALESCE(-SUM(amount), 0) FROM documentPayment WHERE documentID = ? AND amount < 0",
+                                               arguments: [documentID]) ?? 0
+            refused = untaken > movedAway
+        } else {
+            refused = try Self.leftToList(db, advanceRequestID: documentID) < 0
+        }
+        if refused {
+            throw DataError.paymentBacksSettlement(paymentID: paymentID, finalInvoiceNumber: last.finalInvoiceNumber)
         }
     }
 

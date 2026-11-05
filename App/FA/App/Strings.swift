@@ -751,9 +751,25 @@ enum L {
     static let paymentRecordedGoodsAdvance = r(
         "rp.recordedGoodsAdvance",
         "Payment recorded. An advance for EU goods needs no tax document: the final invoice lists it as paid in advance.")
+    /// Record Payment's last step on a goods advance that a final invoice already settled: no second final invoice.
+    static let paymentRecordedSettledGoodsAdvance = r(
+        "rp.recordedSettledGoodsAdvance", "Payment recorded. An advance for EU goods needs no tax document.")
+    static func advanceAlreadyInFinalInvoice(_ numbers: String) -> LocalizedStringResource {
+        r("finalInvoice.advanceAlreadyIn", "This advance is already in final invoice \(numbers).")
+    }
     static let settledInLabel = r("document.settledInLabel", "Settled in")
     static func paymentSettledBy(_ number: String) -> LocalizedStringResource {
         r("payment.settledBy", "Payment is settled in \(number) and can't be deleted")
+    }
+    /// The lock of a settled payment row, for VoiceOver.
+    static let paymentSettledLocked = r("payment.settledLocked", "A final invoice settled this payment as paid in advance; it cannot change.")
+    static func errorRelatedPaymentSettled(_ number: String) -> LocalizedStringResource {
+        r("error.relatedPaymentSettled",
+          "Final invoice \(number) settled the other side of this credit as paid in advance, so the credit cannot be deleted.")
+    }
+    static func errorPaymentBacksSettlement(_ number: String) -> LocalizedStringResource {
+        r("error.paymentBacksSettlement",
+          "Final invoice \(number) settled this advance as paid in advance; without this payment the advance's money would no longer match it, so it cannot be deleted.")
     }
     static func errorPaymentSettled(_ number: String) -> LocalizedStringResource {
         r("error.paymentSettled", "Final invoice \(number) settled this payment as paid in advance, so it cannot change and takes no tax document.")

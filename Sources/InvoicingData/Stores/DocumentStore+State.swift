@@ -29,12 +29,14 @@ extension DocumentStore {
         try states(db, records: try request(filter).fetchAll(db), today: today)
     }
 
-    /// Payment totals of one document: net paid, incoming payments, incoming payments without an issued receipt.
+    /// Payment totals of one document: net paid, incoming payments, incoming payments without an issued receipt,
+    /// payments linked to a payment tax document (a draft or an issued one).
     struct PaymentSums: Decodable, FetchableRecord {
         var documentID: String
         var paid: Int64
         var incoming: Int
         var missingReceipts: Int
+        var withReceipt: Int
     }
 
     static func states(_ db: Database, records: [DocumentRecord], today: CalendarDay) throws -> [DocumentState] {
@@ -46,7 +48,8 @@ extension DocumentStore {
                    COALESCE(SUM(CASE WHEN p.kind IN ('received', 'creditIn') THEN 1 ELSE 0 END), 0) AS incoming,
                    COALESCE(SUM(CASE WHEN p.kind IN ('received', 'creditIn')
                                       AND NOT EXISTS (SELECT 1 FROM document r WHERE r.id = p.receiptDocumentID AND r.status = 'issued')
-                                     THEN 1 ELSE 0 END), 0) AS missingReceipts
+                                     THEN 1 ELSE 0 END), 0) AS missingReceipts,
+                   COALESCE(SUM(CASE WHEN p.receiptDocumentID IS NOT NULL THEN 1 ELSE 0 END), 0) AS withReceipt
             FROM documentPayment p
             GROUP BY p.documentID
             """) {
@@ -105,11 +108,13 @@ extension DocumentStore {
                 && (settlement == .open || settlement == .partlyPaid) && summary.dueDate < today
             let incoming = sum?.incoming ?? 0
             let deductions = deductedBy[record.id] ?? []
-            // Money received on an advance for § 64 goods needs no payment tax document (ADR 0012).
+            // Money received on an advance for § 64 goods needs no payment tax document (ADR 0012). An advance
+            // whose payments already have one (a draft or an issued one, made before v3) keeps that flow, so its
+            // badge and its tax documents read as before.
             var taxDocumentRequired = true
             if summary.kind == .advanceRequest && summary.status != .draft {
                 let goodsOnly = try record.isIntraCommunityGoodsOnly()
-                taxDocumentRequired = !goodsOnly
+                taxDocumentRequired = !goodsOnly || (sum?.withReceipt ?? 0) > 0
             }
             states.append(DocumentState(
                 summary: summary,

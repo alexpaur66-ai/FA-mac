@@ -342,9 +342,10 @@ struct DocumentDetailView: View {
                 Spacer()
                 MoneyText(amount: payment.amount.amount, currency: payment.amount.currency.code, locale: locale)
                 if payment.receiptIssued || settledIn != nil {
+                    // A settled payment has no tax document; the final invoice holds it (ADR 0012).
                     Image(systemName: "lock.fill")
                         .foregroundStyle(.secondary)
-                        .accessibilityLabel(Text(L.paymentLocked))
+                        .accessibilityLabel(Text(payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
                 } else if isAdvanceReceipt {
                     if let receiptID = payment.receiptDocumentID {
                         if let openDraft {
@@ -540,7 +541,7 @@ struct DocumentInspectorView: View {
                                     Image(systemName: "lock.fill")
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
-                                        .accessibilityLabel(Text(L.paymentLocked))
+                                        .accessibilityLabel(Text(payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
                                 }
                             }
                         }

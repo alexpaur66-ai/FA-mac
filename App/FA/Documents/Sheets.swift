@@ -97,12 +97,23 @@ struct RecordPaymentSheet: View {
     /// the payment (§ 28 odst. 8 ZDPH). Create its draft now, or later with Create Tax Document in the
     /// payment's row of the advance's detail (the Overview queue selects that advance) or the Document menu.
     /// An advance for § 64 goods needs no tax document: the step offers its final invoice instead, which
-    /// lists the payment as paid in advance (ADR 0012, the design thread's spec of 5 Nov 2026).
+    /// lists the payment as paid in advance (ADR 0012, the design thread's spec of 5 Nov 2026). Once a final
+    /// invoice settled the advance (or it is closed), as the Document menu knows, the step only confirms the
+    /// payment: a second final invoice would bill the same supply again.
     private func recordedStep(_ payment: DocumentPayment) -> some View {
         let goodsAdvance = !state.taxDocumentRequired
+        let offersFinalInvoice = goodsAdvance && !state.deductedInFinal && state.closure == nil
+        let message: LocalizedStringResource
+        if !goodsAdvance {
+            message = L.paymentRecordedAdvance
+        } else if offersFinalInvoice {
+            message = L.paymentRecordedGoodsAdvance
+        } else {
+            message = L.paymentRecordedSettledGoodsAdvance
+        }
         return VStack(alignment: .leading, spacing: Spacing.l) {
             Label {
-                Text(goodsAdvance ? L.paymentRecordedGoodsAdvance : L.paymentRecordedAdvance)
+                Text(message)
                     .textRole(.body).fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
@@ -115,7 +126,7 @@ struct RecordPaymentSheet: View {
                 Button { dismiss() } label: { Text(L.later) }
                     .keyboardShortcut(.cancelAction)
                 if goodsAdvance {
-                    if let createFinalInvoice {
+                    if offersFinalInvoice, let createFinalInvoice {
                         Button {
                             let advanceID = state.id
                             dismiss()

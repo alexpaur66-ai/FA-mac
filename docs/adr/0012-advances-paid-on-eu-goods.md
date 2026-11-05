@@ -47,33 +47,46 @@ The names, the wording and the steps are the design thread's spec of 5 Nov 2026.
 - **PDF** (ACCT): a totals row "Uhrazené zálohy / Advances paid" with the minus sum before "K úhradě",
   and below the summary the same heading with one line per row: "Záloha ZF 2026-0003 uhrazena
   12. 11. 2026 / Advance ZF 2026-0003 paid on 12. 11. 2026: −4 000,00 €". No tax document, rate or VAT
-  column, and the summary is not reduced.
+  column, and the summary is not reduced. The goods advance request itself prints only "Toto není daňový
+  doklad. / This is not a tax document." without the sentence that promises a tax document on payment
+  (`DocumentClause.notATaxDocumentForGoods`); an advance with any other line keeps that sentence.
 - **Data, schema v3** (ADR 0005, append-only):
   - The `paidAdvance` table links an issued final invoice to each payment it settled: the payment (unique,
     so one final invoice settles a payment), the advance request, the numbers and the amount in minor units.
-    Written in the issue transaction (`linkPaidAdvances`) and frozen by triggers like the final invoice.
+    Written in the issue transaction (`linkPaidAdvances`) and frozen by triggers like the final invoice: no
+    update, no delete, and no insert that would replace a link (its id or its payment).
   - A row must name a stored payment received on the issued advance request of that number, for the same
     customer and currency, on the row's day and for at most the payment's amount, without an issued payment
     tax document (such a payment is deducted under § 37a instead) and settled by no other final invoice
     (`advanceAlreadySettled`). What final invoices settle on one advance may not exceed what it holds after
-    refunds (`paidAdvancesExceedPaid`). An advance number the database does not know is allowed without a
-    payment and named in the audit event (`externalPaidAdvances`), as ADR 0007 does for deductions; a known
-    number without a payment is refused. Any refusal rolls the issue back, so no number is used up.
+    refunds, less what its payments with an issued payment tax document received, which a final invoice
+    deducts under § 37a instead (an advance that took such documents before v3; `paidAdvancesExceedPaid`).
+    An advance number the database does not know is allowed without a payment and named in the audit event
+    (`externalPaidAdvances`), as ADR 0007 does for deductions; a known number without a payment is refused.
+    Any refusal rolls the issue back, so no number is used up.
   - A settled payment is locked: triggers stop changes to its money and its deletion, the store refuses a
     payment tax document for it (`paymentSettled`, also when such a draft is issued), and deleting the other
-    leg of an applied credit that was settled is refused. A refund or credit moved away from the advance may
-    take only what the final invoices did not settle (`refundExceedsAvailable`).
+    leg of an applied credit that was settled is refused (`relatedPaymentSettled`). A refund or credit moved
+    away from the advance may take only what the final invoices did not settle and its issued payment tax
+    documents do not cover (`refundExceedsAvailable`). Deleting a payment row of such an advance is refused
+    when the advance would then hold less than those two together, or keep money no final invoice can list
+    because a payment was settled net of the refund or credit deleted (`paymentBacksSettlement`).
   - Two document columns spare the lists a snapshot decode: `paidInAdvance` (minor units, NULL when none)
     and `treatments` (the lines' treatments as a JSON array). Rows written before v3 have NULL in both:
     they had no advances paid, and the store reads their treatments from the snapshot.
 - **States**: an issued advance request whose lines are all § 64 goods has `taxDocumentRequired` false,
   which the badge rules already knew (screens-flows.md §6, question 5): it reads "Paid" after its payment,
   and "Settled in final invoice" once a final invoice settled one of its payments (`deductedInFinal`,
-  `deductedBy`). An advance with any other line keeps the payment tax document flow.
+  `deductedBy`). An advance with any other line keeps the payment tax document flow, and so does one whose
+  payments already have a payment tax document (a draft or an issued one, made before v3), so its badges and
+  tax documents read as before.
 - **App** (design thread's names):
   - Record Payment on a goods advance ends with "Payment recorded. An advance for EU goods needs no tax
     document: the final invoice lists it as paid in advance." and the default button "Create Final
-    Invoice" (↩), with Later (⎋). Create Tax Document is not offered for such an advance.
+    Invoice" (↩), with Later (⎋). Create Tax Document is not offered for such an advance. Once a final
+    invoice settled the advance, the step says "Payment recorded. An advance for EU goods needs no tax
+    document." with Later only: the Document menu offers no second final invoice for it either, and Create
+    Final Invoice reached any other way names the final invoice instead of drafting one.
   - Create Final Invoice from a goods advance lists its open payments under "Paid in advance" instead of
     refusing while they have no tax document. Each payment is offered for at most what the advance still
     holds.

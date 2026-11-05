@@ -416,8 +416,12 @@ struct NumberCell: Hashable {
         if id != nil, id == document?.customerID { return }
         let chosen = customers.first { $0.id == id }
         update { doc in
-            // Deductions belong to the previous client's receipts; the store would refuse them at issue.
-            if chosen?.id != doc.customerID { doc.advanceDeductions = [] }
+            // Deductions and advances paid belong to the previous client's advances; the store would refuse them
+            // at issue.
+            if chosen?.id != doc.customerID {
+                doc.advanceDeductions = []
+                doc.paidAdvances = nil
+            }
             doc.customerID = chosen?.id
             doc.customer = chosen?.party
                 ?? Party(name: "", address: PostalAddress(street: "", city: "", postalCode: "", countryCode: "CZ"))

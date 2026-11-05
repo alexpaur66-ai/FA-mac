@@ -561,11 +561,19 @@ struct MainSplitView: View {
     /// other final invoice deducts (§ 37a ZDPH; the deductions carry the advance's rate and exchange rate).
     /// Refused with the reason while a received payment has no issued tax document: its amount would not
     /// be deducted and the customer would be billed for money already received. An advance for § 64 goods
-    /// has no tax documents: its payments are listed as paid in advance instead (ADR 0012).
+    /// has no tax documents: its payments are listed as paid in advance instead (ADR 0012). An advance with a
+    /// closing event, or one a final invoice already deducted or settled, gets none, however this is reached
+    /// (the Document menu does not offer it, Record Payment's last step neither): it would bill the supply twice.
     private func createFinalInvoice(from advanceID: String) {
         do {
             guard let advance = try stores.documents.document(id: advanceID),
                   advance.kind == .advanceRequest, advance.status != .draft else { return }
+            let advanceState = try stores.documents.state(for: advanceID, today: CalendarDay(Date(), in: .current))
+            guard advanceState.closure == nil else { return }
+            guard !advanceState.deductedInFinal else {
+                report(L.advanceAlreadyInFinalInvoice(advanceState.deductedBy.joined(separator: ", ")), kind: .info)
+                return
+            }
             let goodsOnly = advance.isIntraCommunityGoodsOnly
             var pending: [DocumentPayment] = []
             if !goodsOnly {
