@@ -523,7 +523,6 @@ TableColumn("Status") { row in StatusBadge(row.stateInputs, detail: row.statusDe
     - When only one of them occurs, once, it is the decimal mark, unless it is the UI locale's grouping separator and exactly three digits follow it. So in an English locale that groups with commas, "1,234" is 1234 and "36,5" is 36.5.
     - A mark that occurs more than once is grouping only when every group after it has exactly three digits. Anything else, such as "1.5." or two decimal marks, is invalid and shows the error state.
     - **Rate fields** (every field that takes an exchange rate: the inline rate form and Change…, §8.9, and the rate sheet behind Add Rate… and Enter Rate…, screens-flows §2g) always read a single "," or "." as the decimal mark. A ČNB rate for EUR or USD is quoted with three decimals and is far below 1 000, so "24,315" is always 24.315.
-    - Build note: the first editor's `DecimalInput.parse` (DraftEditorView.swift), used by the line cells and the inline rate form alike, doesn't follow this rule yet. It reads a single mark equal to the locale's grouping separator, and any repeated mark, as grouping, so in a comma-grouping locale "36,5" reads 365 and the rate "24,315" reads 24 315 (editor design check, E077).
 - **Locale:** typing follows the **UI locale**, Sasa's habit (the §8.2 rule). The PDF locale applies only to the preview and PDF.
 - **Format:** the field binds with a plain **number** format, `Decimal.FormatStyle(locale:)` (macOS 12.0 [S107]) with two fraction digits via `precision(_:)` (macOS 12.0 [S107]). It does **not** use `Decimal.FormatStyle.Currency`: a currency style puts the symbol or code into the field text, so the currency would show twice next to the suffix label, and parsing could require the symbol. `Currency` is for read-only display (`MoneyText`).
 - **States:**
@@ -554,7 +553,7 @@ HStack(spacing: Spacing.xs) {
 
 - **Purpose:** choose the client first; selecting one prefills the draft.
 - **Anatomy:**
-  - a text field with type-ahead suggestions (`textInputSuggestions(_:)` and `textInputCompletion(_:)`, macOS 15.0 [S58])
+  - a text field with the app's own suggestion list drawn under it, on every macOS version (v0.1; ADR 0009 amendments). `textInputSuggestions(_:)` and `textInputCompletion(_:)` (macOS 15.0 [S58]) are not used for the client: they have no room for the final New Client row
   - each suggestion shows the name, then "IČO · country · default currency · document language · VAT treatment" in `.secondary`
   - caution chips on suggestions with gaps that would block Issue later: "VAT ID missing", "Address missing"
   - a final suggestion "New Client "…"…", which opens the New Client sheet (screens-flows §2e)
@@ -567,24 +566,10 @@ HStack(spacing: Spacing.xs) {
   - locked (Issued): plain text
 - **Keyboard:**
   - Focus lands here first in a new draft (`defaultFocus`, macOS 13.0).
-  - Return accepts the top suggestion; Tab accepts and moves to the first line description.
-  - Esc clears the field.
-  - Moving through suggestions with ↑/↓ is UNVERIFIED for `textInputSuggestions`; test it.
+  - ↓ and ↑ move the highlight through the list; Return takes the highlighted client (the top one until the highlight moves); Tab accepts and moves to the first line's Description.
+  - Esc reverts the field to the chosen client, or empties it when none is chosen.
+- **VoiceOver** (RECOMMENDATION): the highlighted row carries the selected trait, and moving the highlight announces the client's name and defaults line, so the list is usable without sight.
 - **Undo:** "Undo Apply Client Defaults" restores the fields that the client's defaults overwrote [S16].
-
-```swift
-TextField("Client", text: $query)
-    .textInputSuggestions {
-        ForEach(matches) { client in
-            VStack(alignment: .leading) {
-                Text(verbatim: client.name)
-                Text(verbatim: client.defaultsSummary).textRole(.rowSecondary)
-            }
-            .textInputCompletion(client.name)
-        }
-    }
-    .onSubmit { pickTopMatch() }
-```
 
 ### 8.5 LineItemsEditor
 
@@ -607,7 +592,7 @@ TextField("Client", text: $query)
   - issued: read-only text, selectable
   - row invalid: a trailing `exclamationmark.triangle` with a tooltip explaining the fix, and the Issue sheet lists it
   - empty: one blank row with placeholder text
-  - **fully empty trailing lines** (e.g. after ↩ on the last row): exist on screen only. All of them are dropped on save and at issue, never counted as invalid and never printed. The first editor drops only the last one (editor design check, E021).
+  - **fully empty trailing lines** (e.g. after ↩ on the last row): exist on screen only. All of them are dropped on save and at issue, never counted as invalid and never printed.
 - **Keyboard** (RECOMMENDATION; the authoritative map is screens-flows §3.1):
   - **Tab / ⇧Tab** move to the next or previous cell. Tab on the last cell of the last row appends a row. Whether the system Tab order follows `Grid` row order is UNVERIFIED; drive it with `@FocusState` and `focused(_:equals:)` (macOS 12.0) [S65] if not.
   - **Return** moves down one row in the same column. On the last row it appends a new row and focuses its description (`onSubmit`).
@@ -622,7 +607,7 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
         GridRow {
             TextField("Description", text: $line.text)
                 .focused($focus, equals: .text(line.id))
-                .textInputSuggestions { /* item history, see 8.4 */ }
+                .textInputSuggestions { /* item history (Suggestions above); macOS 15.0, gate with if #available */ }
             TextField("Unit price", value: $line.unitPrice,
                       format: Decimal.FormatStyle(locale: uiLocale).precision(.fractionLength(2)))  // number style, §8.3
                 .multilineTextAlignment(.trailing).monospacedDigit()
@@ -722,7 +707,7 @@ Menu {
   - Czech client paying in CZK gets QR Platba; EU client paying in EUR gets EPC (RECOMMENDATION).
   - USD (the third v0.1 currency): which QR standard, if any, fits a USD payment is UNVERIFIED. Until it is checked, a USD document defaults to None (RECOMMENDATION).
   - Error correction M and about 30 mm at print size [S94][S95].
-  - The caption wording is not required by either standard (HEURISTIC). Use one name everywhere, in the UI and printed under the code: **"QR Platba"** and **"EPC QR (SEPA)"**. Build note: the PDF on main still prints "SEPA QR (EPC)" (`PDFStrings.qrCaption`); the build aligns it.
+  - The caption wording is not required by either standard (HEURISTIC). Use one name everywhere, in the UI and printed under the code: **"QR Platba"** and **"EPC QR (SEPA)"**.
 - **States:**
   - valid (issued documents only)
   - **draft:** no scannable QR, in the app **and in print or Quick Look**. A placeholder box of the same size takes its place, because a draft has no number and no VS yet, so a payment made from its QR could never be matched. In the app's QRPreview (inspector) the placeholder reads "QR after issue" (UI label, screens-flows §5). On the draft PDF (the PDF preview, print and Quick Look) it is document text: "QR po vystavení / QR after issue", or "QR po vystavení" alone on a Czech document (screens-flows §2c, §5).
