@@ -195,7 +195,8 @@ enum Schema {
                 t.column("finalInvoiceNumber", .text).notNull()
                 t.column("receiptDocumentID", .text).notNull().unique().references("document", onDelete: .restrict)
                 t.column("receiptNumber", .text).notNull()
-                // The advance request the receipt's payment was received on; nil when the receipt has no payment.
+                // The advance request the receipt's payment was received on, or the issued advance request the
+                // receipt names when no payment is linked yet; nil when neither is known (DocumentStore.linkDeductions).
                 t.column("advanceRequestID", .text).references("document", onDelete: .restrict)
                 t.column("createdAt", .text).notNull()
             }

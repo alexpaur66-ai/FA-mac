@@ -67,8 +67,11 @@ extension DocumentStore {
     /// Records which payment tax documents the final invoice deducted. A number that is not in the
     /// database (a document issued before the app) is allowed and returned, so the audit event can name
     /// it; a number that is in the database must be an issued payment tax document in the final invoice's
-    /// currency and for its customer, deducted by no other final invoice (`advanceAlreadyDeducted`). Other
-    /// kinds return no links.
+    /// currency and for its customer (the same customer id, or the same name when neither has one), deducted
+    /// by no other final invoice (`advanceAlreadyDeducted`). The link names the advance request the receipt's
+    /// payment was received on or, when no payment is linked to the receipt yet, the issued advance request
+    /// the receipt is for (its `relatedDocumentNumber`, same customer and currency), so the link stays right
+    /// when the payment is recorded and attached later. Other kinds return no links.
     static func linkDeductions(_ db: Database, finalInvoice: DocumentRecord, document: Document, at stamp: String) throws -> [String] {
         guard document.kind.deductsAdvances else { return [] }
         var external: [String] = []
@@ -86,19 +89,30 @@ extension DocumentStore {
             guard receipt.currency == finalInvoice.currency else {
                 throw DataError.deductedDocumentInvalid(number: number, detail: "in \(receipt.currency), the final invoice is in \(finalInvoice.currency)")
             }
-            if let customer = receipt.customerID, let own = finalInvoice.customerID, customer != own {
+            if !Self.sameCustomer(receipt, finalInvoice) {
                 throw DataError.deductedDocumentInvalid(number: number, detail: "for \(receipt.customerName), the final invoice is for \(finalInvoice.customerName)")
             }
             if let existing = try AdvanceDeductionRecord.filter(Column("receiptDocumentID") == receipt.id).fetchOne(db) {
                 throw DataError.advanceAlreadyDeducted(receiptNumber: number, by: existing.finalInvoiceNumber)
             }
-            let advanceRequestID = try String.fetchOne(db, sql: "SELECT documentID FROM documentPayment WHERE receiptDocumentID = ?",
+            var advanceRequestID = try String.fetchOne(db, sql: "SELECT documentID FROM documentPayment WHERE receiptDocumentID = ?",
                                                        arguments: [receipt.id])
+            if advanceRequestID == nil { advanceRequestID = try Self.relatedAdvanceRequestID(db, receipt: receipt) }
             try AdvanceDeductionRecord(id: UUID().uuidString, finalInvoiceID: finalInvoice.id, finalInvoiceNumber: finalInvoice.number ?? "",
                                        receiptDocumentID: receipt.id, receiptNumber: number, advanceRequestID: advanceRequestID,
                                        createdAt: stamp).insert(db)
         }
         return external
+    }
+
+    /// The issued advance request a receipt is for, by its `relatedDocumentNumber`, when it is for the
+    /// receipt's customer and in its currency (the rules `checkReceipt` applies to a payment attached later).
+    static func relatedAdvanceRequestID(_ db: Database, receipt: DocumentRecord) throws -> String? {
+        guard let related = receipt.relatedDocumentNumber?.trimmingCharacters(in: .whitespacesAndNewlines), !related.isEmpty,
+              let advance = try DocumentRecord.filter(Column("number") == related).fetchOne(db),
+              advance.kind == DocumentKind.advanceRequest.rawValue, advance.status == DocumentStatus.issued.rawValue,
+              advance.currency == receipt.currency, advance.customerID == receipt.customerID else { return nil }
+        return advance.id
     }
 
     /// The payment tax documents an issued final invoice deducted, by receipt number.

@@ -24,9 +24,11 @@ public enum DocumentSettlement: String, Sendable, CaseIterable {
 public struct DocumentState: Hashable, Sendable, Identifiable {
     public let summary: DocumentSummary
     public let settlement: DocumentSettlement
-    /// Net sum of the payments: received and credit in, minus refunds and credit out. Zero on a draft.
+    /// Net sum of the payments: received and credit in, minus refunds and credit out. Zero on a draft. On
+    /// an issued payment tax document, the payment it records (its amount due; the payment itself is booked
+    /// on the advance request).
     public let paid: Money
-    /// Amount due minus `paid`; negative when overpaid. Zero on a draft.
+    /// Amount due minus `paid`; negative when overpaid. Zero on a draft and on an issued payment tax document.
     public let outstanding: Money
     /// Issued, past the due date, open or partly paid, and not closed. Payment tax documents are never
     /// overdue: they record money already received.

@@ -18,21 +18,32 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
   `CHECK` constraint enforces the sign. The net paid amount of a document is the plain sum of its
   payments, so every balance query stays one `SUM`. A refund (`recordRefund`) is the positive sum
   returned, stored negative; from a bank statement it must come from a debit line, and allocation against
-  a transaction is checked on absolute values, so one debit line can be split like one credit line.
+  a transaction is checked on absolute values, so one debit line can be split like one credit line. A
+  refund may not exceed what the document holds, which is its net paid amount or, for a final invoice
+  whose advances exceed the supply, the credit (`refundExceedsAvailable`), so the net paid amount never
+  drops below zero (or below a negative amount due). A payment tax document takes no payments of its own
+  (`documentNotPayable`): the payment it records is booked on the advance request. Deleting the last
+  payment taken from a bank line that was matched by hand to the document returns the line to the
+  unmatched list (audited), as deleting a draft does.
 - **Applied credit is two linked rows.** `applyCredit(from:to:amount:on:)` writes a `creditOut` on the
   overpaid document and a `creditIn` on the one it pays, each naming the other (`relatedPaymentID`), in
-  one transaction. The credit may exceed neither what the source was overpaid nor what the target still
+  one transaction. Both documents are for the same customer (`creditCustomerMismatch`) and in the same
+  currency. The credit may exceed neither what the source was overpaid nor what the target still
   owes. Deleting one leg deletes the other; a leg whose receipt is issued locks both.
 - **Only incoming payments have a receipt.** `attachReceipt` and the receipt checks refuse a refund or a
   credit-out leg; a credit applied to an advance request is money received on it and may have one.
 - **Deduction links are written when a final invoice is issued.** For each payment tax document a final
   invoice deducts, `advanceDeduction` records the final invoice, the receipt and the advance request the
-  receipt's payment was received on (numbers denormalised, because issued numbers never change). A
+  receipt's payment was received on, or, when no payment is linked to the receipt yet, the issued advance
+  request the receipt names (`relatedDocumentNumber`, same customer and currency), so a payment attached
+  later keeps the link right; attaching a payment of another advance to a deducted receipt is refused
+  (numbers denormalised, because issued numbers never change). A
   partial unique index makes a receipt deductible by one final invoice only (`advanceAlreadyDeducted`
   rolls the issue back, so the number is not consumed); the rows are frozen by triggers like the final
   invoice itself. A deducted number the database does not know (a receipt issued before the app) is
   allowed and named in the audit event, so the first year's final invoices can still be issued; a known
-  number must be an issued payment tax document in the same currency and for the same customer.
+  number must be an issued payment tax document in the same currency and for the same customer (the same
+  customer id, or the same customer name when neither document has one).
 - **Closing events live beside the document.** `documentClosure` holds one event per issued document:
   `closedUnpaid` for an advance request with no payments and no deduction ("Uzavřít zálohu bez
   úhrady…"), or `markedForCreditNote` for a tax document ("Označit k opravě dobropisem…"). Both need a
@@ -43,7 +54,8 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
   `observeStates` observation give a `DocumentState` per document: the settlement (`draft`, `open`,
   `partlyPaid`, `paid`, `overpaid`, `settledByAdvances`, `closedUnpaid`), the net paid and outstanding
   amounts, overdue and days overdue (issued, open or partly paid, not closed, due date before today;
-  payment tax documents are never overdue), whether every received payment of an advance has its issued
+  payment tax documents are never overdue and read as paid, with paid = their amount and outstanding 0,
+  since the payment is booked on the advance request), whether every received payment of an advance has its issued
   tax document, which final invoices deducted it, and the closing event. It is computed from the rows in
   one read with three aggregate queries, so a list of a thousand documents costs four statements, and a
   GRDB `ValueObservation` can watch it. The design system's `DocumentStateInputs` is filled from it one

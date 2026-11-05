@@ -63,4 +63,11 @@ public enum DataError: Error, Equatable, Sendable {
     /// The number a final invoice deducts belongs to a document that is not an issued payment tax document
     /// of the same customer and currency.
     case deductedDocumentInvalid(number: String, detail: String)
+    /// A refund may not exceed what the document holds: its net paid amount or, for a final invoice whose
+    /// advances exceed the supply, the credit the customer holds; `available` is that amount.
+    case refundExceedsAvailable(documentID: String, available: Money, requested: Money)
+    /// A payment tax document records money already received on its advance request; it takes no payments.
+    case documentNotPayable(String)
+    /// Credit moves only between documents of the same customer.
+    case creditCustomerMismatch(sourceDocumentID: String, targetDocumentID: String)
 }

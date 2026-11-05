@@ -65,8 +65,11 @@ extension DocumentStore {
             let summary = try record.summary()
             let currency = summary.currency
             let sum = sums[record.id]
-            let paidUnits = summary.status == .draft ? 0 : (sum?.paid ?? 0)
             let dueUnits = summary.status == .draft ? 0 : (record.amountDue ?? 0)
+            // A payment tax document records a payment booked on its advance request: it reads as paid in
+            // full, with nothing outstanding.
+            let isReceipt = summary.kind == .paymentTaxDocument && summary.status != .draft
+            let paidUnits = summary.status == .draft ? 0 : (isReceipt ? dueUnits : (sum?.paid ?? 0))
             let outstandingUnits = dueUnits - paidUnits
             let closure = try closures[record.id]?.closure()
 

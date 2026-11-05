@@ -600,6 +600,9 @@ import InvoicingCore
         let receiptState = try store.state(for: receipt.id, today: due.adding(days: 100))
         #expect(receiptState.settlement == .paid)
         #expect(!receiptState.isOverdue)
+        // Paid in full by definition: the payment is booked on the advance, nothing is outstanding on the receipt.
+        #expect(receiptState.paid == czk("12100"))
+        #expect(receiptState.outstanding == czk("0"))
         // A further payment without its receipt turns the flag off again.
         try store.recordPayment(documentID: advance.id, on: due, amount: czk("500"), now: Fixtures.now)
         state = try store.state(for: advance.id, today: due)
@@ -627,6 +630,23 @@ import InvoicingCore
         let ids = first.map { $0.id }
         #expect(ids == ["doc-cz"])
         #expect(first.first?.settlement == .draft)
+
+        // A payment written after the subscription delivers a new value.
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        var received: [[DocumentState]] = []
+        for try await states in store.observeStates(today: Fixtures.day("2026-11-05")).values(in: database.queue) {
+            received.append(states)
+            if received.count == 1 {
+                try store.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-05"), amount: Money(100, .czk), now: Fixtures.now)
+            } else if states.first?.settlement == .partlyPaid || received.count >= 5 {
+                break
+            }
+        }
+        #expect(received.first?.first?.settlement == .open)
+        let last = try #require(received.last?.first)
+        #expect(received.count >= 2)
+        #expect(last.settlement == .partlyPaid)
+        #expect(last.paid == Money(100, .czk))
     }
 
     @Test func finalInvoiceLinksTheReceiptsItDeducts() throws {
@@ -691,6 +711,31 @@ import InvoicingCore
         #expect(throws: DataError.documentNotIssued("final-2")) { try store.verifyIntegrity(id: "final-2") }
     }
 
+    @Test func verifyIntegrityDetectsAChangedSnapshotOrHash() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        #expect(try store.verifyIntegrity(id: "doc-cz"))
+
+        // Tampering needs the frozen trigger gone, which only this test database allows.
+        try database.queue.write { db in
+            try db.execute(sql: "DROP TRIGGER document_frozen_update")
+            try db.execute(sql: "UPDATE document SET snapshot = replace(snapshot, 'Konzultace', 'Konzultace!') WHERE id = ?", arguments: ["doc-cz"])
+        }
+        #expect(try store.verifyIntegrity(id: "doc-cz") == false)
+
+        // The snapshot restored is whole again; a changed hash is caught as well.
+        try database.queue.write { db in
+            try db.execute(sql: "UPDATE document SET snapshot = replace(snapshot, 'Konzultace!', 'Konzultace') WHERE id = ?", arguments: ["doc-cz"])
+        }
+        #expect(try store.verifyIntegrity(id: "doc-cz"))
+        try database.queue.write { db in
+            try db.execute(sql: "UPDATE document SET snapshotSHA256 = ? WHERE id = ?", arguments: [String(repeating: "0", count: 64), "doc-cz"])
+        }
+        #expect(try store.verifyIntegrity(id: "doc-cz") == false)
+    }
+
     @Test func closingEventsHaveRules() throws {
         let database = try Fixtures.prepared()
         try Fixtures.addAdvanceSeries(database)
@@ -731,5 +776,190 @@ import InvoicingCore
         try store.recordPayment(documentID: advance.id, on: Fixtures.day("2026-12-01"), amount: Money(1, .czk), now: Fixtures.now)
         let actions = try AuditLog(database).events(entity: "document", id: advance.id).map { $0.action }
         #expect(actions.suffix(3) == ["close", "reopen", "payment"])
+    }
+
+    @Test func refundsAreBoundedByWhatTheDocumentHolds() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        func czk(_ text: String) -> Money { Money(Fixtures.d(text), .czk) }
+        let day = Fixtures.day("2026-11-10")
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.saveDraft(Fixtures.czkDraft(id: "doc-2"), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        try store.issue(id: "doc-2", seriesID: "fv", now: Fixtures.now)
+
+        // Nothing received: nothing to pay back, and no row is written.
+        #expect(throws: DataError.refundExceedsAvailable(documentID: "doc-2", available: czk("0"), requested: czk("1"))) {
+            try store.recordRefund(documentID: "doc-2", on: day, amount: czk("1"), now: Fixtures.now)
+        }
+        #expect(try store.payments(for: "doc-2").isEmpty)
+        #expect(try store.paymentState(for: "doc-2").paid == czk("0"))
+
+        // Overpaid by 1 000 CZK: the net paid amount may go back (an order cancelled), not more.
+        try store.recordPayment(documentID: "doc-cz", on: day, amount: czk("13100"), now: Fixtures.now)
+        #expect(throws: DataError.refundExceedsAvailable(documentID: "doc-cz", available: czk("13100"), requested: czk("13101"))) {
+            try store.recordRefund(documentID: "doc-cz", on: day, amount: czk("13101"), now: Fixtures.now)
+        }
+        try store.recordRefund(documentID: "doc-cz", on: day, amount: czk("13100"), now: Fixtures.now)
+        let refunded = try store.state(for: "doc-cz", today: day)
+        #expect(refunded.paid == czk("0"))
+        #expect(refunded.outstanding == czk("12100"))
+        #expect(refunded.settlement == .open)
+        #expect(throws: DataError.refundExceedsAvailable(documentID: "doc-cz", available: czk("0"), requested: czk("1"))) {
+            try store.recordRefund(documentID: "doc-cz", on: day, amount: czk("1"), now: Fixtures.now)
+        }
+
+        // A final invoice whose advances exceed the supply: the customer's credit may go back, not more.
+        let advance = try Fixtures.issuedAdvance(database)
+        let receipt = try Fixtures.issuedReceipt(database, advance: advance)
+        var draft = try Fixtures.finalInvoiceDraft(deducting: receipt)
+        draft.lines[0].quantity = 5
+        try store.saveDraft(draft, now: Fixtures.now)
+        try store.issue(id: "final", seriesID: "fv", now: Fixtures.now)
+        #expect(try store.paymentState(for: "final").amountDue == czk("-6050"))
+        #expect(throws: DataError.refundExceedsAvailable(documentID: "final", available: czk("6050"), requested: czk("6050.01"))) {
+            try store.recordRefund(documentID: "final", on: day, amount: czk("6050.01"), now: Fixtures.now)
+        }
+        try store.recordRefund(documentID: "final", on: day, amount: czk("6050"), now: Fixtures.now)
+        let finalState = try store.state(for: "final", today: day)
+        #expect(finalState.paid == czk("-6050"))
+        #expect(finalState.outstanding == czk("0"))
+        #expect(finalState.settlement == .paid)
+        #expect(!finalState.isOverdue)
+    }
+
+    @Test func aPaymentTaxDocumentTakesNoPayments() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        func czk(_ text: String) -> Money { Money(Fixtures.d(text), .czk) }
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        let receipt = try Fixtures.issuedReceipt(database, advance: advance)
+
+        #expect(throws: DataError.documentNotPayable(receipt.id)) {
+            try store.recordPayment(documentID: receipt.id, on: day, amount: czk("3000"), now: Fixtures.now)
+        }
+        #expect(throws: DataError.documentNotPayable(receipt.id)) {
+            try store.recordRefund(documentID: receipt.id, on: day, amount: czk("1"), now: Fixtures.now)
+        }
+        // Credit from an overpaid invoice of the same customer is not moved to the receipt either; both legs roll back.
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        try store.recordPayment(documentID: "doc-cz", on: day, amount: czk("13100"), now: Fixtures.now)
+        #expect(throws: DataError.documentNotPayable(receipt.id)) {
+            try store.applyCredit(from: "doc-cz", to: receipt.id, amount: czk("500"), on: day, now: Fixtures.now)
+        }
+        #expect(try store.payments(for: receipt.id).isEmpty)
+        #expect(try store.payments(for: "doc-cz").map { $0.kind } == [.received])
+        #expect(try store.paymentState(for: "doc-cz").outstanding == czk("-1000"))
+    }
+
+    @Test func creditMovesOnlyWithinOneCustomer() throws {
+        let database = try Fixtures.prepared()
+        try CustomerStore(database).save(Fixtures.czechCustomer(id: "cust-cz2"), now: Fixtures.now)
+        let store = DocumentStore(database)
+        func czk(_ text: String) -> Money { Money(Fixtures.d(text), .czk) }
+        let day = Fixtures.day("2026-11-10")
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.saveDraft(Fixtures.czkDraft(id: "doc-other", customer: Fixtures.czechCustomer(id: "cust-cz2")), now: Fixtures.now)
+        try store.saveDraft(Fixtures.czkDraft(id: "doc-same"), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        try store.issue(id: "doc-other", seriesID: "fv", now: Fixtures.now)
+        try store.issue(id: "doc-same", seriesID: "fv", now: Fixtures.now)
+        try store.recordPayment(documentID: "doc-cz", on: day, amount: czk("12600"), now: Fixtures.now)
+
+        #expect(throws: DataError.creditCustomerMismatch(sourceDocumentID: "doc-cz", targetDocumentID: "doc-other")) {
+            try store.applyCredit(from: "doc-cz", to: "doc-other", amount: czk("500"), on: day, now: Fixtures.now)
+        }
+        #expect(try store.payments(for: "doc-other").isEmpty)
+        #expect(try store.payments(for: "doc-cz").count == 1)
+
+        let credit = try store.applyCredit(from: "doc-cz", to: "doc-same", amount: czk("500"), on: day, now: Fixtures.now)
+        #expect(credit.documentID == "doc-same")
+        #expect(try store.paymentState(for: "doc-cz").outstanding == czk("0"))
+        #expect(try store.paymentState(for: "doc-same").outstanding == czk("11600"))
+    }
+
+    @Test func aReceiptIssuedBeforeItsPaymentStillNamesItsAdvance() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        // The receipt is issued before any payment is recorded or attached.
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day), now: Fixtures.now)
+        let receipt = try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+        try store.saveDraft(try Fixtures.finalInvoiceDraft(deducting: receipt), now: Fixtures.now)
+        try store.issue(id: "final", seriesID: "fv", now: Fixtures.now)
+
+        #expect(try store.deduction(ofReceipt: "dd1")?.advanceRequestID == advance.id)
+        #expect(try store.deductions(ofAdvanceRequest: advance.id).map { $0.finalInvoiceID } == ["final"])
+        let deducted = try store.state(for: advance.id, today: day)
+        #expect(deducted.deductedInFinal)
+        #expect(deducted.deductedBy == ["FV-2026-001"])
+        #expect(throws: DataError.documentIsDeducted(advance.id)) {
+            try store.closeAdvanceUnpaid(id: advance.id, reason: "x", now: Fixtures.now)
+        }
+        #expect(try store.closure(for: advance.id) == nil)
+
+        // The payment recorded and attached afterwards agrees with the frozen link.
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        #expect(try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now).receiptDocumentID == "dd1")
+        let paid = try store.state(for: advance.id, today: day)
+        #expect(paid.deductedBy == ["FV-2026-001"])
+        #expect(paid.taxDocumentIssued)
+        #expect(try store.deduction(ofReceipt: "dd1")?.advanceRequestID == advance.id)
+    }
+
+    @Test func aDeductedReceiptWithoutItsAdvanceTakesNoPayment() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day), now: Fixtures.now)
+        let receipt = try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        // A frozen link that names no advance request (as written before the advance could be resolved).
+        try database.queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO advanceDeduction (id, finalInvoiceID, finalInvoiceNumber, receiptDocumentID, receiptNumber, advanceRequestID, createdAt)
+                VALUES ('link-1', 'doc-cz', 'FV-2026-001', 'dd1', ?, NULL, '2026-11-05T05:00:00Z')
+                """, arguments: [receipt.number ?? ""])
+        }
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+            Issue.record("a payment was attached to a receipt deducted without its advance")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        #expect(try store.payments(for: advance.id).first?.receiptDocumentID == nil)
+    }
+
+    @Test func aDeductedReceiptMustBeForTheSameCustomer() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        // A receipt without a customer id (a one-off customer) for a final invoice of a stored customer.
+        var oneOff = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day)
+        oneOff.customerID = nil
+        try store.saveDraft(oneOff, now: Fixtures.now)
+        let receipt = try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+        try store.saveDraft(try Fixtures.finalInvoiceDraft(deducting: receipt), now: Fixtures.now)
+        do {
+            try store.issue(id: "final", seriesID: "fv", now: Fixtures.now)
+            Issue.record("a final invoice deducted a receipt of another customer")
+        } catch DataError.deductedDocumentInvalid(let number, _) {
+            #expect(number == receipt.number)
+        }
+        #expect(try store.summary(id: "final")?.status == .draft)
+        #expect(try NumberSeriesStore(database).peekNextNumber(seriesID: "fv", on: day) == "FV-2026-001")
+        #expect(try store.deduction(ofReceipt: "dd1") == nil)
     }
 }
