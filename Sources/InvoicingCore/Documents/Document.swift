@@ -82,6 +82,12 @@ public struct Document: Hashable, Sendable, Codable, Identifiable {
     /// True when any line is a reverse-charge supply (§ 29 odst. 2 písm. c) ZDPH).
     public var hasReverseCharge: Bool { lines.contains { $0.treatment == .reverseChargeEU } }
 
+    /// True when any line is goods supplied to another member state exempt under § 64 ZDPH.
+    public var hasIntraCommunityGoods: Bool { lines.contains { $0.treatment == .intraCommunityGoods } }
+
+    /// True when any line needs the customer's VAT ID from another member state (reverse charge, § 64).
+    public var requiresCustomerVATID: Bool { lines.contains { $0.treatment.requiresCustomerVATID } }
+
     /// The heading in the document's language.
     public var title: String { kind.title(language: language) }
 }

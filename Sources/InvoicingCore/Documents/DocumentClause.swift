@@ -5,6 +5,9 @@ public enum DocumentClause: Hashable, Sendable {
     case reverseCharge
     /// Reference to the provision the supply is exempt under (§ 29 odst. 2 písm. a) ZDPH).
     case exempt(reference: String)
+    /// Goods supplied to a business in another member state, exempt under § 64 odst. 1 ZDPH: the
+    /// reference § 29 odst. 2 písm. a) asks for, with Article 138 of Directive 2006/112/EC in English.
+    case intraCommunitySupply
     /// A service with the place of supply outside the Czech Republic (§ 9 odst. 1 ZDPH); informative.
     case outsideScope
     /// Printed on every advance request.
@@ -32,6 +35,10 @@ public enum DocumentClause: Hashable, Sendable {
             return "Osvobozeno od daně podle \(reference) zákona č. 235/2004 Sb., o dani z přidané hodnoty."
         case (.exempt(let reference), .english):
             return "Exempt from VAT under \(reference) of Act No. 235/2004 Coll., on Value Added Tax."
+        case (.intraCommunitySupply, .czech):
+            return "Dodání zboží do jiného členského státu, osvobozeno od daně podle § 64 odst. 1 zákona č. 235/2004 Sb., o dani z přidané hodnoty."
+        case (.intraCommunitySupply, .english):
+            return "Intra-Community supply of goods, exempt from VAT under Section 64(1) of the Czech VAT Act and Article 138 of Council Directive 2006/112/EC."
         case (.outsideScope, .czech):
             return "Plnění není předmětem daně v tuzemsku – místo plnění je mimo tuzemsko (§ 9 odst. 1 zákona o DPH)."
         case (.outsideScope, .english):
@@ -74,6 +81,7 @@ public enum DocumentClause: Hashable, Sendable {
         }
         for treatment in document.treatments {
             switch treatment {
+            case .intraCommunityGoods: result.append(.intraCommunitySupply)
             case .reverseChargeEU: result.append(.reverseCharge)
             case .exempt(let reference): result.append(.exempt(reference: reference))
             case .outsideEU: result.append(.outsideScope)

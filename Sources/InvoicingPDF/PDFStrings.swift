@@ -36,13 +36,15 @@ enum PDFStrings {
         bilingual("pokračování", "continued", language)
     }
 
-    /// The label of a VAT summary row (ACCT: "Tuzemsko 21 % · EU – přenesená daňová povinnost (PDP) ·
-    /// Mimo EU · Osvobozeno").
+    /// The label of a VAT summary row (ACCT: "Tuzemsko 21 % · EU – dodání zboží, osvobozeno (§ 64) ·
+    /// EU – přenesená daňová povinnost (PDP) · Mimo EU · Osvobozeno").
     static func treatment(_ treatment: VATTreatment, percent: Decimal?, _ language: DocumentLanguage) -> String {
         switch treatment {
         case .taxable:
             let rate = percent.map { PDFFormat.percent($0) } ?? ""
             return bilingual("Tuzemsko \(rate)", "Czech VAT \(rate)", language)
+        case .intraCommunityGoods:
+            return bilingual("EU – dodání zboží, osvobozeno (§ 64)", "intra-Community supply of goods, exempt", language)
         case .reverseChargeEU:
             return bilingual("EU – přenesená daňová povinnost (PDP)", "reverse charge", language)
         case .outsideEU:
@@ -57,7 +59,7 @@ enum PDFStrings {
         switch treatment {
         case .taxable: return ""
         case .reverseChargeEU: return "PDP"
-        case .outsideEU, .exempt: return "—"
+        case .intraCommunityGoods, .outsideEU, .exempt: return "—"
         }
     }
 

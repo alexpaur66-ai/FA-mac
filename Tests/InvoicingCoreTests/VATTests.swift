@@ -33,13 +33,18 @@ import Testing
         #expect(VATTreatment.reverseChargeEU.reportedInECSalesList)
         #expect(!VATTreatment.outsideEU.requiresCustomerVATID)
         #expect(!VATTreatment.outsideEU.reportedInECSalesList)
+        #expect(!VATTreatment.intraCommunityGoods.chargesVAT)
+        #expect(VATTreatment.intraCommunityGoods.requiresCustomerVATID)
+        #expect(VATTreatment.intraCommunityGoods.reportedInECSalesList)
+        #expect(VATTreatment.intraCommunityGoods.groupingKey != VATTreatment.reverseChargeEU.groupingKey)
+        #expect(!VATTreatment.exempt(reference: "§ 64").requiresCustomerVATID)
         #expect(!VATTreatment.exempt(reference: "§ 51").chargesVAT)
         #expect(VATTreatment.taxable(.standard).groupingKey != VATTreatment.taxable(.reduced).groupingKey)
         #expect(VATTreatment.exempt(reference: "a").groupingKey != VATTreatment.exempt(reference: "b").groupingKey)
     }
 
     @Test func codable() throws {
-        let all: [VATTreatment] = [.taxable(.reduced), .reverseChargeEU, .outsideEU, .exempt(reference: "§ 51 odst. 1 písm. a)")]
+        let all: [VATTreatment] = [.taxable(.reduced), .intraCommunityGoods, .reverseChargeEU, .outsideEU, .exempt(reference: "§ 51 odst. 1 písm. a)")]
         let data = try JSONEncoder().encode(all)
         let back = try JSONDecoder().decode([VATTreatment].self, from: data)
         #expect(back == all)

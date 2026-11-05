@@ -47,6 +47,14 @@ enum DocumentFixtures {
                  payment: PaymentInstructions.standard(for: "FV-2026-001", bankConnection: bank, currency: .eur))
     }
 
+    /// Goods sent to the German customer, exempt under § 64: ten bearings at 100 EUR.
+    static func euGoodsInvoice() -> Document {
+        var document = euInvoice()
+        document.id = "doc-goods"
+        document.lines = [DocumentLine(id: "l1", text: "Spindle bearing SKF 7014", quantity: 10, unit: "pcs", unitPrice: 100, treatment: .intraCommunityGoods)]
+        return document
+    }
+
     /// A domestic CZK invoice: three lines of 0.35 CZK at 21 %, the § 37 rounding example of ADR 0002.
     static func czkInvoice() -> Document {
         Document(id: "doc-cz", kind: .invoice, status: .issued, number: "FV-2026-001", supplier: supplier, customer: czechCustomer,
@@ -224,6 +232,13 @@ enum DocumentFixtures {
         #expect(IssueDeadline.lastDay(treatment: .reverseChargeEU, taxPoint: day("2026-11-04")) == day("2026-12-15"))
         #expect(IssueDeadline.lastDay(treatment: .reverseChargeEU, taxPoint: day("2026-11-30")) == day("2026-12-15"))
         #expect(IssueDeadline.lastDay(treatment: .outsideEU, taxPoint: day("2026-02-01")) == day("2026-03-15"))
+    }
+
+    @Test func endOfMonthPlusFifteenForGoodsToAnotherMemberState() {
+        // § 28 odst. 9 písm. a) ZDPH.
+        #expect(IssueDeadline.lastDay(treatment: .intraCommunityGoods, taxPoint: day("2026-11-04")) == day("2026-12-15"))
+        #expect(IssueDeadline.lastDay(treatment: .intraCommunityGoods, taxPoint: day("2026-12-31")) == day("2027-01-15"))
+        #expect(IssueDeadline.lastDay(for: DocumentFixtures.euGoodsInvoice()) == day("2026-12-15"))
     }
 
     @Test func documentTakesTheStrictestDeadline() {
@@ -475,6 +490,80 @@ enum DocumentFixtures {
         }
         #expect(DocumentLabel.amountDue.text(language: .czech) == "K úhradě")
         #expect(DocumentLabel.taxPointDate.text(language: .english) == "Date of taxable supply")
+    }
+}
+
+@Suite struct IntraCommunityGoodsTests {
+    @Test func goodsInvoiceIsExemptAndCitesSection64() throws {
+        let document = DocumentFixtures.euGoodsInvoice()
+        #expect(DocumentValidator.validate(document).isEmpty)
+        #expect(document.hasIntraCommunityGoods)
+        #expect(!document.hasReverseCharge)
+        #expect(document.requiresCustomerVATID)
+        #expect(DocumentClause.clauses(for: document) == [.intraCommunitySupply, .exchangeRate(DocumentFixtures.eurRate)])
+        #expect(DocumentClause.intraCommunitySupply.text(language: .czech)
+                == "Dodání zboží do jiného členského státu, osvobozeno od daně podle § 64 odst. 1 zákona č. 235/2004 Sb., o dani z přidané hodnoty.")
+        #expect(DocumentClause.intraCommunitySupply.text(language: .english)
+                == "Intra-Community supply of goods, exempt from VAT under Section 64(1) of the Czech VAT Act and Article 138 of Council Directive 2006/112/EC.")
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(totals.rows.count == 1)
+        #expect(row.treatment == .intraCommunityGoods)
+        #expect(row.rate == nil)
+        #expect(row.base == 1000)
+        #expect(row.vat == 0)
+        #expect(row.taxableBaseCZK == d("24310.00"))
+        #expect(totals.taxableVATCZK == 0)
+        #expect(totals.amountDue == 1000)
+    }
+
+    @Test func goodsNeedTheCustomersVATIDFromAnotherMemberState() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.customer.vatIdentifier = nil
+        let missing = DocumentValidator.validate(document)
+        #expect(missing.contains { $0.code == .intraCommunityGoodsVATIdentifierRequired && $0.isError })
+        #expect(!missing.contains { $0.code == .customerVATIdentifierRequired })
+        #expect(!DocumentValidator.canIssue(document))
+        document.customer = DocumentFixtures.czechCustomer
+        let czech = DocumentValidator.validate(document)
+        #expect(czech.contains { $0.code == .intraCommunityGoodsVATIdentifierNotEU && $0.detail == "CZ25596641" && $0.isError })
+        #expect(!czech.contains { $0.code == .customerVATIdentifierNotEU })
+        #expect(ValidationIssue(code: .intraCommunityGoodsVATIdentifierRequired, severity: .error).message(language: .czech)
+                .contains("§ 64 odst. 1 písm. a) ZDPH"))
+    }
+
+    @Test func goodsAndServicesOnOneDocumentCiteBothRules() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.lines.append(DocumentLine(id: "l2", text: "Fitting advice", quantity: 1, unit: "h", unitPrice: 50, treatment: .reverseChargeEU))
+        #expect(Array(DocumentClause.clauses(for: document).prefix(2)) == [.intraCommunitySupply, .reverseCharge])
+        document.customer.vatIdentifier = nil
+        let codes = DocumentValidator.validate(document).map(\.code)
+        #expect(codes.contains(.intraCommunityGoodsVATIdentifierRequired))
+        #expect(codes.contains(.customerVATIdentifierRequired))
+    }
+
+    @Test func goodsInvoicedBeforeTheyLeaveRaiseNoServicesWarning() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.taxPointDate = day("2026-11-10")
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .taxPointAfterIssueDate })
+        document.lines[0].treatment = .reverseChargeEU
+        #expect(DocumentValidator.validate(document).contains { $0.code == .taxPointAfterIssueDate })
+    }
+
+    @Test func goodsCountOnTheFifteenthOrTheEarlierIssueDate() {
+        // § 22 odst. 1 ZDPH: delivered on 20 November and invoiced before 15 December → the issue date.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-11-25")) == day("2026-11-25"))
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-14")) == day("2026-12-14"))
+        // Invoiced on or after the 15th → the 15th.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-15")) == day("2026-12-15"))
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-20")) == day("2026-12-15"))
+        // Invoiced before the goods leave → the issue date, even in the month before.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-12-02"), issueDate: day("2026-11-30")) == day("2026-11-30"))
+        // Across the year end.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-12-31"), issueDate: day("2027-01-20")) == day("2027-01-15"))
+        // Every other treatment counts on the tax point.
+        #expect(ReportingDay.day(treatment: .reverseChargeEU, taxPoint: day("2026-11-20"), issueDate: day("2026-12-20")) == day("2026-11-20"))
+        #expect(ReportingDay.day(treatment: .taxable(.standard), taxPoint: day("2026-11-20"), issueDate: day("2026-11-21")) == day("2026-11-20"))
     }
 }
 

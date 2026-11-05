@@ -13,6 +13,7 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case supplierNameMissing, supplierAddressIncomplete, supplierVATIdentifierMissing
         case supplierIdentificationNumberMissing, supplierRegistryEntryMissing
         case customerNameMissing, customerAddressIncomplete, customerVATIdentifierRequired, customerVATIdentifierNotEU
+        case intraCommunityGoodsVATIdentifierRequired, intraCommunityGoodsVATIdentifierNotEU
         case numberMissing, noLines, lineTextMissing, lineQuantityNegative, lineQuantityZero, lineDiscountOutOfRange
         case rateNotInForce, exemptReferenceMissing, mixedTreatments
         case taxPointDateMissing, taxPointAfterIssueDate, issuedAfterDeadline, dueDateBeforeIssueDate
@@ -81,6 +82,12 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case .customerVATIdentifierNotEU:
             return ("DIČ odběratele {detail} není z jiného členského státu EU; přenesení daňové povinnosti podle § 9 odst. 1 ZDPH se neuplatní.",
                     "The customer's VAT ID {detail} is not from another EU member state; the § 9(1) reverse charge does not apply.")
+        case .intraCommunityGoodsVATIdentifierRequired:
+            return ("Dodání zboží do jiného členského státu je osvobozeno, jen když odběratel sdělil své DIČ z jiného členského státu (§ 64 odst. 1 písm. a) ZDPH); doklad ho musí uvádět (§ 29 odst. 1 písm. d) ZDPH).",
+                    "Goods supplied to another member state are exempt only when the customer has given their VAT ID from another member state (§ 64(1)(a) of the VAT Act); the document must carry it (§ 29(1)(d) of the VAT Act).")
+        case .intraCommunityGoodsVATIdentifierNotEU:
+            return ("DIČ odběratele {detail} není z jiného členského státu EU; osvobození podle § 64 ZDPH se neuplatní.",
+                    "The customer's VAT ID {detail} is not from another EU member state; the § 64 exemption does not apply.")
         case .numberMissing:
             return ("Doklad nemá evidenční číslo (§ 29 odst. 1 písm. e) ZDPH).",
                     "The document has no number (§ 29(1)(e) of the VAT Act).")
@@ -197,17 +204,19 @@ public enum DocumentValidator {
         if document.supplier.identificationNumber == nil { add(.supplierIdentificationNumberMissing, .warning) }
         if document.supplier.registryEntry == nil && document.supplier.address.isCzech { add(.supplierRegistryEntryMissing, .warning) }
 
-        // Customer: § 29 odst. 1 písm. c) and d), odst. 2 písm. c) ZDPH.
+        // Customer: § 29 odst. 1 písm. c) and d), odst. 2 písm. c) ZDPH; § 64 odst. 1 písm. a) ZDPH.
         if document.customer.name.trimmingWhitespace().isEmpty { add(.customerNameMissing, .error) }
         if !Self.isComplete(document.customer.address) { add(.customerAddressIncomplete, .error) }
         let treatments = document.treatments
-        if document.hasReverseCharge {
+        // A VAT ID from another member state: the reverse charge prints it, the § 64 exemption depends on it.
+        for treatment in treatments where treatment.requiresCustomerVATID {
+            let goods = treatment == .intraCommunityGoods
             if let vatIdentifier = document.customer.vatIdentifier {
                 if vatIdentifier.isCzech || !vatIdentifier.isEU {
-                    add(.customerVATIdentifierNotEU, .error, detail: vatIdentifier.value)
+                    add(goods ? .intraCommunityGoodsVATIdentifierNotEU : .customerVATIdentifierNotEU, .error, detail: vatIdentifier.value)
                 }
             } else {
-                add(.customerVATIdentifierRequired, .error)
+                add(goods ? .intraCommunityGoodsVATIdentifierRequired : .customerVATIdentifierRequired, .error)
             }
         }
 
@@ -234,7 +243,7 @@ public enum DocumentValidator {
                 }
             case .exempt(let reference):
                 if reference.trimmingWhitespace().isEmpty { add(.exemptReferenceMissing, .error, line: line.id) }
-            case .reverseChargeEU, .outsideEU:
+            case .intraCommunityGoods, .reverseChargeEU, .outsideEU:
                 break
             }
         }
@@ -242,7 +251,10 @@ public enum DocumentValidator {
 
         // Dates: § 29 odst. 1 písm. g) and h), § 28 ZDPH.
         if isTaxDocument && document.taxPointDate == nil { add(.taxPointDateMissing, .error) }
-        if let taxPointDate = document.taxPointDate, taxPointDate > document.issueDate {
+        // The warning is about services (§ 21 odst. 3); goods sent to another member state may be invoiced
+        // before they leave, and § 22 odst. 1 then counts them on the issue date.
+        let intraCommunityGoodsOnly = !treatments.isEmpty && treatments.allSatisfy { $0 == .intraCommunityGoods }
+        if let taxPointDate = document.taxPointDate, taxPointDate > document.issueDate, !intraCommunityGoodsOnly {
             add(.taxPointAfterIssueDate, .warning, detail: taxPointDate.isoString)
         }
         if document.dueDate < document.issueDate { add(.dueDateBeforeIssueDate, .error, detail: document.dueDate.isoString) }

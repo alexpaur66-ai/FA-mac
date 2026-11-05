@@ -226,23 +226,37 @@ import Testing
     @Test func inferredStatusesAndDefaultTreatments() {
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("CZ45274649"), countryCode: "CZ") == .czechVATPayer)
         #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "CZ") == .czechNonPayer)
-        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("DE123456789"), countryCode: "DE") == .euBusiness)
+        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("DE123456789"), countryCode: "DE") == .euBusinessGoods)
         #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "DE") == .euConsumer)
         #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "gr") == .euConsumer)
-        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("GR123456789"), countryCode: "GR") == .euBusiness)
-        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("EL123456789"), countryCode: "GR") == .euBusiness)
+        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("GR123456789"), countryCode: "GR") == .euBusinessGoods)
+        #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("EL123456789"), countryCode: "GR") == .euBusinessGoods)
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("CHE123456789"), countryCode: "CH") == .nonEUBusiness)
         #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "US") == .nonEUConsumer)
 
-        #expect(CustomerVATStatus.czechVATPayer.defaultServiceTreatment == .taxable(.standard))
-        #expect(CustomerVATStatus.czechNonPayer.defaultServiceTreatment == .taxable(.standard))
-        #expect(CustomerVATStatus.euBusiness.defaultServiceTreatment == .reverseChargeEU)
-        #expect(CustomerVATStatus.euConsumer.defaultServiceTreatment == .taxable(.standard))
-        #expect(CustomerVATStatus.nonEUBusiness.defaultServiceTreatment == .outsideEU)
-        #expect(CustomerVATStatus.nonEUConsumer.defaultServiceTreatment == .taxable(.standard))
-        #expect(CustomerVATStatus.euBusiness.requiresVATIdentifier)
+        #expect(CustomerVATStatus.czechVATPayer.defaultTreatment == .taxable(.standard))
+        #expect(CustomerVATStatus.czechNonPayer.defaultTreatment == .taxable(.standard))
+        #expect(CustomerVATStatus.euBusinessGoods.defaultTreatment == .intraCommunityGoods)
+        #expect(CustomerVATStatus.euBusinessServices.defaultTreatment == .reverseChargeEU)
+        #expect(CustomerVATStatus.euConsumer.defaultTreatment == .taxable(.standard))
+        #expect(CustomerVATStatus.nonEUBusiness.defaultTreatment == .outsideEU)
+        #expect(CustomerVATStatus.nonEUConsumer.defaultTreatment == .taxable(.standard))
+        #expect(CustomerVATStatus.euBusinessGoods.requiresVATIdentifier)
+        #expect(CustomerVATStatus.euBusinessServices.requiresVATIdentifier)
         #expect(CustomerVATStatus.czechVATPayer.requiresVATIdentifier)
         #expect(!CustomerVATStatus.euConsumer.requiresVATIdentifier)
+        #expect(CustomerVATStatus.euBusinessGoods.isEUBusiness && CustomerVATStatus.euBusinessServices.isEUBusiness)
+        #expect(!CustomerVATStatus.czechVATPayer.isEUBusiness && !CustomerVATStatus.euConsumer.isEUBusiness)
+    }
+
+    @Test func euBusinessStoredBeforeGoodsReadsAsServices() throws {
+        // Clients saved before the goods status keep the reverse charge they were created with.
+        let stored = try JSONDecoder().decode([CustomerVATStatus].self, from: Data(#"["euBusiness"]"#.utf8))
+        #expect(stored == [.euBusinessServices])
+        #expect(CustomerVATStatus.euBusinessGoods.rawValue == "euBusinessGoods")
+        let statuses: [CustomerVATStatus] = [.euBusinessGoods, .euBusinessServices]
+        let back = try JSONDecoder().decode([CustomerVATStatus].self, from: JSONEncoder().encode(statuses))
+        #expect(back == statuses)
     }
 
     @Test func customerDefaults() {
@@ -254,20 +268,20 @@ import Testing
         #expect(czech.language == .czech)
 
         let german = Customer(id: "c2", party: Party(name: "Beispiel GmbH", address: berlin, vatIdentifier: VATIdentifier("DE123456789")), currency: .eur, paymentTermDays: 30)
-        #expect(german.vatStatus == .euBusiness)
+        #expect(german.vatStatus == .euBusinessGoods)
         #expect(german.language == .english)
-        #expect(german.vatStatus.defaultServiceTreatment == .reverseChargeEU)
+        #expect(german.vatStatus.defaultTreatment == .intraCommunityGoods)
 
         let swiss = Customer(id: "c3", party: Party(name: "Beispiel AG", address: zurich, vatIdentifier: VATIdentifier("CHE123456789")), currency: .chf)
         #expect(swiss.vatStatus == .nonEUBusiness)
 
-        let overridden = Customer(id: "c4", party: Party(name: "Someone", address: athens), vatStatus: .euBusiness, language: .czech)
-        #expect(overridden.vatStatus == .euBusiness)
+        let overridden = Customer(id: "c4", party: Party(name: "Someone", address: athens), vatStatus: .euBusinessServices, language: .czech)
+        #expect(overridden.vatStatus == .euBusinessServices)
         #expect(overridden.language == .czech)
 
         let greek = Customer(id: "c5", party: Party(name: "Example AE", address: athens, vatIdentifier: VATIdentifier("GR123456789")), currency: .eur)
-        #expect(greek.vatStatus == .euBusiness)
-        #expect(greek.vatStatus.defaultServiceTreatment == .reverseChargeEU)
+        #expect(greek.vatStatus == .euBusinessGoods)
+        #expect(greek.vatStatus.defaultTreatment == .intraCommunityGoods)
         #expect(greek.vatStatus.requiresVATIdentifier)
         #expect(greek.party.vatIdentifier?.value == "EL123456789")
     }

@@ -125,6 +125,10 @@ extension Document {
             return "DPH " + (rate.map { $0.percent.plainString } ?? "") + " %"
         case (.taxable, .english):
             return "VAT " + (rate.map { $0.percent.plainString } ?? "") + " %"
+        case (.intraCommunityGoods, .czech):
+            return "dodání zboží do jiného členského státu"
+        case (.intraCommunityGoods, .english):
+            return "intra-Community supply of goods"
         case (.reverseChargeEU, .czech):
             return "přenesení daňové povinnosti"
         case (.reverseChargeEU, .english):
