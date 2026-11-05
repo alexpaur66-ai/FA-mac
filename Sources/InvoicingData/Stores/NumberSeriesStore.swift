@@ -11,15 +11,29 @@ public struct NumberSeriesStore: Sendable {
         self.database = database
     }
 
-    /// Inserts or replaces a series. Replacing a series that has issued numbers with a lower counter
-    /// would reuse numbers, so the stored counter is kept when it is higher than the given one.
+    /// Inserts or replaces a series. Replacing a series that has issued numbers with a lower counter or an
+    /// earlier year would reuse numbers, so the stored year and counter never move backwards, whatever the
+    /// template: name, kinds, template and yearly reset stay editable, the counter carries on.
     public func save(_ stored: StoredNumberSeries, now: Date = Date()) throws {
         try database.queue.write { db in
             let existing = try NumberSeriesRecord.fetchOne(db, key: stored.id)
             var record = NumberSeriesRecord(stored)
-            if let existing, existing.template == record.template, existing.year == record.year, existing.lastCounter > record.lastCounter {
-                record.lastCounter = existing.lastCounter
-                record.lastIssuedYear = existing.lastIssuedYear
+            if let existing {
+                if existing.resetsYearly && record.resetsYearly {
+                    // The counter belongs to its year: keep the stored pair when it is ahead.
+                    if (existing.year, existing.lastCounter) > (record.year, record.lastCounter) {
+                        record.year = existing.year
+                        record.lastCounter = existing.lastCounter
+                        record.lastIssuedYear = existing.lastIssuedYear
+                    }
+                } else {
+                    // A counter that does not restart yearly only grows.
+                    if existing.lastCounter > record.lastCounter {
+                        record.lastCounter = existing.lastCounter
+                        record.lastIssuedYear = existing.lastIssuedYear
+                    }
+                    record.year = max(record.year, existing.year)
+                }
             }
             try record.save(db)
             try AuditLog.append(db, entity: "numberSeries", id: stored.id, action: existing == nil ? "create" : "update",

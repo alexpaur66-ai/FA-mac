@@ -88,6 +88,28 @@ enum Fixtures {
         return database
     }
 
+    /// Adds the advance request series "zf" (ZF-{YYYY}-{NNN}) and the payment tax document series "dd"
+    /// (DD-{YYYY}-{NNN}).
+    static func addAdvanceSeries(_ database: AppDatabase) throws {
+        let store = NumberSeriesStore(database)
+        try store.save(StoredNumberSeries(name: "Zálohové faktury", kinds: [.advanceRequest],
+                                          series: try DocumentNumberSeries(id: "zf", pattern: DocumentNumberPattern(template: "ZF-{YYYY}-{NNN}"), year: 2026)),
+                       now: now)
+        try store.save(StoredNumberSeries(name: "Doklady k platbě", kinds: [.paymentTaxDocument],
+                                          series: try DocumentNumberSeries(id: "dd", pattern: DocumentNumberPattern(template: "DD-{YYYY}-{NNN}"), year: 2026)),
+                       now: now)
+    }
+
+    /// Saves and issues an advance request for 12 100 CZK from the "zf" series (see `addAdvanceSeries`).
+    static func issuedAdvance(_ database: AppDatabase, id: String = "adv") throws -> Document {
+        var request = czkDraft(id: id)
+        request.kind = .advanceRequest
+        request.taxPointDate = nil
+        let store = DocumentStore(database)
+        try store.saveDraft(request, now: now)
+        return try store.issue(id: id, seriesID: "zf", now: now)
+    }
+
     static let cnbDaily = """
     04.11.2026 #212
     země|měna|množství|kód|kurz

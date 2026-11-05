@@ -74,15 +74,23 @@ public struct StatementStore: Sendable {
         }
     }
 
-    /// Records the match of a transaction: `documentID` nil with `.ignored` or `.unmatched`, a document id
-    /// with `.automatic` or `.manual`.
+    /// Records the match of a transaction: `documentID` nil with `.ignored` or `.unmatched`, an issued
+    /// document's id with `.automatic` or `.manual` (`invalidMatch` otherwise, `documentNotIssued` for a
+    /// draft). A transaction that payments were recorded from cannot be unmatched or ignored.
     public func setMatch(transactionID: String, documentID: String?, state: TransactionMatchState, now: Date = Date()) throws {
         try database.queue.write { db in
             guard var record = try BankTransactionRecord.fetchOne(db, key: transactionID) else {
                 throw DataError.transactionNotFound(transactionID)
             }
-            if let documentID {
-                guard try DocumentRecord.exists(db, key: documentID) else { throw DataError.documentNotFound(documentID) }
+            switch state {
+            case .automatic, .manual:
+                guard let documentID else { throw DataError.invalidMatch(transactionID: transactionID, state: state) }
+                guard let document = try DocumentRecord.fetchOne(db, key: documentID) else { throw DataError.documentNotFound(documentID) }
+                guard document.status == DocumentStatus.issued.rawValue else { throw DataError.documentNotIssued(documentID) }
+            case .unmatched, .ignored:
+                guard documentID == nil else { throw DataError.invalidMatch(transactionID: transactionID, state: state) }
+                let payments = try DocumentPaymentRecord.filter(Column("bankTransactionID") == transactionID).fetchCount(db)
+                guard payments == 0 else { throw DataError.transactionHasPayments(transactionID) }
             }
             record.matchedDocumentID = documentID
             record.matchState = state.rawValue

@@ -85,6 +85,14 @@ enum Schema {
                 WHEN OLD.status = 'issued'
                 BEGIN SELECT RAISE(ABORT, 'issued documents cannot be deleted'); END
                 """)
+            // REPLACE removes the conflicting row without firing the delete trigger (recursive_triggers is off),
+            // so an insert that would overwrite an issued row, or take its number, is aborted before it starts.
+            try db.execute(sql: """
+                CREATE TRIGGER document_frozen_replace BEFORE INSERT ON document
+                WHEN EXISTS (SELECT 1 FROM document WHERE status = 'issued'
+                             AND (id = NEW.id OR (NEW.number IS NOT NULL AND number = NEW.number)))
+                BEGIN SELECT RAISE(ABORT, 'issued documents are frozen'); END
+                """)
 
             try db.create(table: "exchangeRate") { t in
                 t.column("currency", .text).notNull()
@@ -148,6 +156,8 @@ enum Schema {
                 t.column("createdAt", .text).notNull()
             }
             try db.execute(sql: "CREATE INDEX documentPayment_documentID ON documentPayment(documentID)")
+            // A payment tax document is the receipt of one payment only.
+            try db.execute(sql: "CREATE UNIQUE INDEX documentPayment_receiptDocumentID ON documentPayment(receiptDocumentID) WHERE receiptDocumentID IS NOT NULL")
             // An issued payment tax document rests on its payment: the payment is locked while the receipt is issued.
             try db.execute(sql: """
                 CREATE TRIGGER documentPayment_locked_update BEFORE UPDATE ON documentPayment
@@ -161,6 +171,14 @@ enum Schema {
                     AND EXISTS (SELECT 1 FROM document WHERE id = OLD.receiptDocumentID AND status = 'issued')
                 BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
                 """)
+            // REPLACE over a locked payment (same id, or same receipt through the unique index) is aborted too.
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_locked_replace BEFORE INSERT ON documentPayment
+                WHEN EXISTS (SELECT 1 FROM documentPayment p JOIN document d ON d.id = p.receiptDocumentID
+                             WHERE d.status = 'issued'
+                             AND (p.id = NEW.id OR (NEW.receiptDocumentID IS NOT NULL AND p.receiptDocumentID = NEW.receiptDocumentID)))
+                BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
+                """)
 
             try db.create(table: "auditEvent") { t in
                 t.autoIncrementedPrimaryKey("id")
@@ -171,6 +189,15 @@ enum Schema {
                 t.column("details", .text)
             }
             try db.execute(sql: "CREATE INDEX auditEvent_entity ON auditEvent(entity, entityID)")
+            // The audit log is evidence: the stores only insert, and nothing may rewrite or remove an event.
+            try db.execute(sql: """
+                CREATE TRIGGER auditEvent_append_only_update BEFORE UPDATE ON auditEvent
+                BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER auditEvent_append_only_delete BEFORE DELETE ON auditEvent
+                BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END
+                """)
         }
         return migrator
     }

@@ -37,7 +37,9 @@ public struct DocumentStore: Sendable {
     }
 
     /// Inserts or updates a draft. The stored status is always `draft` and the number stays empty;
-    /// `issue` is the only way to an issued document. Throws `documentIsFrozen` for an issued id.
+    /// `issue` is the only way to an issued document. Throws `documentIsFrozen` for an issued id. A draft
+    /// that is the receipt of a payment (`attachReceipt`) must still match it: an edit of its kind,
+    /// currency, advance or amount that breaks the link throws `receiptMismatch` or `currencyMismatch`.
     public func saveDraft(_ document: Document, now: Date = Date()) throws {
         try database.queue.write { db in
             let stamp = Timestamps.string(now)
@@ -50,18 +52,30 @@ public struct DocumentStore: Sendable {
             draft.number = nil
             let totals = try? DocumentTotals.compute(for: draft)
             let record = try DocumentRecord(document: draft, totals: totals, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, issuedAt: nil)
+            for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == draft.id).fetchAll(db) {
+                try Self.checkReceipt(db, payment: payment, receipt: record)
+            }
             try record.save(db)
             try AuditLog.append(db, entity: "document", id: draft.id, action: existing == nil ? "create" : "update", at: stamp)
         }
     }
 
-    /// Deletes a draft; issued documents cannot be deleted.
+    /// Deletes a draft; issued documents cannot be deleted. A bank transaction matched to the draft goes
+    /// back to the unmatched list, so the incoming payment does not drop out of every list.
     public func deleteDraft(id: String, now: Date = Date()) throws {
         try database.queue.write { db in
             guard let record = try DocumentRecord.fetchOne(db, key: id) else { throw DataError.documentNotFound(id) }
             guard record.status == DocumentStatus.draft.rawValue else { throw DataError.documentIsFrozen(id) }
+            let stamp = Timestamps.string(now)
+            for var transaction in try BankTransactionRecord.filter(Column("matchedDocumentID") == id).fetchAll(db) {
+                transaction.matchedDocumentID = nil
+                transaction.matchState = TransactionMatchState.unmatched.rawValue
+                try transaction.update(db)
+                try AuditLog.append(db, entity: "bankTransaction", id: transaction.id, action: "match",
+                                    details: ["state": TransactionMatchState.unmatched.rawValue, "document": "", "reason": "draft deleted"], at: stamp)
+            }
             try record.delete(db)
-            try AuditLog.append(db, entity: "document", id: id, action: "delete", at: Timestamps.string(now))
+            try AuditLog.append(db, entity: "document", id: id, action: "delete", at: stamp)
         }
     }
 
@@ -98,7 +112,9 @@ public struct DocumentStore: Sendable {
 
     /// Issues a draft: takes the next number of the series, completes the payment instructions, checks
     /// the document with `DocumentValidator` and freezes it. Everything happens in one transaction, so a
-    /// failed validation leaves the draft, the series and the audit trail untouched.
+    /// failed validation leaves the draft, the series and the audit trail untouched. The series must number
+    /// the document's kind (`seriesDoesNotNumber`), and a receipt linked to a payment must match that
+    /// payment exactly (`receiptMismatch`, `currencyMismatch`) before it is frozen.
     @discardableResult
     public func issue(id: String, seriesID: String, now: Date = Date()) throws -> Document {
         try database.queue.write { db in
@@ -109,6 +125,7 @@ public struct DocumentStore: Sendable {
             }
             guard let seriesRecord = try NumberSeriesRecord.fetchOne(db, key: seriesID) else { throw DataError.seriesNotFound(seriesID) }
             var stored = try seriesRecord.stored()
+            guard stored.numbers(document.kind) else { throw DataError.seriesDoesNotNumber(seriesID: seriesID, kind: document.kind) }
             let number = try stored.series.next(on: document.issueDate)
 
             document.number = number
@@ -128,6 +145,10 @@ public struct DocumentStore: Sendable {
 
             let stamp = Timestamps.string(now)
             let issued = try DocumentRecord(document: document, totals: totals, createdAt: record.createdAt, updatedAt: stamp, issuedAt: stamp)
+            // The issued receipt rests on its payment: check the link again, the draft may have changed since.
+            for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == id).fetchAll(db) {
+                try Self.checkReceipt(db, payment: payment, receipt: issued)
+            }
             try issued.update(db)
             try NumberSeriesRecord(stored).update(db)
             try AuditLog.append(db, entity: "document", id: id, action: "issue",
@@ -138,7 +159,10 @@ public struct DocumentStore: Sendable {
 
     // MARK: Payments
 
-    /// Records a payment against an issued document.
+    /// Records a payment against an issued document. A payment taken from a bank transaction must be in
+    /// its currency, and the payments taken from one transaction never add up to more than its credit (one
+    /// transfer may pay several documents, but is never counted twice); an unmatched transaction becomes
+    /// matched to the document.
     @discardableResult
     public func recordPayment(documentID: String, on day: CalendarDay, amount: Money, bankTransactionID: String? = nil,
                               note: String? = nil, now: Date = Date()) throws -> DocumentPayment {
@@ -148,8 +172,31 @@ public struct DocumentStore: Sendable {
             let currency = Currency(code: record.currency)
             guard amount.currency == currency else { throw DataError.currencyMismatch(expected: currency, actual: amount.currency) }
             let stamp = Timestamps.string(now)
+            let units = try MinorUnits.of(amount.amount, currency)
+            if let bankTransactionID {
+                guard var transaction = try BankTransactionRecord.fetchOne(db, key: bankTransactionID) else {
+                    throw DataError.transactionNotFound(bankTransactionID)
+                }
+                guard transaction.currency == currency.code else {
+                    throw DataError.currencyMismatch(expected: Currency(code: transaction.currency), actual: currency)
+                }
+                let used = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(amount), 0) FROM documentPayment WHERE bankTransactionID = ?",
+                                              arguments: [bankTransactionID]) ?? 0
+                let available = max(transaction.amount - used, 0)
+                guard units <= available else {
+                    throw DataError.transactionOverallocated(id: bankTransactionID, available: MinorUnits.money(available, currency),
+                                                             requested: MinorUnits.money(units, currency))
+                }
+                if transaction.matchState == TransactionMatchState.unmatched.rawValue || transaction.matchState == TransactionMatchState.ignored.rawValue {
+                    transaction.matchedDocumentID = documentID
+                    transaction.matchState = TransactionMatchState.manual.rawValue
+                    try transaction.update(db)
+                    try AuditLog.append(db, entity: "bankTransaction", id: bankTransactionID, action: "match",
+                                        details: ["state": TransactionMatchState.manual.rawValue, "document": documentID], at: stamp)
+                }
+            }
             let payment = DocumentPaymentRecord(id: UUID().uuidString, documentID: documentID, paidOn: day.isoString,
-                                                amount: try MinorUnits.of(amount.amount, currency), currency: currency.code,
+                                                amount: units, currency: currency.code,
                                                 bankTransactionID: bankTransactionID, receiptDocumentID: nil, note: note, createdAt: stamp)
             try payment.insert(db)
             try AuditLog.append(db, entity: "document", id: documentID, action: "payment",
@@ -159,32 +206,59 @@ public struct DocumentStore: Sendable {
     }
 
     /// Links the payment tax document `documentID` (§ 28 odst. 1 písm. d) ZDPH, built with
-    /// `Document.paymentTaxDocument`) to the payment it was issued for. The receipt must be in the payment's
-    /// currency and, once its amounts are known, be for exactly the paid amount. While the receipt is
-    /// issued the payment is locked: the store refuses to change or delete it and two triggers back that up.
+    /// `Document.paymentTaxDocument`) to the payment it was issued for. See `checkReceipt` for what must
+    /// match; a draft receipt is checked again on every save and when it is issued. While the receipt is
+    /// issued the payment is locked: the store refuses to change or delete it and triggers back that up.
     @discardableResult
     public func attachReceipt(paymentID: String, documentID: String, now: Date = Date()) throws -> DocumentPayment {
         try database.queue.write { db in
             guard var payment = try DocumentPaymentRecord.fetchOne(db, key: paymentID) else { throw DataError.paymentNotFound(paymentID) }
             if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(paymentID) }
             guard let receipt = try DocumentRecord.fetchOne(db, key: documentID) else { throw DataError.documentNotFound(documentID) }
-            guard receipt.kind == DocumentKind.paymentTaxDocument.rawValue else {
-                throw DataError.receiptMismatch(paymentID: paymentID, detail: "\(documentID) is \(receipt.kind), not a payment tax document")
-            }
-            let currency = Currency(code: payment.currency)
-            guard receipt.currency == payment.currency else {
-                throw DataError.currencyMismatch(expected: currency, actual: Currency(code: receipt.currency))
-            }
-            if let due = receipt.amountDue, due != payment.amount {
-                throw DataError.receiptMismatch(
-                    paymentID: paymentID,
-                    detail: "the document is for \(MinorUnits.money(due, currency)), the payment is \(MinorUnits.money(payment.amount, currency))")
-            }
+            try Self.checkReceipt(db, payment: payment, receipt: receipt)
+            var details = ["payment": paymentID, "receipt": documentID]
+            if let replaced = payment.receiptDocumentID, replaced != documentID { details["replaced"] = replaced }
             payment.receiptDocumentID = documentID
             try payment.update(db)
             try AuditLog.append(db, entity: "document", id: payment.documentID, action: "receiptAttached",
-                                details: ["payment": paymentID, "receipt": documentID], at: Timestamps.string(now))
+                                details: details, at: Timestamps.string(now))
             return try payment.payment(receiptIssued: receipt.status == DocumentStatus.issued.rawValue)
+        }
+    }
+
+    /// Checks that `receipt` can be the payment tax document of `payment`: a payment tax document in the
+    /// payment's currency, for the advance request the payment was received on (its number and customer),
+    /// for exactly the paid amount once the receipt's amounts are known, and the receipt of no other
+    /// payment. Throws `receiptMismatch` or `currencyMismatch`.
+    static func checkReceipt(_ db: Database, payment: DocumentPaymentRecord, receipt: DocumentRecord) throws {
+        guard receipt.kind == DocumentKind.paymentTaxDocument.rawValue else {
+            throw DataError.receiptMismatch(paymentID: payment.id, detail: "\(receipt.id) is \(receipt.kind), not a payment tax document")
+        }
+        let currency = Currency(code: payment.currency)
+        guard receipt.currency == payment.currency else {
+            throw DataError.currencyMismatch(expected: currency, actual: Currency(code: receipt.currency))
+        }
+        guard let paid = try DocumentRecord.fetchOne(db, key: payment.documentID) else { throw DataError.documentNotFound(payment.documentID) }
+        guard paid.kind == DocumentKind.advanceRequest.rawValue else {
+            throw DataError.receiptMismatch(paymentID: payment.id,
+                                            detail: "the payment is on \(paid.number ?? paid.id), which is \(paid.kind), not an advance request")
+        }
+        guard let related = receipt.relatedDocumentNumber, related == paid.number else {
+            throw DataError.receiptMismatch(paymentID: payment.id,
+                                            detail: "\(receipt.id) is for advance \(receipt.relatedDocumentNumber ?? "none"), the payment is on \(paid.number ?? paid.id)")
+        }
+        guard receipt.customerID == paid.customerID else {
+            throw DataError.receiptMismatch(paymentID: payment.id,
+                                            detail: "\(receipt.id) is for customer \(receipt.customerName), the advance for \(paid.customerName)")
+        }
+        if let due = receipt.amountDue, due != payment.amount {
+            throw DataError.receiptMismatch(
+                paymentID: payment.id,
+                detail: "the document is for \(MinorUnits.money(due, currency)), the payment is \(MinorUnits.money(payment.amount, currency))")
+        }
+        if let other = try String.fetchOne(db, sql: "SELECT id FROM documentPayment WHERE receiptDocumentID = ? AND id <> ?",
+                                           arguments: [receipt.id, payment.id]) {
+            throw DataError.receiptMismatch(paymentID: payment.id, detail: "\(receipt.id) is already the tax document of payment \(other)")
         }
     }
 

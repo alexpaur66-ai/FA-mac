@@ -291,4 +291,174 @@ import InvoicingCore
         #expect(try AuditLog(database).events(entity: "document", id: "adv").map(\.action)
                 == ["create", "issue", "payment", "receiptAttached", "payment", "receiptAttached", "paymentDeleted"])
     }
+
+    @Test func linkedReceiptCannotDriftFromItsPayment() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try Fixtures.addAdvanceSeries(database)
+        let request = try Fixtures.issuedAdvance(database)
+        let payment = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        let receipt = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: request, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(receipt, now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+
+        // Saving the linked draft with another amount, kind or currency is refused; the draft stays as it was.
+        let smaller = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: request, received: Fixtures.d("5000"), on: Fixtures.day("2026-11-10"))
+        do {
+            try store.saveDraft(smaller, now: Fixtures.now)
+            Issue.record("a linked receipt was saved for another amount")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        var invoice = receipt
+        invoice.kind = .invoice
+        do {
+            try store.saveDraft(invoice, now: Fixtures.now)
+            Issue.record("a linked receipt was saved as an invoice")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        var euros = receipt
+        euros.currency = .eur
+        #expect(throws: DataError.currencyMismatch(expected: .czk, actual: .eur)) { try store.saveDraft(euros, now: Fixtures.now) }
+        #expect(try store.document(id: "dd1") == receipt)
+
+        // A drifted row that got past saveDraft (here written directly, without amounts, so attaching it
+        // skips the amount check) is caught when it is issued: nothing is numbered, frozen or locked.
+        let drifted = try DocumentRecord(document: smaller, totals: nil, createdAt: "2026-11-05T05:00:00Z", updatedAt: "2026-11-05T05:00:00Z", issuedAt: nil)
+        try database.queue.write { db in try drifted.update(db) }
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+        do {
+            _ = try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+            Issue.record("a receipt for another amount than its payment was issued")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        let still = try #require(try store.document(id: "dd1"))
+        #expect(still.status == .draft)
+        #expect(still.number == nil)
+        #expect(try NumberSeriesStore(database).series(id: "dd")?.series.lastCounter == 0)
+        #expect(try store.payments(for: "adv").first?.receiptIssued == false)
+        #expect(try AuditLog(database).events(entity: "document", id: "dd1").map { $0.action } == ["create"])
+
+        // The matching receipt issues and locks its payment.
+        try store.saveDraft(receipt, now: Fixtures.now)
+        #expect(try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now).number == "DD-2026-001")
+        #expect(try store.payments(for: "adv").first?.receiptIssued == true)
+    }
+
+    @Test func aReceiptBelongsToOnePayment() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try Fixtures.addAdvanceSeries(database)
+        let request = try Fixtures.issuedAdvance(database)
+        let first = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        let second = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        let receipt = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: request, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(receipt, now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: first.id, documentID: "dd1", now: Fixtures.now)
+        // Attaching it again to the same payment is harmless.
+        _ = try store.attachReceipt(paymentID: first.id, documentID: "dd1", now: Fixtures.now)
+
+        do {
+            _ = try store.attachReceipt(paymentID: second.id, documentID: "dd1", now: Fixtures.now)
+            Issue.record("one receipt was attached to two payments")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == second.id)
+        }
+        try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: second.id, documentID: "dd1", now: Fixtures.now)
+            Issue.record("an issued receipt was attached to a second payment")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == second.id)
+        }
+        let payments = try store.payments(for: "adv")
+        #expect(payments.first { $0.id == first.id }?.receiptIssued == true)
+        let other = try #require(payments.first { $0.id == second.id })
+        #expect(other.receiptDocumentID == nil)
+        #expect(!other.receiptIssued)
+        // The second payment is not locked and can still be removed.
+        try store.deletePayment(id: second.id, now: Fixtures.now)
+        #expect(try store.payments(for: "adv").map { $0.id } == [first.id])
+    }
+
+    @Test func aReceiptIsForTheAdvanceThePaymentWasReceivedOn() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try Fixtures.addAdvanceSeries(database)
+        let firstRequest = try Fixtures.issuedAdvance(database, id: "adv")
+        let secondRequest = try Fixtures.issuedAdvance(database, id: "adv2")
+        #expect(secondRequest.number == "ZF-2026-002")
+        let onFirst = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        let onSecond = try store.recordPayment(documentID: "adv2", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+
+        // A receipt naming the second advance is not the receipt of a payment on the first.
+        let forSecond = Document.paymentTaxDocument(id: "dd2", forAdvanceRequest: secondRequest, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(forSecond, now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: onFirst.id, documentID: "dd2", now: Fixtures.now)
+            Issue.record("a receipt for another advance was accepted")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == onFirst.id)
+        }
+        #expect(try store.attachReceipt(paymentID: onSecond.id, documentID: "dd2", now: Fixtures.now).receiptDocumentID == "dd2")
+
+        // A receipt for another customer is refused.
+        var otherCustomer = Document.paymentTaxDocument(id: "dd3", forAdvanceRequest: firstRequest, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        otherCustomer.customerID = "cust-de"
+        otherCustomer.customer = Fixtures.germanParty
+        try store.saveDraft(otherCustomer, now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: onFirst.id, documentID: "dd3", now: Fixtures.now)
+            Issue.record("a receipt for another customer was accepted")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == onFirst.id)
+        }
+
+        // A payment of an ordinary invoice takes no payment tax document.
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        let invoicePayment = try store.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        let forFirst = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: firstRequest, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(forFirst, now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: invoicePayment.id, documentID: "dd1", now: Fixtures.now)
+            Issue.record("a payment tax document was attached to an invoice payment")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == invoicePayment.id)
+        }
+        #expect(try store.payments(for: "doc-cz").first?.receiptDocumentID == nil)
+        #expect(try store.attachReceipt(paymentID: onFirst.id, documentID: "dd1", now: Fixtures.now).receiptDocumentID == "dd1")
+    }
+
+    @Test func issueRefusesASeriesForAnotherKind() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try Fixtures.addAdvanceSeries(database)
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        #expect(throws: DataError.seriesDoesNotNumber(seriesID: "zf", kind: .invoice)) {
+            try store.issue(id: "doc-cz", seriesID: "zf", now: Fixtures.now)
+        }
+        let unchanged = try #require(try store.document(id: "doc-cz"))
+        #expect(unchanged.status == .draft)
+        #expect(unchanged.number == nil)
+        #expect(try NumberSeriesStore(database).series(id: "zf")?.series.lastCounter == 0)
+        #expect(try AuditLog(database).events(entity: "document", id: "doc-cz").map { $0.action } == ["create"])
+
+        var request = Fixtures.czkDraft(id: "adv")
+        request.kind = .advanceRequest
+        request.taxPointDate = nil
+        try store.saveDraft(request, now: Fixtures.now)
+        #expect(throws: DataError.seriesDoesNotNumber(seriesID: "fv", kind: .advanceRequest)) {
+            try store.issue(id: "adv", seriesID: "fv", now: Fixtures.now)
+        }
+        #expect(try NumberSeriesStore(database).series(id: "fv")?.series.lastCounter == 0)
+
+        // A series with no kinds numbers any kind.
+        let anyKind = StoredNumberSeries(name: "Vše", kinds: [],
+                                     series: try DocumentNumberSeries(id: "any", pattern: DocumentNumberPattern(template: "X-{YYYY}-{NNN}"), year: 2026))
+        try NumberSeriesStore(database).save(anyKind, now: Fixtures.now)
+        #expect(try store.issue(id: "doc-cz", seriesID: "any", now: Fixtures.now).number == "X-2026-001")
+    }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import InvoicingCore
+import GRDB
 @testable import InvoicingData
 
 @Suite struct ProfileStoreTests {
@@ -49,6 +50,70 @@ import InvoicingCore
         #expect(kept.name == "Vydané faktury")
         #expect(kept.series.lastCounter == 1)
         #expect(kept.series.lastNumber == "FV-2026-001")
+    }
+
+    @Test func savingWithANewTemplateKeepsTheCounter() throws {
+        let database = try Fixtures.prepared()
+        let documents = DocumentStore(database)
+        try documents.saveDraft(Fixtures.czkDraft(id: "a"), now: Fixtures.now)
+        try documents.saveDraft(Fixtures.czkDraft(id: "b"), now: Fixtures.now)
+        try documents.issue(id: "a", seriesID: "fv", now: Fixtures.now)
+        try documents.issue(id: "b", seriesID: "fv", now: Fixtures.now)
+        // A form that builds a fresh series with a wider counter: the counter carries on, it does not restart.
+        let wider = StoredNumberSeries(name: "Faktury", kinds: [.invoice, .finalInvoice],
+                                       series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNNN}"), year: 2026))
+        let store = NumberSeriesStore(database)
+        try store.save(wider, now: Fixtures.now)
+        let kept = try #require(try store.series(id: "fv"))
+        #expect(kept.series.pattern.template == "FV-{YYYY}-{NNNN}")
+        #expect(kept.series.year == 2026)
+        #expect(kept.series.lastCounter == 2)
+        #expect(try store.peekNextNumber(seriesID: "fv", on: Fixtures.day("2026-11-06")) == "FV-2026-0003")
+    }
+
+    @Test func savingAStaleEarlierYearKeepsTheYearAndCounter() throws {
+        let database = try Fixtures.prepared()
+        let documents = DocumentStore(database)
+        let store = NumberSeriesStore(database)
+        try documents.saveDraft(Fixtures.czkDraft(id: "a"), now: Fixtures.now)
+        try documents.issue(id: "a", seriesID: "fv", now: Fixtures.now)
+        let stale = StoredNumberSeries(name: "Faktury", kinds: [.invoice, .finalInvoice],
+                                       series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2025))
+        try store.save(stale, now: Fixtures.now)
+        let kept = try #require(try store.series(id: "fv"))
+        #expect(kept.series.year == 2026)
+        #expect(kept.series.lastCounter == 1)
+        try documents.saveDraft(Fixtures.czkDraft(id: "b"), now: Fixtures.now)
+        #expect(try documents.issue(id: "b", seriesID: "fv", now: Fixtures.now).number == "FV-2026-002")
+
+        // A copy from the year before, with a higher counter, does not take the series back a year.
+        let later = StoredNumberSeries(name: "Faktury", kinds: [.invoice, .finalInvoice],
+                                       series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2027, lastCounter: 3))
+        try store.save(later, now: Fixtures.now)
+        let older = StoredNumberSeries(name: "Faktury", kinds: [.invoice, .finalInvoice],
+                                       series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2026, lastCounter: 40))
+        try store.save(older, now: Fixtures.now)
+        let current = try #require(try store.series(id: "fv"))
+        #expect(current.series.year == 2027)
+        #expect(current.series.lastCounter == 3)
+        #expect(try store.peekNextNumber(seriesID: "fv", on: Fixtures.day("2027-01-05")) == "FV-2027-004")
+    }
+
+    @Test func aCounterThatDoesNotResetOnlyGrows() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        let running = StoredNumberSeries(name: "Průběžná", kinds: [],
+                                         series: try DocumentNumberSeries(id: "p", pattern: DocumentNumberPattern(template: "P{NNNNN}"), resetsYearly: false,
+                                                                          year: 2026, lastCounter: 7))
+        try store.save(running, now: Fixtures.now)
+        let stale = StoredNumberSeries(name: "Průběžná", kinds: [],
+                                       series: try DocumentNumberSeries(id: "p", pattern: DocumentNumberPattern(template: "P{NNNNN}"), resetsYearly: false,
+                                                                        year: 2025, lastCounter: 2))
+        try store.save(stale, now: Fixtures.now)
+        let kept = try #require(try store.series(id: "p"))
+        #expect(kept.series.lastCounter == 7)
+        #expect(kept.series.year == 2026)
+        #expect(try store.peekNextNumber(seriesID: "p", on: Fixtures.day("2026-11-05")) == "P00008")
     }
 }
 
@@ -135,13 +200,119 @@ import InvoicingCore
         #expect(try documents.paymentState(for: "doc-cz").isSettled)
         #expect(try documents.payments(for: "doc-cz").first?.bankTransactionID == "tx-1")
 
-        // A statement with matched transactions stays; after unmatching it can go, and the cascade removes the lines.
+        // A statement with matched transactions stays; a transaction with payments cannot be unmatched.
         #expect(throws: DataError.self) { try store.deleteStatement(id: "st-1") }
+        #expect(throws: DataError.transactionHasPayments("tx-1")) {
+            try store.setMatch(transactionID: "tx-1", documentID: nil, state: .unmatched, now: Fixtures.now)
+        }
+        // Without its payment it can be unmatched, and then the statement can go; the cascade removes the lines.
+        let payment = try #require(try documents.payments(for: "doc-cz").first)
+        try documents.deletePayment(id: payment.id, now: Fixtures.now)
         try store.setMatch(transactionID: "tx-1", documentID: nil, state: .unmatched, now: Fixtures.now)
         try store.deleteStatement(id: "st-1", now: Fixtures.now)
         #expect(try store.statements().isEmpty)
         #expect(try store.transactions(in: "st-1").isEmpty)
-        #expect(try documents.payments(for: "doc-cz").first?.bankTransactionID == nil)
+        #expect(try documents.payments(for: "doc-cz").isEmpty)
+    }
+
+    @Test func aBankTransactionIsNeverCountedTwice() throws {
+        let database = try Fixtures.prepared()
+        let store = StatementStore(database)
+        let documents = DocumentStore(database)
+        try store.importStatement(Self.statement(), transactions: Self.transactions(), now: Fixtures.now)
+        try documents.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try documents.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+
+        // Recording the payment matches the unmatched line to the document.
+        let first = try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk),
+                                                bankTransactionID: "tx-1", now: Fixtures.now)
+        #expect(try store.unmatchedIncoming().isEmpty)
+        #expect(try store.transactions(matchedTo: "doc-cz").map { $0.matchState } == [.manual])
+
+        // The same line again, or more than it brought in, is refused.
+        #expect(throws: DataError.transactionOverallocated(id: "tx-1", available: Money(0, .czk), requested: Money(Fixtures.d("12100"), .czk))) {
+            try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk),
+                                        bankTransactionID: "tx-1", now: Fixtures.now)
+        }
+        #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12100"), .czk))
+        try documents.deletePayment(id: first.id, now: Fixtures.now)
+        #expect(throws: DataError.transactionOverallocated(id: "tx-1", available: Money(Fixtures.d("12100"), .czk), requested: Money(Fixtures.d("99999"), .czk))) {
+            try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("99999"), .czk),
+                                        bankTransactionID: "tx-1", now: Fixtures.now)
+        }
+
+        // One transfer may be split; the parts never add up to more than the transfer.
+        try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("5000"), .czk),
+                                    bankTransactionID: "tx-1", now: Fixtures.now)
+        try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("7100"), .czk),
+                                    bankTransactionID: "tx-1", now: Fixtures.now)
+        #expect(throws: DataError.transactionOverallocated(id: "tx-1", available: Money(0, .czk), requested: Money(Fixtures.d("1"), .czk))) {
+            try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("1"), .czk),
+                                        bankTransactionID: "tx-1", now: Fixtures.now)
+        }
+        #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12100"), .czk))
+
+        // A debit is no payment received, and an unknown line is reported as such.
+        #expect(throws: DataError.transactionOverallocated(id: "tx-2", available: Money(0, .czk), requested: Money(Fixtures.d("100"), .czk))) {
+            try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
+                                        bankTransactionID: "tx-2", now: Fixtures.now)
+        }
+        #expect(throws: DataError.transactionNotFound("nope")) {
+            try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
+                                        bankTransactionID: "nope", now: Fixtures.now)
+        }
+        #expect(throws: DataError.transactionHasPayments("tx-1")) {
+            try store.setMatch(transactionID: "tx-1", documentID: nil, state: .unmatched, now: Fixtures.now)
+        }
+        #expect(throws: DataError.transactionHasPayments("tx-1")) {
+            try store.setMatch(transactionID: "tx-1", documentID: nil, state: .ignored, now: Fixtures.now)
+        }
+    }
+
+    @Test func matchesNeedAnIssuedDocumentAndAConsistentState() throws {
+        let database = try Fixtures.prepared()
+        let store = StatementStore(database)
+        let documents = DocumentStore(database)
+        try store.importStatement(Self.statement(), transactions: Self.transactions(), now: Fixtures.now)
+        try documents.saveDraft(Fixtures.czkDraft(id: "draft-9"), now: Fixtures.now)
+        #expect(throws: DataError.documentNotIssued("draft-9")) {
+            try store.setMatch(transactionID: "tx-1", documentID: "draft-9", state: .manual, now: Fixtures.now)
+        }
+        #expect(throws: DataError.invalidMatch(transactionID: "tx-1", state: .manual)) {
+            try store.setMatch(transactionID: "tx-1", documentID: nil, state: .manual, now: Fixtures.now)
+        }
+        #expect(throws: DataError.invalidMatch(transactionID: "tx-1", state: .automatic)) {
+            try store.setMatch(transactionID: "tx-1", documentID: nil, state: .automatic, now: Fixtures.now)
+        }
+        try documents.saveDraft(Fixtures.czkDraft(id: "doc-cz"), now: Fixtures.now)
+        try documents.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        #expect(throws: DataError.invalidMatch(transactionID: "tx-2", state: .ignored)) {
+            try store.setMatch(transactionID: "tx-2", documentID: "doc-cz", state: .ignored, now: Fixtures.now)
+        }
+        #expect(try store.unmatchedIncoming().map { $0.id } == ["tx-1"])
+    }
+
+    @Test func deletingAMatchedDraftReturnsTheLineToTheUnmatchedList() throws {
+        let database = try Fixtures.prepared()
+        let store = StatementStore(database)
+        let documents = DocumentStore(database)
+        try store.importStatement(Self.statement(), transactions: Self.transactions(), now: Fixtures.now)
+        try documents.saveDraft(Fixtures.czkDraft(id: "draft-9"), now: Fixtures.now)
+        // A match to a draft can only come from older data or raw SQL; the store no longer writes one.
+        try database.queue.write { db in
+            try db.execute(sql: "UPDATE bankTransaction SET matchedDocumentID = 'draft-9', matchState = 'manual' WHERE id = 'tx-1'")
+        }
+        #expect(try store.unmatchedIncoming().isEmpty)
+        try documents.deleteDraft(id: "draft-9", now: Fixtures.now)
+
+        let line = try #require(try store.unmatchedIncoming().first)
+        #expect(line.id == "tx-1")
+        #expect(line.matchState == .unmatched)
+        #expect(line.matchedDocumentID == nil)
+        #expect(try store.transactions(in: "st-1").first { $0.id == "tx-1" }?.matchState == .unmatched)
+        let event = try #require(try AuditLog(database).events(entity: "bankTransaction", id: "tx-1").last)
+        #expect(event.action == "match")
+        #expect(event.details?["state"] == "unmatched")
     }
 
     @Test func refusesForeignCurrencyLinesAndWrongStatementIds() throws {

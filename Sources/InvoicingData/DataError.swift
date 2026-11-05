@@ -29,4 +29,13 @@ public enum DataError: Error, Equatable, Sendable {
     /// A stored row cannot be read back as the value it was written from.
     case corruptRecord(table: String, id: String, detail: String)
     case currencyMismatch(expected: Currency, actual: Currency)
+    /// The series does not number documents of this kind (its `kinds` do not include it).
+    case seriesDoesNotNumber(seriesID: String, kind: DocumentKind)
+    /// The payments taken from the bank transaction would exceed its credit; `available` is what is left
+    /// of it (zero for a debit).
+    case transactionOverallocated(id: String, available: Money, requested: Money)
+    /// Payments were recorded from the transaction, so it cannot be unmatched or ignored; delete them first.
+    case transactionHasPayments(String)
+    /// `.automatic` and `.manual` need a document, `.unmatched` and `.ignored` take none.
+    case invalidMatch(transactionID: String, state: TransactionMatchState)
 }

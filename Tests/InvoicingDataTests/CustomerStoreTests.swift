@@ -17,6 +17,10 @@ import InvoicingCore
         #expect(try store.search("fakturace@").map(\.id) == ["cust-cz"])
         #expect(try store.search("   ").count == 2)
         #expect(try store.search("nobody").isEmpty)
+        // LIKE wildcards typed by the user are ordinary characters.
+        #expect(try store.search("%").isEmpty)
+        #expect(try store.search("_").isEmpty)
+        #expect(try store.search("odb_ratel").isEmpty)
     }
 
     @Test func updateKeepsCreatedAtAndWritesAudit() throws {

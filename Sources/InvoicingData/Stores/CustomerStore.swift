@@ -39,10 +39,15 @@ public struct CustomerStore: Sendable {
     public func search(_ text: String) throws -> [Customer] {
         let key = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return try all() }
+        // `%` and `_` typed by the user are characters to find, not LIKE wildcards.
+        let escaped = key.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%" + escaped + "%"
         return try database.queue.read { db in
             try CustomerRecord
                 .filter(Column("archivedAt") == nil)
-                .filter(Column("searchKey").like("%" + key + "%"))
+                .filter(sql: "searchKey LIKE ? ESCAPE '\\'", arguments: [pattern])
                 .order(Column("name").collating(.localizedCaseInsensitiveCompare))
                 .fetchAll(db)
                 .map { try $0.decode() }

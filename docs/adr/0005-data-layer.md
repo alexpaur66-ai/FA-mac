@@ -22,17 +22,23 @@ data that guarantee the authenticity of origin and the integrity of the document
   snapshot: nothing queries lines yet, and a `documentLine` table can be filled from the snapshots by a
   later migration if reporting needs it.
 - **Issued documents are frozen twice.** `DocumentStore` refuses to update or delete an issued row, and
-  two SQLite triggers abort any `UPDATE` or `DELETE` of a row whose status is `issued`, so no code path,
-  not even raw SQL, can change an issued document. Payments and audit events live in their own tables.
+  SQLite triggers abort any `UPDATE` or `DELETE` of a row whose status is `issued`, and any `INSERT` that
+  would overwrite it through `REPLACE` (same id, or an issued number), so no code path, not even raw SQL,
+  can change an issued document. Payments and audit events live in their own tables.
   Corrections are new documents (§ 45, Phase 2).
 - **Issuing is one transaction.** `issue` takes the next number from the series, completes the payment
   instructions (variable symbol and ISO 11649 reference from the number, the profile's account for the
   currency when the draft has none), runs `DocumentValidator`, computes the totals, writes the frozen row
   with the SHA-256 of its snapshot, advances the series and appends the audit event. A validation error
-  rolls everything back, so a number is never consumed by a document that was not issued.
+  rolls everything back, so a number is never consumed by a document that was not issued. `issue` refuses
+  a series whose kinds do not include the document's kind (an empty set means any kind).
+- **The counter never moves backwards.** Saving a series keeps the stored year and counter when they are
+  ahead of the ones given, whatever the template, so a stale copy or a new template carries on from the
+  last issued number instead of issuing a counter of the year again.
 - **Numbers are unique in the database**, not only in the series: a partial unique index on
   `document.number` (where not null) catches a second series that produces the same text.
-- **Audit trail.** `auditEvent` is append-only (the stores only insert): create/update/delete of drafts,
+- **Audit trail.** `auditEvent` is append-only: the stores only insert, and triggers abort any update or
+  delete of an event. It records create/update/delete of drafts,
   issue (with number, series and hash), payments, customer and profile changes, rate imports, statement
   imports and matches. It is the evidence of what changed and when.
 - **Storage forms.** Ids are text UUIDs; days are ISO `YYYY-MM-DD` text (sortable, comparable in SQL);
@@ -45,11 +51,21 @@ data that guarantee the authenticity of origin and the integrity of the document
   optional link to the transaction) although the parsers come with v0.2, so the first release's
   database never needs a destructive migration for the feature Saša asked for first.
 - **A payment carries its receipt.** `documentPayment.receiptDocumentID` points to the payment tax
-  document issued for an advance payment (`DocumentStore.attachReceipt`, which checks kind, currency and
-  amount). While that document is issued the payment is locked by the store and by two triggers, because
-  the issued receipt rests on it; a deleted draft receipt unlinks itself (`ON DELETE SET NULL`). Where a
-  payment came from is derived, not stored: a `bankTransactionID` means a bank import, nil means the user
-  typed it in. Agreed with the design thread for the payments table and the v0.2 "already recorded" lane.
+  document issued for an advance payment (`DocumentStore.attachReceipt`, which checks that the payment is
+  on an advance request, that the receipt is a payment tax document naming that request and its customer,
+  and its currency and amount). The check runs again on every save of the linked draft and when it is
+  issued, so the issued receipt always matches its payment. A receipt belongs to at most one payment (store
+  check plus a partial unique index). While that document is issued the payment is locked by the store
+  and by triggers (update, delete and `REPLACE`), because the issued receipt rests on it; a deleted draft
+  receipt unlinks itself (`ON DELETE SET NULL`). Where a payment came from is derived, not stored: a
+  `bankTransactionID` means a bank import, nil means the user typed it in. The payments linked to one bank
+  transaction never add up to more than its credit, so one transfer may be split across several documents
+  but is never counted twice; a transaction with payments cannot be unmatched or ignored. Agreed with the
+  design thread for the payments table and the v0.2 "already recorded" lane.
+- **Matches target issued documents.** `setMatch` links a transaction only to an issued document
+  (`.automatic`/`.manual` with a document, `.unmatched`/`.ignored` without one). Should a draft still be
+  matched (older data, raw SQL), deleting it returns the transaction to the unmatched list with an audit
+  event, so an incoming payment never drops out of every list.
 - **Migrations are append-only.** `DatabaseMigrator` with named migrations; `v1` is never edited after
   release, every schema change is a new migration.
 
