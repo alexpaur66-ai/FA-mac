@@ -35,15 +35,17 @@ public struct DocumentState: Hashable, Sendable, Identifiable {
     public let isOverdue: Bool
     /// Days since the due date while overdue, otherwise 0.
     public let daysOverdue: Int
-    /// Advance requests: the customer's advances need a payment tax document for each payment received.
-    /// True for every customer until the customer setting exists (screens-flows.md §6, question 5).
+    /// Advance requests: each payment received needs a payment tax document. False for an issued advance
+    /// whose lines are all § 64 goods, which a final invoice settles as paid in advance instead (ADR 0012);
+    /// true for every other one until the customer setting exists (screens-flows.md §6, question 5).
     public let taxDocumentRequired: Bool
     /// Advance requests: at least one payment was received and every received payment has an issued
     /// payment tax document.
     public let taxDocumentIssued: Bool
-    /// Advance requests: an issued final invoice deducted a payment tax document of this advance.
+    /// Advance requests: an issued final invoice deducted a payment tax document of this advance, or settled
+    /// one of its payments as paid in advance (§ 64 goods, ADR 0012).
     public let deductedInFinal: Bool
-    /// Numbers of the final invoices that deducted this advance, each once; usually one.
+    /// Numbers of the final invoices that deducted or settled this advance, each once; usually one.
     public let deductedBy: [String]
     /// The closing event, if any (`closedUnpaid` or `markedForCreditNote`).
     public let closure: DocumentClosure?

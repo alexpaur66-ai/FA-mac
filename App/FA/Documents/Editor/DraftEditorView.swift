@@ -95,7 +95,15 @@ struct DraftEditorView: View {
                         header(document)
                         lines(document)
                         if document.kind == .finalInvoice {
-                            deductions(document)
+                            // § 64 goods: the advances were paid without a tax document, so they are listed as
+                            // paid in advance instead of deducted (ADR 0012); each section shows when it applies.
+                            let goodsOnly = document.isIntraCommunityGoodsOnly
+                            if !document.advanceDeductions.isEmpty || !goodsOnly {
+                                deductions(document)
+                            }
+                            if !(document.paidAdvances ?? []).isEmpty || document.hasIntraCommunityGoods {
+                                paidInAdvance(document, showsConflicts: document.advanceDeductions.isEmpty && goodsOnly)
+                            }
                         }
                         notes(document)
                     }
@@ -264,8 +272,8 @@ struct DraftEditorView: View {
     }
 
     /// Base and Total are the lines before any deduction; a final invoice then shows the advances
-    /// deducted, the amount due and the VAT after the deduction, the base of the VAT in CZK
-    /// (screens-flows.md §2d, step 4: Total → − advances → Amount due). Under reverse charge or the § 64
+    /// deducted, the advances paid on § 64 goods (ADR 0012), the amount due and the VAT after the
+    /// deduction, the base of the VAT in CZK (screens-flows.md §2d, step 4: Total → − advances → Amount due). Under reverse charge or the § 64
     /// exemption the VAT figure's place says so; the VAT in CZK appears only when Czech VAT is charged in a
     /// foreign currency.
     @ViewBuilder private func figures(_ document: Document) -> some View {
@@ -285,9 +293,12 @@ struct DraftEditorView: View {
             }
             figure(L.total, totals.totalGross, document.currency, role: isFinal || isReceipt ? .amountStrong : .total)
             if isFinal {
-                let deducted = totals.totalGross - totals.amountDue
+                let deducted = totals.totalGross - totals.dueBeforePaidInAdvance
                 if deducted != 0 {
                     figure(L.advancesDeducted, -deducted, document.currency)
+                }
+                if totals.paidInAdvance != 0 {
+                    figure(L.paidInAdvanceTitle, -totals.paidInAdvance, document.currency)
                 }
                 figure(L.amountDue, totals.amountDue, document.currency, role: .total)
                 if chargesVAT {
@@ -783,6 +794,57 @@ struct DraftEditorView: View {
             }
             if let deductionError = model.deductionError {
                 InlineMessage(deductionError)
+            }
+        }
+    }
+
+    // MARK: Paid in advance (§ 64 goods, ADR 0012)
+
+    /// The advances paid on EU goods without a tax document (the design thread's spec of 5 Nov 2026): one
+    /// row per payment with the advance, the day it was paid and the amount, a button that removes it, and
+    /// the client's open payments to add. They reduce only the amount due. The conflict rows show here when
+    /// the deductions section, which shows them otherwise, is hidden.
+    private func paidInAdvance(_ document: Document, showsConflicts: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text(L.paidInAdvanceTitle).textRole(.sectionTitle)
+            ForEach(document.paidAdvances ?? []) { paid in
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.l) {
+                    Text(L.paidAdvanceRow(paid.advanceNumber, paid.paidOn.formatted(locale))).textRole(.documentNumber)
+                    Spacer()
+                    MoneyText(amount: paid.amount, currency: paid.currency.code, locale: locale)
+                    Button(role: .destructive) { model.removePaidAdvance(id: paid.id) } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text(L.remove))
+                }
+            }
+            let candidates = model.paidAdvanceCandidates()
+            Menu {
+                ForEach(candidates) { candidate in
+                    Button { model.addPaidAdvance(candidate) } label: {
+                        Text(L.paidAdvanceMenuItem(candidate.advanceNumber, candidate.payment.paidOn.formatted(locale),
+                                                   MoneyText.format(candidate.available.amount, currency: candidate.available.currency.code,
+                                                                    locale: locale)))
+                    }
+                }
+            } label: {
+                Label { Text(L.addPaidAdvance) } icon: { Image(systemName: "plus") }
+            }
+            .disabled(candidates.isEmpty)
+            if candidates.isEmpty && (document.paidAdvances ?? []).isEmpty {
+                Text(L.noPaidAdvances).textRole(.rowSecondary)
+            }
+            if showsConflicts {
+                ForEach(model.deductionConflicts, id: \.self) { conflict in
+                    InlineMessage(conflict)
+                }
+                ForEach(model.deductionWarnings, id: \.self) { warning in
+                    InlineMessage(warning, kind: .warning)
+                }
+                if let deductionError = model.deductionError {
+                    InlineMessage(deductionError)
+                }
             }
         }
     }

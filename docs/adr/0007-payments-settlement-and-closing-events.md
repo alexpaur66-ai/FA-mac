@@ -97,3 +97,8 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
   it deducted.
 - Amendment (PR 20, November 2026): the `payment` audit event names the payment id too, so the trail of a
   payment deleted and restored by Undo reads as one payment.
+- Amendment (PR 22, November 2026, ADR 0012): an issued advance request whose lines are all § 64 goods
+  has `taxDocumentRequired` false. Its payments take no payment tax document; the final invoice lists them as
+  paid in advance (`paidAdvance` links, schema v3), which settles and locks them like an issued receipt does
+  (`paymentSettled`), and `deductedInFinal` and `deductedBy` count those final invoices too. A refund or a
+  credit moved away from such an advance may take only what no final invoice settled.

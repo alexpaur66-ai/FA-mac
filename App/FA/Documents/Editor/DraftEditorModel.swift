@@ -498,7 +498,10 @@ struct NumberCell: Hashable {
         update { doc in
             doc.kind = kind
             Self.followIssueDate(&doc, explicitTaxPoint: taxPointExplicit)
-            if kind != .finalInvoice { doc.advanceDeductions = [] }
+            if kind != .finalInvoice {
+                doc.advanceDeductions = []
+                doc.paidAdvances = nil
+            }
         }
         series = (try? stores.series.series(for: kind)) ?? []
         refreshDeductionConflicts()
@@ -904,22 +907,36 @@ struct NumberCell: Hashable {
 
     /// The listed receipts that another issued final invoice already deducts (one final invoice per
     /// receipt, `linkDeductions`) are ⛔ rows naming that invoice instead of a refusal after the click;
-    /// receipts another draft final invoice lists too are ⚠ rows.
+    /// receipts another draft final invoice lists too are ⚠ rows. The same for the payments listed as paid
+    /// in advance (§ 64 goods, `linkPaidAdvances`, ADR 0012).
     private func refreshDeductionConflicts() {
-        guard let document, document.kind == .finalInvoice, !document.advanceDeductions.isEmpty else {
+        guard let document, document.kind == .finalInvoice,
+              !document.advanceDeductions.isEmpty || !(document.paidAdvances ?? []).isEmpty else {
             deductionConflicts = []
             deductionWarnings = []
             return
         }
         let numbers = Set(document.advanceDeductions.map(\.documentNumber))
+        // The listed payments with the number of their advance.
+        var listedPayments: [(paymentID: String, advanceNumber: String)] = []
+        for paid in document.paidAdvances ?? [] {
+            if let paymentID = paid.paymentID { listedPayments.append((paymentID: paymentID, advanceNumber: paid.advanceNumber)) }
+        }
         do {
             var conflicts: [String] = []
-            let receipts = try stores.documents.summaries(DocumentFilter(kinds: [.paymentTaxDocument], status: .issued))
-            for receipt in receipts {
-                guard let number = receipt.number, numbers.contains(number),
-                      let link = try stores.documents.deduction(ofReceipt: receipt.id), link.finalInvoiceID != documentID
-                else { continue }
-                conflicts.append(String(localized: L.advanceAlreadyDeductedIn(number, link.finalInvoiceNumber)))
+            if !numbers.isEmpty {
+                let receipts = try stores.documents.summaries(DocumentFilter(kinds: [.paymentTaxDocument], status: .issued))
+                for receipt in receipts {
+                    guard let number = receipt.number, numbers.contains(number),
+                          let link = try stores.documents.deduction(ofReceipt: receipt.id), link.finalInvoiceID != documentID
+                    else { continue }
+                    conflicts.append(String(localized: L.advanceAlreadyDeductedIn(number, link.finalInvoiceNumber)))
+                }
+            }
+            for listed in listedPayments {
+                guard let link = try stores.documents.paidAdvance(ofPayment: listed.paymentID), link.finalInvoiceID != documentID else { continue }
+                let conflict = String(localized: L.paidAdvanceAlreadySettledIn(listed.advanceNumber, link.finalInvoiceNumber))
+                if !conflicts.contains(conflict) { conflicts.append(conflict) }
             }
             deductionConflicts = conflicts
             var warnings: [String] = []
@@ -930,6 +947,11 @@ struct NumberCell: Hashable {
                     let warning = String(localized: L.receiptAlsoInDraft(number))
                     if !warnings.contains(warning) { warnings.append(warning) }
                 }
+                let otherPayments = Set((draft.paidAdvances ?? []).compactMap(\.paymentID))
+                for listed in listedPayments where otherPayments.contains(listed.paymentID) {
+                    let warning = String(localized: L.paidAdvanceAlsoInDraft(listed.advanceNumber))
+                    if !warnings.contains(warning) { warnings.append(warning) }
+                }
             }
             deductionWarnings = warnings
         } catch {
@@ -937,6 +959,33 @@ struct NumberCell: Hashable {
             deductionWarnings = []
             deductionError = ErrorText.message(error)
         }
+    }
+
+    // MARK: Paid in advance (final invoice, § 64 goods, ADR 0012)
+
+    /// Payments of the client's EU goods advances in the draft's currency that no issued final invoice
+    /// settled and this draft does not list yet (`DocumentStore.paidAdvanceCandidates`).
+    func paidAdvanceCandidates() -> [PaidAdvanceCandidate] {
+        guard let document, document.kind == .finalInvoice, let customerID = document.customerID else { return [] }
+        let listed = Set((document.paidAdvances ?? []).compactMap(\.paymentID))
+        let candidates = (try? stores.documents.paidAdvanceCandidates(customerID: customerID, currency: document.currency)) ?? []
+        return candidates.filter { !listed.contains($0.payment.id) }
+    }
+
+    /// Lists the payment as paid in advance, for what its advance still holds.
+    func addPaidAdvance(_ candidate: PaidAdvanceCandidate) {
+        deductionError = nil
+        update { doc in doc.paidAdvances = (doc.paidAdvances ?? []) + [candidate.paidAdvance] }
+        refreshDeductionConflicts()
+    }
+
+    func removePaidAdvance(id: String) {
+        deductionError = nil
+        update { doc in
+            let rest = (doc.paidAdvances ?? []).filter { $0.id != id }
+            doc.paidAdvances = rest.isEmpty ? nil : rest
+        }
+        refreshDeductionConflicts()
     }
 
     // MARK: Issue

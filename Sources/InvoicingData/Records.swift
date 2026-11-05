@@ -131,6 +131,8 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
     /// Nil on a draft whose amounts cannot be computed yet (for example a missing exchange rate).
     public let totalGross: Money?
     public let amountDue: Money?
+    /// What a final invoice lists as paid in advance (§ 64 goods, ADR 0012); nil when nothing is.
+    public let paidInAdvance: Money?
     public let taxableVATCZK: Money?
     public let variableSymbol: String?
     public let relatedDocumentNumber: String?
@@ -160,6 +162,11 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     var amountDue: Int64?
     var taxableBaseCZK: Int64?
     var taxableVATCZK: Int64?
+    /// Since v3: what a final invoice lists as paid in advance; nil when nothing is.
+    var paidInAdvance: Int64?
+    /// Since v3: the distinct treatments of the lines (`VATTreatment.groupingKey`) as a JSON array; nil on
+    /// rows written before.
+    var treatments: String?
     var variableSymbol: String?
     var creditorReference: String?
     var relatedDocumentNumber: String?
@@ -191,6 +198,12 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
         amountDue = try MinorUnits.ifPresent(totals?.amountDue, scale)
         taxableBaseCZK = try MinorUnits.ifPresent(totals?.taxableBaseCZK, .czk)
         taxableVATCZK = try MinorUnits.ifPresent(totals?.taxableVATCZK, .czk)
+        if let paid = totals?.paidInAdvance, paid != 0 {
+            paidInAdvance = try MinorUnits.of(paid, scale)
+        } else {
+            paidInAdvance = nil
+        }
+        treatments = try JSONCodec.encode(document.treatments.map(\.groupingKey))
         variableSymbol = document.payment?.variableSymbol?.digits
         creditorReference = document.payment?.creditorReference?.value
         relatedDocumentNumber = document.relatedDocumentNumber
@@ -207,6 +220,15 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
         }
     }
 
+    /// True when the row has lines and all of them are § 64 goods (`Document.isIntraCommunityGoodsOnly`),
+    /// read from the `treatments` column, or from the snapshot for a row written before the column existed.
+    func isIntraCommunityGoodsOnly() throws -> Bool {
+        if let treatments, let keys = try? JSONCodec.decode([String].self, from: treatments) {
+            return !keys.isEmpty && keys.allSatisfy { $0 == VATTreatment.intraCommunityGoods.groupingKey }
+        }
+        return try decode().isIntraCommunityGoodsOnly
+    }
+
     func summary() throws -> DocumentSummary {
         guard let kind = DocumentKind(rawValue: kind), let status = DocumentStatus(rawValue: status) else {
             throw DataError.corruptRecord(table: Self.databaseTableName, id: id, detail: "kind \(self.kind), status \(self.status)")
@@ -220,6 +242,7 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
             currency: currency,
             totalGross: totalGross.map { MinorUnits.money($0, currency) },
             amountDue: amountDue.map { MinorUnits.money($0, currency) },
+            paidInAdvance: paidInAdvance.map { MinorUnits.money($0, currency) },
             taxableVATCZK: taxableVATCZK.map { MinorUnits.money($0, .czk) },
             variableSymbol: variableSymbol,
             relatedDocumentNumber: relatedDocumentNumber,
@@ -322,6 +345,40 @@ struct AdvanceDeductionRecord: Codable, FetchableRecord, PersistableRecord, Send
         AdvanceDeductionLink(id: id, finalInvoiceID: finalInvoiceID, finalInvoiceNumber: finalInvoiceNumber,
                              receiptDocumentID: receiptDocumentID, receiptNumber: receiptNumber,
                              advanceRequestID: advanceRequestID, createdAt: createdAt)
+    }
+}
+
+/// A payment on an advance request for § 64 goods that an issued final invoice settled as paid in
+/// advance (ADR 0012): such an advance has no payment tax document.
+public struct PaidAdvanceLink: Hashable, Sendable, Identifiable {
+    public let id: String
+    public let finalInvoiceID: String
+    public let finalInvoiceNumber: String
+    public let paymentID: String
+    public let advanceRequestID: String
+    public let advanceNumber: String
+    /// The part of the payment the final invoice lists.
+    public let amount: Money
+    /// ISO 8601 UTC, the issue of the final invoice.
+    public let createdAt: String
+}
+
+struct PaidAdvanceRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
+    static let databaseTableName = "paidAdvance"
+    var id: String
+    var finalInvoiceID: String
+    var finalInvoiceNumber: String
+    var paymentID: String
+    var advanceRequestID: String
+    var advanceNumber: String
+    var amount: Int64
+    var currency: String
+    var createdAt: String
+
+    func link() -> PaidAdvanceLink {
+        PaidAdvanceLink(id: id, finalInvoiceID: finalInvoiceID, finalInvoiceNumber: finalInvoiceNumber, paymentID: paymentID,
+                        advanceRequestID: advanceRequestID, advanceNumber: advanceNumber,
+                        amount: MinorUnits.money(amount, Currency(code: currency)), createdAt: createdAt)
     }
 }
 

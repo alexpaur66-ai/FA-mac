@@ -20,6 +20,8 @@ struct RecordPaymentSheet: View {
     @Binding var lastDate: Date?
     /// Opens the draft payment tax document created for a payment on an advance (screens-flows.md §2d, step 2).
     let openDraft: @MainActor (String) -> Void
+    /// Creates the final invoice of an advance for § 64 goods, which needs no tax document (ADR 0012).
+    let createFinalInvoice: (@MainActor (String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
@@ -30,12 +32,14 @@ struct RecordPaymentSheet: View {
     /// The payment just recorded on an advance request; it needs its own tax document.
     @State private var recorded: DocumentPayment?
 
-    init(stores: Stores, state: DocumentState, mode: Mode, lastDate: Binding<Date?>, openDraft: @escaping @MainActor (String) -> Void) {
+    init(stores: Stores, state: DocumentState, mode: Mode, lastDate: Binding<Date?>, openDraft: @escaping @MainActor (String) -> Void,
+         createFinalInvoice: (@MainActor (String) -> Void)? = nil) {
         self.stores = stores
         self.state = state
         self.mode = mode
         self._lastDate = lastDate
         self.openDraft = openDraft
+        self.createFinalInvoice = createFinalInvoice
         _date = State(initialValue: min(lastDate.wrappedValue ?? Date(), Date()))
         // What is left to pay, or what was paid too much.
         let outstanding = state.outstanding.amount
@@ -92,10 +96,14 @@ struct RecordPaymentSheet: View {
     /// Step 2 of the advance flow: the money is in, and the tax document for it is due within 15 days of
     /// the payment (§ 28 odst. 8 ZDPH). Create its draft now, or later with Create Tax Document in the
     /// payment's row of the advance's detail (the Overview queue selects that advance) or the Document menu.
+    /// An advance for § 64 goods needs no tax document: the step offers its final invoice instead, which
+    /// lists the payment as paid in advance (ADR 0012, the design thread's spec of 5 Nov 2026).
     private func recordedStep(_ payment: DocumentPayment) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.l) {
+        let goodsAdvance = !state.taxDocumentRequired
+        return VStack(alignment: .leading, spacing: Spacing.l) {
             Label {
-                Text(L.paymentRecordedAdvance).textRole(.body).fixedSize(horizontal: false, vertical: true)
+                Text(goodsAdvance ? L.paymentRecordedGoodsAdvance : L.paymentRecordedAdvance)
+                    .textRole(.body).fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             }
@@ -106,9 +114,21 @@ struct RecordPaymentSheet: View {
                 Spacer()
                 Button { dismiss() } label: { Text(L.later) }
                     .keyboardShortcut(.cancelAction)
-                Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                if goodsAdvance {
+                    if let createFinalInvoice {
+                        Button {
+                            let advanceID = state.id
+                            dismiss()
+                            createFinalInvoice(advanceID)
+                        } label: { Text(L.createFinalInvoice) }
+                            .keyboardShortcut(.defaultAction)
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
     }

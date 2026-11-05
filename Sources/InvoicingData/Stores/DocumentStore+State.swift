@@ -61,6 +61,11 @@ extension DocumentStore {
                 deductedBy[advanceID, default: []].append(link.finalInvoiceNumber)
             }
         }
+        // A final invoice that settled payments of a § 64 goods advance as paid in advance (ADR 0012) settles it too.
+        for link in try PaidAdvanceRecord.order(Column("finalInvoiceNumber")).fetchAll(db)
+        where deductedBy[link.advanceRequestID]?.contains(link.finalInvoiceNumber) != true {
+            deductedBy[link.advanceRequestID, default: []].append(link.finalInvoiceNumber)
+        }
 
         var states: [DocumentState] = []
         states.reserveCapacity(records.count)
@@ -100,6 +105,12 @@ extension DocumentStore {
                 && (settlement == .open || settlement == .partlyPaid) && summary.dueDate < today
             let incoming = sum?.incoming ?? 0
             let deductions = deductedBy[record.id] ?? []
+            // Money received on an advance for § 64 goods needs no payment tax document (ADR 0012).
+            var taxDocumentRequired = true
+            if summary.kind == .advanceRequest && summary.status != .draft {
+                let goodsOnly = try record.isIntraCommunityGoodsOnly()
+                taxDocumentRequired = !goodsOnly
+            }
             states.append(DocumentState(
                 summary: summary,
                 settlement: settlement,
@@ -107,7 +118,7 @@ extension DocumentStore {
                 outstanding: MinorUnits.money(outstandingUnits, currency),
                 isOverdue: overdue,
                 daysOverdue: overdue ? today.days(since: summary.dueDate) : 0,
-                taxDocumentRequired: true,
+                taxDocumentRequired: taxDocumentRequired,
                 taxDocumentIssued: summary.kind == .advanceRequest && incoming > 0 && (sum?.missingReceipts ?? 0) == 0,
                 deductedInFinal: summary.kind == .advanceRequest && !deductions.isEmpty,
                 deductedBy: deductions,

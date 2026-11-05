@@ -8,12 +8,13 @@ import InvoicingCore
     @Test func migrationCreatesEveryTable() throws {
         let database = try AppDatabase()
         let tables = ["companyProfile", "customer", "numberSeries", "document", "documentPayment", "exchangeRate",
-                      "bankStatement", "bankTransaction", "advanceDeduction", "documentClosure", "auditEvent", "documentPDF"]
+                      "bankStatement", "bankTransaction", "advanceDeduction", "documentClosure", "auditEvent", "documentPDF",
+                      "paidAdvance"]
         for table in tables {
             let exists = try database.queue.read { db in try db.tableExists(table) }
             #expect(exists, "missing table \(table)")
         }
-        #expect(InvoicingData.schemaVersion == 2)
+        #expect(InvoicingData.schemaVersion == 3)
         let foreignKeys = try database.queue.read { db in try Bool.fetchOne(db, sql: "PRAGMA foreign_keys") }
         #expect(foreignKeys == true)
     }
@@ -192,5 +193,33 @@ import InvoicingCore
         #expect(completed)
         #expect(hasPDFTable)
         #expect(keptRows == 1)
+    }
+
+    @Test func upgradingAV2DatabaseAddsThePaidAdvanceColumnsAsNull() throws {
+        // v3 (ADR 0012) adds two nullable document columns and the paidAdvance table; an issued row of v2 keeps
+        // its values and reads NULL in both columns (the frozen trigger never fires for a column added by ALTER).
+        let queue = try DatabaseQueue()
+        let migrator = Schema.migrator
+        try migrator.migrate(queue, upTo: "v2")
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO document (id, kind, status, number, customerName, issueDate, dueDate, currency, amountDue, snapshot,
+                                      createdAt, updatedAt)
+                VALUES ('doc-old', 'invoice', 'issued', 'FV-2026-001', 'Beispiel GmbH', '2026-11-05', '2026-11-19', 'EUR', 100000, '{}',
+                        '2026-11-05T10:00:00Z', '2026-11-05T10:00:00Z')
+                """)
+        }
+        try migrator.migrate(queue)
+        let (hasTable, paidInAdvance, treatments, amountDue) = try queue.read { db -> (Bool, Int64?, String?, Int64?) in
+            // fetchOne reads NULL as nil.
+            let paidInAdvance = try Int64.fetchOne(db, sql: "SELECT paidInAdvance FROM document WHERE id = 'doc-old'")
+            let treatments = try String.fetchOne(db, sql: "SELECT treatments FROM document WHERE id = 'doc-old'")
+            let amountDue = try Int64.fetchOne(db, sql: "SELECT amountDue FROM document WHERE id = 'doc-old'")
+            return (try db.tableExists("paidAdvance"), paidInAdvance, treatments, amountDue)
+        }
+        #expect(hasTable)
+        #expect(paidInAdvance == nil)
+        #expect(treatments == nil)
+        #expect(amountDue == 100000)
     }
 }

@@ -295,6 +295,31 @@ enum PDFInspection {
         #expect(goods.values == [1000], "the total alone without Czech VAT")
     }
 
+    @Test func aGoodsFinalInvoiceListsTheAdvancesPaidWithoutTouchingTheValue() throws {
+        // ADR 0012: an advance on § 64 goods had no tax document; the final invoice lists it under its heading
+        // and it reduces only the amount due.
+        var document = PDFFixtures.euGoodsInvoice()
+        document.kind = .finalInvoice
+        document.paidAdvances = [PaidAdvance(id: "pa1", advanceNumber: "ZF-2026-003", paidOn: PDFFixtures.day("2026-11-02"), amount: 400, currency: .eur,
+                                             paymentID: "pay-1", advanceTreatment: .intraCommunityGoods)]
+        let pdf = try PDFInspection.document(try DocumentPDF.render(document))
+        let text = PDFInspection.text(pdf)
+        for expected in ["Uhrazené zálohy / Advances paid", "Záloha ZF-2026-003 uhrazena 2. 11. 2026", "Advance ZF-2026-003 paid on 2. 11. 2026",
+                         "1 000,00 €", "400,00 €", "600,00 €"] {
+            #expect(text.contains(expected), "missing \(expected)")
+        }
+        #expect(!text.contains("Odečet záloh"), "nothing is deducted")
+        let dueLines = PDFInspection.linesContaining("K úhradě", in: pdf)
+        #expect(!dueLines.isEmpty)
+        for line in dueLines {
+            #expect(line.contains("600,00 €"), "amount due line: \(line)")
+        }
+        // The VAT summary keeps the whole value of the supply.
+        let totals = try DocumentTotals.compute(for: document)
+        let rows = DocumentPDFRenderer(document: document, totals: totals, totalPages: nil).summaryRows()
+        #expect(rows.map(\.values) == [[1000]])
+    }
+
     @Test func aForeignCurrencyInvoiceWithCzechVATPrintsTheTaxInCZK() throws {
         let document = PDFFixtures.euInvoiceWithCzechVAT()
         let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))

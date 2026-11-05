@@ -108,7 +108,7 @@ struct OverviewView: View {
     private func reloadUntaxedReceived() {
         var amounts: [String: Money] = [:]
         for state in documents.states where state.summary.kind == .advanceRequest && state.summary.status == .issued
-            && !state.taxDocumentIssued {
+            && state.taxDocumentRequired && !state.taxDocumentIssued {
             guard let payments = try? stores.documents.payments(for: state.id) else { continue }
             let untaxed = payments.filter { $0.isIncoming && !$0.receiptIssued }.map(\.amount)
             if let sum = MoneyList.sums(untaxed).first {
@@ -544,10 +544,15 @@ struct OverviewFigures {
 
     /// What an issued document adds to the month's revenue: tax documents only, and a final invoice net of
     /// the advances it deducts (their payment tax documents count already), so the advance money is never
-    /// counted twice (§2a). `amountDue` is the supply's gross minus the deducted advances.
+    /// counted twice (§2a). `amountDue` is the supply's gross minus the deducted advances and minus the
+    /// advances paid on § 64 goods, which had no tax document and so count here (ADR 0012).
     static func revenueAmount(_ summary: DocumentSummary) -> Money? {
         guard summary.kind.isTaxDocument else { return nil }
-        return summary.kind == .finalInvoice ? summary.amountDue : summary.totalGross
+        guard summary.kind == .finalInvoice else { return summary.totalGross }
+        if let due = summary.amountDue, let paid = summary.paidInAdvance, paid.currency == due.currency {
+            return due + paid
+        }
+        return summary.amountDue
     }
 
     /// The overdue group of the queue: every overdue document except an advance an issued final invoice

@@ -31,6 +31,8 @@ struct DocumentDetailView: View {
     @State private var paymentPendingDeletion: DocumentPayment?
     /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
     @State private var deductions: [AdvanceDeductionLink] = []
+    /// A final invoice's paid-in-advance links, or the settled payments of an advance (§ 64 goods, ADR 0012).
+    @State private var paidAdvanceLinks: [PaidAdvanceLink] = []
     @State private var loadError: String?
     /// The issued document's stored PDF, rendered and stored now when it has none yet (ADR 0010).
     @State private var pdf: StoredDocumentPDF?
@@ -98,10 +100,12 @@ struct DocumentDetailView: View {
         do {
             payments = try stores.documents.payments(for: documentID)
             deductions = try DocumentInspectorView.deductions(stores, state: documents.state(id: documentID))
+            paidAdvanceLinks = try DocumentInspectorView.paidAdvanceLinks(stores, state: documents.state(id: documentID))
             loadError = nil
         } catch {
             payments = []
             deductions = []
+            paidAdvanceLinks = []
             loadError = ErrorText.message(error, locale: locale)
         }
         loadPDF()
@@ -164,10 +168,13 @@ struct DocumentDetailView: View {
         }
     }
 
-    /// What a final invoice deducts: its gross before deductions minus its amount due. Nil when either
-    /// figure is missing.
+    /// What a final invoice deducts: its gross before deductions minus its amount due, without what it lists
+    /// as paid in advance (§ 64 goods, ADR 0012), which has its own row. Nil when either figure is missing.
     static func deductedAmount(_ summary: DocumentSummary) -> Money? {
         guard let total = summary.totalGross, let due = summary.amountDue, total.currency == due.currency else { return nil }
+        if let paid = summary.paidInAdvance, paid.currency == due.currency {
+            return total - due - paid
+        }
         return total - due
     }
 
@@ -240,6 +247,18 @@ struct DocumentDetailView: View {
                     }
                 }
             }
+            if summary.kind == .finalInvoice, let paid = summary.paidInAdvance, !paid.isZero {
+                // Total − paid in advance = amount due: the § 64 value itself is never reduced (ADR 0012).
+                GridRow {
+                    Text(L.paidInAdvanceTitle).textRole(.label)
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        MoneyText(amount: -paid.amount, currency: summary.currency.code, locale: locale)
+                        if !paidAdvanceLinks.isEmpty {
+                            chainLinks(DocumentInspectorView.unique(paidAdvanceLinks.map(\.advanceNumber)))
+                        }
+                    }
+                }
+            }
             if summary.status == .issued && summary.kind != .paymentTaxDocument {
                 GridRow {
                     Text(L.paid).textRole(.label)
@@ -272,7 +291,8 @@ struct DocumentDetailView: View {
             }
             if !state.deductedBy.isEmpty {
                 GridRow {
-                    Text(L.deductedByLabel).textRole(.label)
+                    // An advance for § 64 goods is settled, not deducted: no tax base changes (ADR 0012).
+                    Text(state.taxDocumentRequired ? L.deductedByLabel : L.settledInLabel).textRole(.label)
                     chainLinks(state.deductedBy)
                 }
             }
@@ -306,7 +326,9 @@ struct DocumentDetailView: View {
     }
 
     @ViewBuilder private func paymentRow(_ payment: DocumentPayment, state: DocumentState) -> some View {
-        let isAdvanceReceipt = state.summary.kind == .advanceRequest && payment.kind == .received
+        // An advance for § 64 goods takes no tax document; its payments are settled in the final invoice (ADR 0012).
+        let isAdvanceReceipt = state.summary.kind == .advanceRequest && payment.kind == .received && state.taxDocumentRequired
+        let settledIn = paidAdvanceLinks.first { $0.paymentID == payment.id }
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(spacing: Spacing.m) {
                 DayText(payment.paidOn)
@@ -319,7 +341,7 @@ struct DocumentDetailView: View {
                 }
                 Spacer()
                 MoneyText(amount: payment.amount.amount, currency: payment.amount.currency.code, locale: locale)
-                if payment.receiptIssued {
+                if payment.receiptIssued || settledIn != nil {
                     Image(systemName: "lock.fill")
                         .foregroundStyle(.secondary)
                         .accessibilityLabel(Text(L.paymentLocked))
@@ -342,13 +364,21 @@ struct DocumentDetailView: View {
                             .buttonStyle(.link)
                     }
                 }
+            } else if let settledIn {
+                HStack(spacing: Spacing.m) {
+                    Text(L.paymentSettledBy(settledIn.finalInvoiceNumber)).textRole(.caption)
+                    if let openDocument {
+                        Button { openDocument(settledIn.finalInvoiceID) } label: { Text(L.showDocument) }
+                            .buttonStyle(.link)
+                    }
+                }
             }
         }
         .contextMenu {
             if isAdvanceReceipt, payment.receiptDocumentID == nil, let createTaxDocument {
                 Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
             }
-            if payment.canBeDeleted {
+            if payment.canBeDeleted && settledIn == nil {
                 Button(role: .destructive) {
                     // A draft tax document of the payment documents nothing without it: ask (ADR 0009 amendments).
                     if payment.deletionNeedsConfirmation {
@@ -463,6 +493,7 @@ struct DocumentInspectorView: View {
     @State private var document: Document?
     @State private var payments: [DocumentPayment] = []
     @State private var deductions: [AdvanceDeductionLink] = []
+    @State private var paidAdvanceLinks: [PaidAdvanceLink] = []
     @State private var events: [AuditEvent] = []
     @Environment(\.locale) private var locale
 
@@ -505,7 +536,7 @@ struct DocumentInspectorView: View {
                             HStack(spacing: Spacing.xs) {
                                 DayText(payment.paidOn)
                                 Text(payment.kind.title).textRole(.rowSecondary)
-                                if payment.receiptIssued {
+                                if payment.receiptIssued || paidAdvanceLinks.contains(where: { $0.paymentID == payment.id }) {
                                     Image(systemName: "lock.fill")
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
@@ -559,16 +590,21 @@ struct DocumentInspectorView: View {
             document = try? stores.documents.document(id: documentID)
             payments = (try? stores.documents.payments(for: documentID)) ?? []
             deductions = (try? Self.deductions(stores, state: documents.state(id: documentID))) ?? []
+            paidAdvanceLinks = (try? Self.paidAdvanceLinks(stores, state: documents.state(id: documentID))) ?? []
             events = Self.shownEvents((try? stores.audit.events(entity: "document", id: documentID)) ?? [])
         }
     }
 
-    /// The related document, the deducting final invoices and the receipts, each number once.
+    /// The related document, the deducting or settling final invoices, the receipts and the advances paid
+    /// (§ 64 goods), each number once.
     private func chainNumbers(_ state: DocumentState?) -> [String] {
         var numbers: [String] = []
         if let related = state?.summary.relatedDocumentNumber { numbers.append(related) }
         numbers += state?.deductedBy ?? []
         numbers += deductions.map(\.receiptNumber)
+        if state?.summary.kind == .finalInvoice {
+            numbers += paidAdvanceLinks.map(\.advanceNumber)
+        }
         return Self.unique(numbers)
     }
 
@@ -597,6 +633,17 @@ struct DocumentInspectorView: View {
     static func deductions(_ stores: Stores, state: DocumentState?) throws -> [AdvanceDeductionLink] {
         guard let state, state.summary.kind == .finalInvoice, state.summary.status == .issued else { return [] }
         return try stores.documents.deductions(ofFinalInvoice: state.id)
+    }
+
+    /// The paid-in-advance links of an issued final invoice, or the settled payments of an issued advance
+    /// request (§ 64 goods, ADR 0012); empty for every other document.
+    static func paidAdvanceLinks(_ stores: Stores, state: DocumentState?) throws -> [PaidAdvanceLink] {
+        guard let state, state.summary.status == .issued else { return [] }
+        switch state.summary.kind {
+        case .finalInvoice: return try stores.documents.paidAdvances(ofFinalInvoice: state.id)
+        case .advanceRequest: return try stores.documents.paidAdvances(ofAdvanceRequest: state.id)
+        default: return []
+        }
     }
 
     /// One audit event as a sentence with its kind symbol (design-system.md §8.15). An action the shell

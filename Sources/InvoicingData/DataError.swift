@@ -72,4 +72,15 @@ public enum DataError: Error, Equatable, Sendable {
     case creditCustomerMismatch(sourceDocumentID: String, targetDocumentID: String)
     /// No PDF is stored for the document yet (`storePDF` first).
     case pdfNotStored(String)
+    /// An issued final invoice settled the payment as paid in advance (§ 64 goods, ADR 0012): it cannot change
+    /// or go, and it takes no payment tax document.
+    case paymentSettled(paymentID: String, finalInvoiceNumber: String)
+    /// An advance paid that a final invoice lists is not a payment received on an issued advance request of the
+    /// final invoice's customer and currency, on that day and for at least that amount, without a tax document.
+    case paidAdvanceInvalid(number: String, detail: String)
+    /// A payment is settled as paid in advance by one final invoice only.
+    case advanceAlreadySettled(advanceNumber: String, by: String)
+    /// The advances paid listed for an advance request exceed what it holds: its payments net of refunds,
+    /// less what other final invoices settled; `available` is that amount.
+    case paidAdvancesExceedPaid(advanceNumber: String, available: Money, listed: Money)
 }

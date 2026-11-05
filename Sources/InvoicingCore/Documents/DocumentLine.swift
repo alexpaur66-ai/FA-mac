@@ -70,3 +70,41 @@ public struct AdvanceDeduction: Hashable, Sendable, Codable, Identifiable {
 
     public var gross: Decimal { base + vat }
 }
+
+/// An advance paid on goods supplied to another member state under § 64 ZDPH, listed on the final invoice
+/// as paid in advance (ADR 0012). Such an advance has no payment tax document: § 20a odst. 2 and
+/// § 28 odst. 1 písm. d) ZDPH concern taxable supplies, and an exempt supply is not one (§ 2 odst. 2 ZDPH).
+/// It reduces only what the customer still pays; the value of the supply, and so the tax base, stays whole.
+public struct PaidAdvance: Hashable, Sendable, Codable, Identifiable {
+    public var id: String
+    /// Number of the advance request the money was paid on.
+    public var advanceNumber: String
+    /// The day the payment was received.
+    public var paidOn: CalendarDay
+    /// The amount received, in `currency`, which must be the final invoice's currency.
+    public var amount: Decimal
+    public var currency: Currency
+    /// The stored payment this row settles; nil for an advance the app does not know (paid before it).
+    public var paymentID: String?
+    /// The treatment of the advance request's lines: `.intraCommunityGoods` when all of them are § 64 goods,
+    /// otherwise the first other one; nil when unknown. Anything but § 64 goods is a point for the
+    /// accountant, since such an advance may have needed a payment tax document.
+    public var advanceTreatment: VATTreatment?
+
+    public init(id: String = UUID().uuidString, advanceNumber: String, paidOn: CalendarDay, amount: Decimal, currency: Currency,
+                paymentID: String? = nil, advanceTreatment: VATTreatment? = nil) {
+        self.id = id
+        self.advanceNumber = advanceNumber
+        self.paidOn = paidOn
+        self.amount = amount
+        self.currency = currency
+        self.paymentID = paymentID
+        self.advanceTreatment = advanceTreatment
+    }
+
+    /// The `advanceTreatment` of a document with these lines.
+    public static func treatment(of lines: [DocumentLine]) -> VATTreatment? {
+        guard !lines.isEmpty else { return nil }
+        return lines.first { $0.treatment != .intraCommunityGoods }?.treatment ?? .intraCommunityGoods
+    }
+}
