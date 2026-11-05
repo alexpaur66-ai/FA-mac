@@ -284,8 +284,10 @@ import InvoicingCore
 
         // A draft receipt that is deleted unlinks itself from its payment, which stays deletable.
         let second = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-11"), amount: Money(Fixtures.d("5000"), .czk), now: Fixtures.now)
-        _ = try store.attachReceipt(paymentID: second.id, documentID: "dd2", now: Fixtures.now)
-        try store.deleteDraft(id: "dd2", now: Fixtures.now)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd4", forAdvanceRequest: issuedRequest, received: Fixtures.d("5000"), on: Fixtures.day("2026-11-11")),
+                            now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: second.id, documentID: "dd4", now: Fixtures.now)
+        try store.deleteDraft(id: "dd4", now: Fixtures.now)
         #expect(try store.payments(for: "adv").last?.receiptDocumentID == nil)
         try store.deletePayment(id: second.id, now: Fixtures.now)
         #expect(try AuditLog(database).events(entity: "document", id: "adv").map(\.action)
