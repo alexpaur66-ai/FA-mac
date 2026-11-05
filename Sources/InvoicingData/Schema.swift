@@ -142,10 +142,25 @@ enum Schema {
                 t.column("amount", .integer).notNull()
                 t.column("currency", .text).notNull()
                 t.column("bankTransactionID", .text).references("bankTransaction", onDelete: .setNull)
+                // The payment tax document issued for this payment; a deleted draft receipt unlinks itself.
+                t.column("receiptDocumentID", .text).references("document", onDelete: .setNull)
                 t.column("note", .text)
                 t.column("createdAt", .text).notNull()
             }
             try db.execute(sql: "CREATE INDEX documentPayment_documentID ON documentPayment(documentID)")
+            // An issued payment tax document rests on its payment: the payment is locked while the receipt is issued.
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_locked_update BEFORE UPDATE ON documentPayment
+                WHEN OLD.receiptDocumentID IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM document WHERE id = OLD.receiptDocumentID AND status = 'issued')
+                BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_locked_delete BEFORE DELETE ON documentPayment
+                WHEN OLD.receiptDocumentID IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM document WHERE id = OLD.receiptDocumentID AND status = 'issued')
+                BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
+                """)
 
             try db.create(table: "auditEvent") { t in
                 t.autoIncrementedPrimaryKey("id")

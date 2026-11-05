@@ -150,19 +150,56 @@ public struct DocumentStore: Sendable {
             let stamp = Timestamps.string(now)
             let payment = DocumentPaymentRecord(id: UUID().uuidString, documentID: documentID, paidOn: day.isoString,
                                                 amount: try MinorUnits.of(amount.amount, currency), currency: currency.code,
-                                                bankTransactionID: bankTransactionID, note: note, createdAt: stamp)
+                                                bankTransactionID: bankTransactionID, receiptDocumentID: nil, note: note, createdAt: stamp)
             try payment.insert(db)
             try AuditLog.append(db, entity: "document", id: documentID, action: "payment",
                                 details: ["amount": amount.description, "on": day.isoString], at: stamp)
-            return try payment.payment()
+            return try payment.payment(receiptIssued: false)
+        }
+    }
+
+    /// Links the payment tax document `documentID` (§ 28 odst. 1 písm. d) ZDPH, built with
+    /// `Document.paymentTaxDocument`) to the payment it was issued for. The receipt must be in the payment's
+    /// currency and, once its amounts are known, be for exactly the paid amount. While the receipt is
+    /// issued the payment is locked: the store refuses to change or delete it and two triggers back that up.
+    @discardableResult
+    public func attachReceipt(paymentID: String, documentID: String, now: Date = Date()) throws -> DocumentPayment {
+        try database.queue.write { db in
+            guard var payment = try DocumentPaymentRecord.fetchOne(db, key: paymentID) else { throw DataError.paymentNotFound(paymentID) }
+            if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(paymentID) }
+            guard let receipt = try DocumentRecord.fetchOne(db, key: documentID) else { throw DataError.documentNotFound(documentID) }
+            guard receipt.kind == DocumentKind.paymentTaxDocument.rawValue else {
+                throw DataError.receiptMismatch(paymentID: paymentID, detail: "\(documentID) is \(receipt.kind), not a payment tax document")
+            }
+            let currency = Currency(code: payment.currency)
+            guard receipt.currency == payment.currency else {
+                throw DataError.currencyMismatch(expected: currency, actual: Currency(code: receipt.currency))
+            }
+            if let due = receipt.amountDue, due != payment.amount {
+                throw DataError.receiptMismatch(
+                    paymentID: paymentID,
+                    detail: "the document is for \(MinorUnits.money(due, currency)), the payment is \(MinorUnits.money(payment.amount, currency))")
+            }
+            payment.receiptDocumentID = documentID
+            try payment.update(db)
+            try AuditLog.append(db, entity: "document", id: payment.documentID, action: "receiptAttached",
+                                details: ["payment": paymentID, "receipt": documentID], at: Timestamps.string(now))
+            return try payment.payment(receiptIssued: receipt.status == DocumentStatus.issued.rawValue)
         }
     }
 
     public func payments(for documentID: String) throws -> [DocumentPayment] {
         try database.queue.read { db in
             try DocumentPaymentRecord.filter(Column("documentID") == documentID).order(Column("paidOn"), Column("createdAt"))
-                .fetchAll(db).map { try $0.payment() }
+                .fetchAll(db).map { try $0.payment(receiptIssued: try Self.receiptIsIssued(db, $0)) }
         }
+    }
+
+    /// True when the payment's receipt exists and is issued.
+    static func receiptIsIssued(_ db: Database, _ payment: DocumentPaymentRecord) throws -> Bool {
+        guard let receiptID = payment.receiptDocumentID else { return false }
+        let status = try String.fetchOne(db, sql: "SELECT status FROM document WHERE id = ?", arguments: [receiptID])
+        return status == DocumentStatus.issued.rawValue
     }
 
     /// Amount due, paid and outstanding of an issued document.
@@ -179,9 +216,11 @@ public struct DocumentStore: Sendable {
         }
     }
 
+    /// Deletes a payment; refused while its payment tax document is issued.
     public func deletePayment(id: String, now: Date = Date()) throws {
         try database.queue.write { db in
-            guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.documentNotFound(id) }
+            guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
+            if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(id) }
             try payment.delete(db)
             try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted",
                                 details: ["payment": id], at: Timestamps.string(now))

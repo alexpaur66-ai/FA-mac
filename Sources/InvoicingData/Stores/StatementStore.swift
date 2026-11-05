@@ -99,7 +99,7 @@ public struct StatementStore: Sendable {
             let matched = try BankTransactionRecord
                 .filter(Column("statementID") == id && Column("matchedDocumentID") != nil)
                 .fetchCount(db)
-            guard matched == 0 else { throw DataError.statementNotFound("\(id): \(matched) matched transactions") }
+            guard matched == 0 else { throw DataError.statementHasMatchedTransactions(id: id, count: matched) }
             try BankStatementRecord.deleteOne(db, key: id)
             try AuditLog.append(db, entity: "bankStatement", id: id, action: "delete", at: Timestamps.string(now))
         }

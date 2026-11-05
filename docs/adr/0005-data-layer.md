@@ -44,6 +44,12 @@ data that guarantee the authenticity of origin and the integrity of the document
 - **Bank statements are in schema v1** (`bankStatement`, `bankTransaction`, `documentPayment` with an
   optional link to the transaction) although the parsers come with v0.2, so the first release's
   database never needs a destructive migration for the feature Saša asked for first.
+- **A payment carries its receipt.** `documentPayment.receiptDocumentID` points to the payment tax
+  document issued for an advance payment (`DocumentStore.attachReceipt`, which checks kind, currency and
+  amount). While that document is issued the payment is locked by the store and by two triggers, because
+  the issued receipt rests on it; a deleted draft receipt unlinks itself (`ON DELETE SET NULL`). Where a
+  payment came from is derived, not stored: a `bankTransactionID` means a bank import, nil means the user
+  typed it in. Agreed with the design thread for the payments table and the v0.2 "already recorded" lane.
 - **Migrations are append-only.** `DatabaseMigrator` with named migrations; `v1` is never edited after
   release, every schema change is a new migration.
 

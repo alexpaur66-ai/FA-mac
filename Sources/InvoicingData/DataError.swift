@@ -7,6 +7,13 @@ public enum DataError: Error, Equatable, Sendable {
     case seriesNotFound(String)
     case statementNotFound(String)
     case transactionNotFound(String)
+    case paymentNotFound(String)
+    /// The payment tax document issued for the payment rests on it; the payment cannot change or go.
+    case paymentLocked(String)
+    /// The document is not a payment tax document for exactly this payment.
+    case receiptMismatch(paymentID: String, detail: String)
+    /// Transactions of the statement are matched to documents; unmatch them first.
+    case statementHasMatchedTransactions(id: String, count: Int)
     /// The document is issued; issued documents are never changed or deleted (§ 35 ZDPH).
     case documentIsFrozen(String)
     case documentAlreadyIssued(String)

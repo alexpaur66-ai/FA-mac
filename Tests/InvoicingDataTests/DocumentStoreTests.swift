@@ -220,4 +220,75 @@ import InvoicingCore
         #expect(try store.paymentState(for: "doc-cz").outstanding == Money(Fixtures.d("5000"), .czk))
         #expect(try AuditLog(database).events(entity: "document", id: "doc-cz").map(\.action) == ["create", "issue", "payment", "payment", "paymentDeleted"])
     }
+
+    @Test func receiptLocksItsPayment() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        let seriesStore = NumberSeriesStore(database)
+        try seriesStore.save(StoredNumberSeries(name: "Zálohové faktury", kinds: [.advanceRequest],
+                                                series: try DocumentNumberSeries(id: "zf", pattern: DocumentNumberPattern(template: "ZF-{YYYY}-{NNN}"), year: 2026)),
+                             now: Fixtures.now)
+        try seriesStore.save(StoredNumberSeries(name: "Doklady k platbě", kinds: [.paymentTaxDocument],
+                                                series: try DocumentNumberSeries(id: "dd", pattern: DocumentNumberPattern(template: "DD-{YYYY}-{NNN}"), year: 2026)),
+                             now: Fixtures.now)
+        var request = Fixtures.czkDraft(id: "adv")
+        request.kind = .advanceRequest
+        request.taxPointDate = nil
+        try store.saveDraft(request, now: Fixtures.now)
+        let issuedRequest = try store.issue(id: "adv", seriesID: "zf", now: Fixtures.now)
+        #expect(issuedRequest.number == "ZF-2026-001")
+
+        let payment = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        #expect(payment.receiptDocumentID == nil)
+        #expect(!payment.receiptIssued)
+        #expect(!payment.isFromBankImport)
+
+        // The receipt built for the payment: linked while a draft, not yet locking.
+        let receipt = Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: issuedRequest, received: Fixtures.d("12100"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(receipt, now: Fixtures.now)
+        let linked = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+        #expect(linked.receiptDocumentID == "dd1")
+        #expect(!linked.receiptIssued)
+
+        // Another amount, or another kind of document, is not this payment's receipt.
+        let wrongAmount = Document.paymentTaxDocument(id: "dd2", forAdvanceRequest: issuedRequest, received: Fixtures.d("5000"), on: Fixtures.day("2026-11-10"))
+        try store.saveDraft(wrongAmount, now: Fixtures.now)
+        do {
+            _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd2", now: Fixtures.now)
+            Issue.record("a receipt for another amount was accepted")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        do {
+            _ = try store.attachReceipt(paymentID: payment.id, documentID: "adv", now: Fixtures.now)
+            Issue.record("an advance request was accepted as a receipt")
+        } catch DataError.receiptMismatch(let paymentID, _) {
+            #expect(paymentID == payment.id)
+        }
+        #expect(throws: DataError.paymentNotFound("nope")) { _ = try store.attachReceipt(paymentID: "nope", documentID: "dd1") }
+
+        // Issued: the payment is locked for the store and for raw SQL alike.
+        let issuedReceipt = try store.issue(id: "dd1", seriesID: "dd", now: Fixtures.now)
+        #expect(issuedReceipt.number == "DD-2026-001")
+        let locked = try #require(try store.payments(for: "adv").first)
+        #expect(locked.receiptIssued)
+        #expect(throws: DataError.paymentLocked(payment.id)) { try store.deletePayment(id: payment.id, now: Fixtures.now) }
+        #expect(throws: DataError.paymentLocked(payment.id)) { _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd2", now: Fixtures.now) }
+        #expect(throws: DatabaseError.self) {
+            try database.queue.write { db in try db.execute(sql: "DELETE FROM documentPayment WHERE id = ?", arguments: [payment.id]) }
+        }
+        #expect(throws: DatabaseError.self) {
+            try database.queue.write { db in try db.execute(sql: "UPDATE documentPayment SET note = 'x' WHERE id = ?", arguments: [payment.id]) }
+        }
+        #expect(try store.paymentState(for: "adv").isSettled)
+
+        // A draft receipt that is deleted unlinks itself from its payment, which stays deletable.
+        let second = try store.recordPayment(documentID: "adv", on: Fixtures.day("2026-11-11"), amount: Money(Fixtures.d("5000"), .czk), now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: second.id, documentID: "dd2", now: Fixtures.now)
+        try store.deleteDraft(id: "dd2", now: Fixtures.now)
+        #expect(try store.payments(for: "adv").last?.receiptDocumentID == nil)
+        try store.deletePayment(id: second.id, now: Fixtures.now)
+        #expect(try AuditLog(database).events(entity: "document", id: "adv").map(\.action)
+                == ["create", "issue", "payment", "receiptAttached", "payment", "receiptAttached", "paymentDeleted"])
+    }
 }

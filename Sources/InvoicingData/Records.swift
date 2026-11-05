@@ -229,8 +229,17 @@ public struct DocumentPayment: Hashable, Sendable, Identifiable {
     public let documentID: String
     public let paidOn: CalendarDay
     public let amount: Money
+    /// The imported bank statement line the payment was matched from; nil when typed in by the user.
     public let bankTransactionID: String?
+    /// The payment tax document issued for this payment (an advance received against an advance
+    /// request); nil for payments of ordinary invoices.
+    public let receiptDocumentID: String?
+    /// True while `receiptDocumentID` points to an issued document: the receipt rests on this payment,
+    /// so the payment can be neither changed nor deleted.
+    public let receiptIssued: Bool
     public let note: String?
+
+    public var isFromBankImport: Bool { bankTransactionID != nil }
 }
 
 struct DocumentPaymentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
@@ -241,14 +250,16 @@ struct DocumentPaymentRecord: Codable, FetchableRecord, PersistableRecord, Senda
     var amount: Int64
     var currency: String
     var bankTransactionID: String?
+    var receiptDocumentID: String?
     var note: String?
     var createdAt: String
 
-    func payment() throws -> DocumentPayment {
+    func payment(receiptIssued: Bool) throws -> DocumentPayment {
         DocumentPayment(id: id, documentID: documentID,
                         paidOn: try CalendarDay.stored(paidOn, table: Self.databaseTableName, id: id),
                         amount: MinorUnits.money(amount, Currency(code: currency)),
-                        bankTransactionID: bankTransactionID, note: note)
+                        bankTransactionID: bankTransactionID, receiptDocumentID: receiptDocumentID,
+                        receiptIssued: receiptIssued, note: note)
     }
 }
 
