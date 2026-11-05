@@ -18,6 +18,9 @@ import Testing
         #expect(CzechBankAccount(parsing: " 000019-2000145399/0800 ")?.description == "19-2000145399/0800")
         #expect(CzechBankAccount(prefix: "123", number: "1265098001", bankCode: "5500") != nil)
         #expect(CzechBankAccount(prefix: "000123", number: "0001265098001", bankCode: "5500")?.description == "123-1265098001/5500")
+        // An all-zero prefix (as it comes out of an IBAN) is no prefix at all.
+        #expect(CzechBankAccount(parsing: "000000-1265098001/5500")?.description == "1265098001/5500")
+        #expect(CzechBankAccount(prefix: "000000", number: "1265098001", bankCode: "5500")?.prefix == "")
     }
 
     @Test func rejectsBadChecksumsAndShapes() {
@@ -31,6 +34,7 @@ import Testing
         #expect(CzechBankAccount(parsing: "12345678901/0800") == nil)
         #expect(CzechBankAccount(parsing: "abc/0800") == nil)
         #expect(CzechBankAccount(parsing: "/0800") == nil)
+        #expect(CzechBankAccount(parsing: "0000000000/5500") == nil)   // an all-zero number
         #expect(CzechBankAccount(parsing: "1234567-2000145399/0800") == nil)
     }
 

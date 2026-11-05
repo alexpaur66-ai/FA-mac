@@ -56,8 +56,8 @@ public struct CzechBankAccount: Hashable, Sendable, Codable, CustomStringConvert
         return sum % 11 == 0
     }
 
+    /// Leading zeros are not significant; an all-zero prefix is no prefix, an all-zero number is invalid.
     private static func stripLeadingZeros(_ text: String) -> String {
-        let stripped = text.drop(while: { $0 == "0" })
-        return stripped.isEmpty && !text.isEmpty ? "0" : String(stripped)
+        String(text.drop(while: { $0 == "0" }))
     }
 }
