@@ -119,6 +119,7 @@ struct OverviewView: View {
         let name = monthName(month)
         // The This month filter is the month of today; for another month the tile has no list to open.
         let isCurrentMonth = month.year == documents.today.year && month.month == documents.today.month
+        let issuedAction: (@MainActor () -> Void)? = isCurrentMonth ? { show(.filter(.thisMonth)) } : nil
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.l, alignment: .top)],
                          alignment: .leading, spacing: Spacing.l) {
             Tile(symbol: "clock", title: L.tileUnpaid,
@@ -141,7 +142,7 @@ struct OverviewView: View {
             Tile(symbol: Symbols.document, title: L.tileIssued(name),
                  value: figures.issuedCountsText,
                  lines: [String(localized: L.revenueTaxDocuments) + ": " + MoneyList.text(figures.revenue, locale: locale)],
-                 action: isCurrentMonth ? { show(.filter(.thisMonth)) } : nil)
+                 action: issuedAction)
             // By tax point, not by issue date, so no document filter matches it; the tile opens nothing.
             Tile(symbol: "percent", title: L.tileVAT(name),
                  value: MoneyText.format(figures.vatCZK, currency: "CZK", locale: locale),
