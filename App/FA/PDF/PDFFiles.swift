@@ -3,7 +3,6 @@
 
 import AppKit
 import InvoicingCore
-import InvoicingPDF
 import PDFKit
 import UniformTypeIdentifiers
 
@@ -47,11 +46,10 @@ enum PDFFiles {
     }
 
     /// Print…: the document's PDF through the system print panel, one page per sheet, no scaling.
+    /// `PDFDocument.printOperation(for:scalingMode:autoRotate:)` builds the operation; `PDFView` has no such method.
     static func printPDF(_ data: Data, window: NSWindow?) {
         guard let document = PDFDocument(data: data) else { return }
-        let view = PDFView(frame: NSRect(x: 0, y: 0, width: DocumentPDF.pageSize.width, height: DocumentPDF.pageSize.height))
-        view.document = document
-        guard let operation = view.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleNone, autoRotate: false) else { return }
+        guard let operation = document.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleNone, autoRotate: false) else { return }
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         if let window {

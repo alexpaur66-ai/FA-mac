@@ -61,7 +61,7 @@ and leaves the image to the app.
 - **Preview as page images.** The detail column shows the pages as Retina bitmaps drawn by PDFKit on
   white, stacked inside the detail's scroll view, so there is no scroll view inside a scroll view. The
   draft editor's View ▸ Show Preview swaps the editor for the same view, re-rendered about 300 ms after
-  the last edit. Print… prints through `PDFView.printOperation` and the system print panel.
+  the last edit. Print… prints through `PDFDocument.printOperation` and the system print panel.
 - **The preview and the PDF actions live in the main window.** An issued document's detail shows the
   PDF row (the saved file, or "kept in the app"), Save PDF…, Show PDF in Finder (disabled while the file
   is missing; the app keeps its own frozen copy) and Print…, then the pages. On a draft, View ▸ Show/Hide
