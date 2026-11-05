@@ -785,15 +785,15 @@ Edge cases:
 - Single keys: ↩ opens the document, Space previews it, ⌫ deletes a manual payment that nothing issued rests on (undoable).
 
 **Bank statement import (v0.2).**
-- The exact Raiffeisenbank formats are still being researched by the build thread. The UI below works for any parsed format.
+- Raiffeisenbank formats, from the build thread's reading of the bank's internet-banking manual: PDF statements are free. The data formats are a paid service that has to be activated: RB XML (not camt.053), ABO (`*.GPC`) and Gemini (`*.ACE`). Several statements can arrive as one ZIP. The parser handles ABO first. The UI below works for any parsed format.
 
-1. **Drop the file** on the window, on the Payments & Bank section or on an account row (`dropDestination(for:isEnabled:action:)`, macOS 26 [S72]). File ▸ Import Bank Statement… does the same through `fileImporter` with `.commaSeparatedText`, `.xml` or `.pdf` [S73].
+1. **Drop the file** on the window, on the Payments & Bank section or on an account row (`dropDestination(for:isEnabled:action:)`, macOS 26 [S72]). File ▸ Import Bank Statement… does the same through `fileImporter` with the ABO, XML, ZIP and PDF types [S73].
    - Highlight a drop target only when it can accept the file [S36].
 2. **Preview sheet.**
    - It shows: file name and checksum (the file is stored untouched); detected format; the detected account, matched by IBAN to Settings ▸ Bank accounts, or **"Assign to account…"** if unknown; the period; opening and closing balance; "42 transactions · 30 new · 12 already imported (skipped)".
-   - PDF statements are stored. Whether their transactions can be parsed depends on the build thread; until then show "Stored – transactions can't be read from this PDF yet; match manually or import CSV/XML".
+   - PDF statements are stored. Whether their transactions can be parsed depends on the build thread; until then show "Stored – transactions can't be read from this PDF yet; match manually or import an ABO/XML statement".
    - **Import** (↩) opens the triage window.
-   - **Ask Sasa now (Q8):** check whether Raiffeisenbank internet banking can export the statement as CSV or camt.053 XML. Once the build thread knows the formats, the import sheet gains a short "how to download the statement as CSV/XML" step.
+   - **Ask Sasa now (Q8):** is the paid data-format service active on the account, and what does it cost? Once it is, the import sheet gains a short "how to download the statement as ABO" step.
 
    **PDF fallback: "match manually"** (the real path while Sasa only has PDFs). The triage window shows the stored statement in a `PDFView` [S78] on one side and the list of open documents on the other. Search finds documents by VS, number, client or amount (⌘F); R or ⌘R records a payment on the selected document with the Record Payment sheet, whose date and amount Sasa copies from the statement. The statement stays attached as the payment's source file.
 3. **Triage window** "Výpis 10/2026 · RB EUR".
@@ -1008,7 +1008,7 @@ Principles:
 **Why ship it in v0.1.**
 - The Czech tools Sasa could compare against added exactly this in 2026: Fakturoid's ⌘K navigation palette (June 2026) and iÚčto's ⌘K, which "jumps to any section or runs an action" (August 2026) [S103][S116].
 - The keyboard-first apps that showed the pattern list each command's shortcut beside it, so people learn the shortcuts along the way [S131][S133].
-- It enables the 11-keystroke repeat-invoice script and most of the budgets in §4.
+- It enables the 12-keystroke repeat-invoice script and most of the budgets in §4.
 - **It is cheap if built right.** One command registry produces both the menu bar and the palette. The palette therefore can't drift from the menus, which must still list every command [S18].
 
 **Risks and mitigations.**
@@ -1176,7 +1176,7 @@ Counting rules:
 | 7 | Add a CRM note after a call (weekly) | Contacts → search → open → edit note → save | ~5 C + ~4 K + text | ⌘K · acm · ↓↓↓ ("Add Note – Acme") · ↩ · ‹text› · ↩ | **9 K + text** |
 | 8 | Monthly close: CSV for the accountant + backup (monthly) | Export menu → choose month → export → download (backup is not applicable on the web) | ~5 C | ⌘6 · ↩ ("Export October 2026…", backup ticked) · ↩ (save panel) | **3 K** |
 
-**Bonus (v0.2): triage a statement of 30 lines** (20 exact, 8 suggested, 2 fees), from a CSV or XML statement.
+**Bonus (v0.2): triage a statement of 30 lines** (20 exact, 8 suggested, 2 fees), from an ABO or XML statement.
 - This app: 1 C on "Přijmout přesné shody (20)" (or ⌘K · "přij" · ↩ = 6 K from the palette) + 8 × ↩ + 2 × (N + category key) = **1 C + 12 K** (or 18 K with no click).
 - Xero-style: one OK per line, **30 C** [S120][S121]. Xero's "Bulk OK" idea has been "in development" since 17 Nov 2025 (status checked 2026-11-05), so this may change once it ships.
 - With a PDF-only statement there is no triage: the "match manually" fallback (§2f) costs about ⌘F · VS · ↩ · R · date · ↩ per line.
@@ -1407,7 +1407,7 @@ Counting rules:
 5. **Advances for EU reverse-charge clients.** Do you issue a "Daňový doklad k přijaté platbě" for each advance payment, or go straight to the final invoice? This sets the default for "When paid, prepare". (ACCT.)
 6. **PDF filing.** One folder, or subfolders per year or per client? What file-name pattern (e.g. "FV 2026-0042 Acme.pdf")?
 7. **ČNB rates.** Would a button that opens the ČNB rates page **in your own browser** be acceptable (the app itself still makes no network call)? And should the app also accept the ČNB **daily** rates file, or only the yearly file the brief names?
-8. **Raiffeisenbank statements.** In RB internet banking, can you download the statement as **CSV or camt.053 XML**, not only PDF? With CSV/XML, v0.2 can match payments automatically; with PDF only, matching stays manual (§2f).
+8. **Raiffeisenbank statements.** Statements as data (ABO, RB XML or Gemini) are a paid service in RB internet banking; PDF is free. Is the service active, or worth its price? With ABO or XML, v0.2 can match payments automatically; with PDF only, matching stays manual (§2f).
 
 ---
 

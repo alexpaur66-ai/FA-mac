@@ -28,6 +28,8 @@ waits for Saša's macOS version. Until then the code follows the policy agreed f
   `#if compiler(>=6.2)` and an `if #available(macOS 26, *)` check, with a macOS 14 fallback.
 - Today that applies to one call: `glassEffect(_:in:)` in `FloatingSurface`. On macOS 14 and 15 the surface is an
   opaque capsule, the same as with Reduce Transparency.
+- The runner's Xcode 16.4 (Swift 6.1) compiles only the fallback. The glass branch is first compiled by Xcode 26 or
+  later, on the Mac.
 - When the target is raised, the gated branches become the only branch, and the macOS 27 items in design-system.md §2
   (bordered text fields, `.tabs` pickers, `reorderable()`, concentric radii) can be adopted.
 
@@ -61,9 +63,10 @@ NavigationSplitView { … }
                                     max: LayoutMetrics.sidebar.max)
 ```
 
-`Brand.accent` is the "Inkoust" accent as a fill colour. The app can apply it app-wide through an `AccentColor` asset
-(with the `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` build setting) or with `.tint(Brand.accent)` on the root view.
-Links and accent-coloured text use `NSColor.linkColor`, never the brand colour.
+`Brand.accent` is the "Inkoust" accent as a fill colour, for custom drawing. App-wide, the accent comes from an
+`AccentColor` asset with the same values and the `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` build setting, which
+the build adds with the project settings (not `.tint` on the root view). Links and accent-coloured text use
+`NSColor.linkColor`, never the brand colour.
 
 Every status label is a `LocalizedStringResource` in the `DesignSystem` table, with English defaults in sentence case and
 Czech translations in `DesignSystem.xcstrings`. Two Czech labels wait for the accountant: "Uzavřeno – neuhrazeno" and
