@@ -7,7 +7,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
 - **This whole document is a design proposal (RECOMMENDATION).** Statements about Apple platforms, APIs, the HIG or other products carry a source tag **[S#]**. The numbered list of sources is at the end.
 - **UNVERIFIED** marks anything that no opened page confirms. Test it before building on it.
 - **ACCT** marks anything that needs to be confirmed with the accountant. This covers all legal or tax wording and treatment beyond what the project brief states.
-- The only legal wording used verbatim in this spec is the wording from the brief: "Faktura – daňový doklad", "Zálohová faktura", "Daňový doklad k přijaté platbě", "Není daňovým dokladem" and "daň odvede zákazník". Everything else printed on a PDF is ACCT. **All legal and tax strings, with their status (Brief or ACCT), are kept in one reviewed table: design-system §9 "Legal and tax strings".** Czech terms in this spec such as "přenesená daňová povinnost", "Osvobozeno", "Tuzemsko", "Mimo EU", "DUZP / Datum uskutečnění zdanitelného plnění", "Obchodní firma", "Kurzový rozdíl", "Konečná faktura" and "Odečtené zálohy" are **ACCT: confirm with accountant** wherever they appear.
+- The only legal wording used verbatim in this spec is the wording from the brief: "Faktura – daňový doklad", "Zálohová faktura", "Daňový doklad k přijaté platbě", "Není daňovým dokladem" (the brief's short form, used in the app only; the PDF prints the InvoicingCore clause from design-system §9, ACCT) and "daň odvede zákazník". Everything else printed on a PDF is ACCT. **All legal and tax strings, with their status (Brief or ACCT), are kept in one reviewed table: design-system §9 "Legal and tax strings".** Czech terms in this spec such as "přenesená daňová povinnost", "Osvobozeno", "Tuzemsko", "Mimo EU", "DUZP / Datum uskutečnění zdanitelného plnění", "Obchodní firma", "Kurzový rozdíl", "Konečná faktura" and "Odečtené zálohy" are **ACCT: confirm with accountant** wherever they appear.
 - **Cross-references.** design-system.md owns the tokens, colours, status styles, components and the toolbar table (§8.11). This spec owns the screens, flows, menus and the **one authoritative keyboard map (§3.1)**.
 - Notation:
   - ⌘ = Command, ⇧ = Shift, ⌥ = Option, ⌃ = Control, ↩ = Return, ⌫ = Delete, ⎋ = Esc.
@@ -27,7 +27,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
    - It comes from one series per document type and is continuous, with no gaps.
    - Drafts have no number. Deleting a draft never uses up a number.
 3. **"Zálohová faktura" is not a tax document.**
-   - It prints "Není daňovým dokladem".
+   - It prints the not-a-tax-document clause from design-system §9 (InvoicingCore `DocumentClause.notATaxDocument`: "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby.", ACCT). The brief's short form "Není daňovým dokladem" may label the in-app banner.
    - It has no DUZP field. ACCT: confirm that no date of supply should print.
 4. **Reverse charge** is a **document-level** VAT treatment (RECOMMENDATION; design-system §8.5 uses the same rule). It prints the clause "daň odvede zákazník" (the brief's exact string).
    - **ACCT: to verify** that a reverse-charge document shows no VAT rate and no VAT amount, and cite the legal source once the accountant confirms it.
@@ -637,7 +637,7 @@ Assumptions:
 - **Document ▸ "Označit k opravě dobropisem… / Mark for Credit Note…"** for a tax document issued by mistake. A reason is required. It stops the Overdue nags, shows a banner on the document ("K opravě dobropisem – dobropisy přijdou ve fázi 2"), sets a CSV flag, and becomes the entry point for Phase 2 credit notes.
 
 **Step 1: create the advance** (⇧⌘N, the palette "zálohová acme", or the client's New Advance Invoice).
-- The editor has type Zálohová faktura, and a banner in the editor and on the PDF reads "Není daňovým dokladem" (rule 3).
+- The editor has type Zálohová faktura, and a banner in the editor reads "Není daňovým dokladem" (the brief's short form), and the PDF prints the not-a-tax-document clause from design-system §9 (rule 3, ACCT).
 - There is no DUZP field and no rate is needed. The tax document later takes the rate for its own DUZP.
 - Lines carry the VAT rate that the later tax documents will use. Whether the advance PDF shows a VAT breakdown is ACCT.
 - **"When paid, prepare / Po zaplacení připravit"** pop-up, the same idea as Fakturoid's "S platbou vystavit" [S109]:
@@ -670,9 +670,9 @@ Assumptions:
   - the exact layout of the deduction and of the CZK VAT difference is ACCT
 - Totals: Celkem → − zálohy → **K úhradě**.
 - If the amount due is 0, the QR is suppressed, and after Issue the status becomes "Uhrazeno (zálohami)".
-- **If the amount due would be negative, Issue is blocked:** "Advances exceed the invoice – refund or credit note handling is Phase 2 (ACCT)".
+- **If the advances exceed the supply (negative amount due), Issue stays available with a warning** (validator `advancesExceedSupply`, ADR 0004): "Advances exceed the invoice – refund or credit note handling is Phase 2 (ACCT)". The QR and the payment request are suppressed, as for a zero amount due (RECOMMENDATION). After Issue the badge follows the settlement the data layer computes; it is not "Uhrazeno (zálohami)", which needs an amount due of exactly 0.
 - An advance can be deducted by **one** issued final invoice only. Fakturoid also allows only one final invoice per advance [S109]. If two drafts deduct the same advance, both show a warning.
-- The PDF title is "Faktura – daňový doklad". Any extra wording about settling advances is ACCT.
+- The PDF title in the merged core (`DocumentKind.title`) is "Faktura – daňový doklad (vyúčtování záloh)"; the parenthetical settling wording is ACCT.
 - After Issue, each deducted advance becomes "Zúčtováno v konečné faktuře", with the final invoice number in the badge detail.
 - The final invoice uses the Faktura series by default, with an optional separate series. ACCT, and part of Q2.
 
@@ -785,7 +785,7 @@ Edge cases:
 - Single keys: ↩ opens the document, Space previews it, ⌫ deletes a manual payment that nothing issued rests on (undoable).
 
 **Bank statement import (v0.2).**
-- Raiffeisenbank formats, from the build thread's reading of the bank's internet-banking manual: PDF statements are free. The data formats are a paid service that has to be activated: RB XML (not camt.053), ABO (`*.GPC`) and Gemini (`*.ACE`). Several statements can arrive as one ZIP. The parser handles ABO first. The UI below works for any parsed format.
+- Raiffeisenbank formats, UNVERIFIED (from the build thread's reading of the bank's internet-banking manual, not confirmed on any page and not in the source list): PDF statements are free. The data formats are a paid service that has to be activated: RB XML (not camt.053), ABO (`*.GPC`) and Gemini (`*.ACE`). The free and paid status and the format names are UNVERIFIED. Several statements can arrive as one ZIP. The parser handles ABO first. The UI below works for any parsed format.
 
 1. **Drop the file** on the window, on the Payments & Bank section or on an account row (`dropDestination(for:isEnabled:action:)`, macOS 26 [S72]). File ▸ Import Bank Statement… does the same through `fileImporter` with the ABO, XML, ZIP and PDF types [S73].
    - Highlight a drop target only when it can accept the file [S36].
@@ -803,7 +803,7 @@ Edge cases:
    | Lane | What lands there | Default |
    |---|---|---|
    | **Already recorded / Už zaznamenáno** (checked first) | The line matches a payment Sasa already recorded by hand: same document or VS, same amount, date within ±N days (a setting), same account | Pre-ticked. Accepting **links** the line to that payment (its source changes from Manual to "Confirmed by statement") instead of creating a second payment. Included in the bulk accept. |
-   | **Matched / Spárováno** | VS + amount + currency match within the payment tolerance (the one shared setting, §2f Record Payment). Fakturoid allows up to 1.99 Kč and iDoklad under 1 Kč [S107][S115]. | Pre-ticked. Accepted in bulk with the prominent toolbar item **"Přijmout přesné shody (N) / Accept Exact Matches (N)"**, Bank ▸ Accept Exact Matches, or the palette (one placement in the window, one label). In Xero, bulk OK is the most-voted pain point, with 248 votes [S120]. |
+   | **Matched / Spárováno** | VS + amount + currency match within the payment tolerance (the one shared setting, §2f Record Payment). Fakturoid allows up to 1.99 Kč and iDoklad under 1 Kč [S107][S115]. | Pre-ticked. Accepted in bulk with the prominent toolbar item **"Přijmout přesné shody (N) / Accept Exact Matches (N)"**, Bank ▸ Accept Exact Matches, or the palette (one placement in the window, one label). A Xero product idea for bulk OK has 248 votes and is marked "In development" [S120]. |
    | **Suggested / Návrhy** | VS only (the amount differs, so it would be a partial payment or an overpayment); amount + a payer IBAN already confirmed ≥2 times (Fakturoid's rule [S108]); amount only, when exactly one open document matches | One ↩ per line |
    | **Unmatched / Nespárováno** | Incoming lines with no candidate | Find with ⌘F, or mark N |
    | **Outgoing / Odchozí** | Outgoing lines | Categorise: Poplatky (fees) / Software / Nájem (rent) / Daně (tax) / Vlastník (owner) / custom |
@@ -856,7 +856,7 @@ The currency pop-up defaults to EUR. Other currencies in the file are stored for
 **Coverage panel** (detail column).
 - A month grid with one mark per day, each drawn as an SF Symbol plus the day number, never as a typed glyph. Each cell has a VoiceOver label, e.g. "4. 11. 2026, kurz vyhlášen, 24,315" or "2. 11. 2026, kurz chybí, potřebný pro koncept":
   - published: `checkmark.circle.fill`
-  - non-publication day (uses the rate of dd.mm.): `circle`
+  - non-publication day (uses the rate of dd.mm.; when ČNB publishes is UNVERIFIED, see the resolver below): `circle`
   - missing and needed: `exclamationmark.circle.fill` in the caution tone, plus the word "chybí" in the cell's tooltip
   - future: no mark
 - Below it, always as text, **"Needed rates / Potřebné kurzy"**: every date a draft or payment needs but the data doesn't cover. Each has **Enter manually…**. This list, not the grid, is the primary way to see what is missing.
@@ -870,7 +870,7 @@ The currency pop-up defaults to EUR. Other currencies in the file are stored for
 
 **How the rate for a date is resolved** (rule 6; **ACCT: which ČNB rate legally applies to DUZP D**, that day's rate or the previous publication day's depending on publication time, is UNVERIFIED and goes to the accountant). The resolver is **one unit-tested function**:
 1. The date has a published row: use it.
-2. The date is inside the imported range but has no row: it is a non-publication day (a weekend or holiday). Use the last earlier row and label it "last published rate, dd.mm.".
+2. The date is inside the imported range but has no row: treat it as a non-publication day (a weekend or holiday). That ČNB publishes only on working days is UNVERIFIED (ACCT: confirm against the ČNB publication calendar, then add an [S#]). Use the last earlier row and label it "last published rate, dd.mm.".
 3. The date is after the imported range:
    - A Saturday or Sunday directly after a covered Friday resolves to that Friday.
    - A **Czech public holiday** on a weekday resolves the same way, using a small built-in table of Czech public holidays taken from an official calendar (RECOMMENDATION; the table needs a yearly check). Without it, a holiday right after the imported range would block drafts until the next import, and the label "poslední vyhlášený kurz (víkend/svátek)" could never appear.
@@ -1239,7 +1239,8 @@ Counting rules:
 | Marked for credit note | K opravě dobropisem (ACCT) |
 | Close Advance as Unpaid… / Mark for Credit Note… | Uzavřít zálohu bez úhrady… / Označit k opravě dobropisem… (ACCT) |
 | Locked | Uzamčeno |
-| Not a tax document | Není daňovým dokladem (brief wording) |
+| Not a tax document (in-app banner) | Není daňovým dokladem (brief wording) |
+| This is not a tax document. A tax document will be issued upon receipt of the payment. (PDF note on an advance) | Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby. (InvoicingCore `DocumentClause.notATaxDocument`, ACCT) |
 
 **Overview**
 
@@ -1408,7 +1409,7 @@ Counting rules:
 5. **Advances for EU reverse-charge clients.** Do you issue a "Daňový doklad k přijaté platbě" for each advance payment, or go straight to the final invoice? This sets the default for "When paid, prepare". (ACCT.)
 6. **PDF filing.** One folder, or subfolders per year or per client? What file-name pattern (e.g. "FV 2026-0042 Acme.pdf")?
 7. **ČNB rates.** Would a button that opens the ČNB rates page **in your own browser** be acceptable (the app itself still makes no network call)? And should the app also accept the ČNB **daily** rates file, or only the yearly file the brief names?
-8. **Raiffeisenbank statements.** Statements as data (ABO, RB XML or Gemini) are a paid service in RB internet banking; PDF is free. Is the service active, or worth its price? With ABO or XML, v0.2 can match payments automatically; with PDF only, matching stays manual (§2f).
+8. **Raiffeisenbank statements.** Are statements as data (ABO, RB XML or Gemini) a paid service in RB internet banking, with PDF free? UNVERIFIED. Is the service active, or worth its price? With ABO or XML, v0.2 can match payments automatically; with PDF only, matching stays manual (§2f).
 
 ---
 

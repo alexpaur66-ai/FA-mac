@@ -112,3 +112,16 @@ Refuted, among others: rounding in `MoneyText` (the core rounds every displayed 
 from zero, before it reaches the view), marking the ACCT strings `needs_review` (the catalog's "translated" only means
 a translation exists; the ship gate is the legal-strings table in ds §9), and a README gating rule that would break a
 macOS 27 API (it covered only the macOS 26 glass call; the wording now names the API's own version anyway).
+
+## 2026-11-05 — Build thread review (PR 7)
+
+Six focused reviewers and one adversarial reviewer read `App/FA/DesignSystem/` and these docs against the merged
+InvoicingCore; a verifier checked each finding. 17 confirmed, 10 refuted. Those not already fixed above:
+
+- A final invoice with a negative amount due is no longer blocked at Issue: sf §2d now gives the `advancesExceedSupply` warning (ADR 0004, `DocumentValidator`); the QR and payment request are suppressed as for a zero amount due (RECOMMENDATION).
+- The advance note: ds §9 lists the clause InvoicingCore prints (`DocumentClause.notATaxDocument`, ACCT) next to the brief's short form "Není daňovým dokladem", which stays an in-app label only; ds §3 table, §8.6 TotalsPanel and §8.16 IssueSheet, and sf §0 rule 3, §2d step 1, the opening ground rules and the §5 label table follow it.
+- The final-invoice PDF title in sf §2d and the ds §9 table now quotes InvoicingCore `DocumentKind.title` ("Faktura – daňový doklad (vyúčtování záloh)", ACCT).
+- `DesignSystemGallery.swift`: the 24,310 CZK/EUR sample is marked an illustrative rate, not a published ČNB rate.
+- sf §2f: the Raiffeisenbank format and price statements and Q8 are marked UNVERIFIED (not confirmed on any page in the source list).
+- sf §2g: the ČNB publication-day assumption in the coverage grid and the resolver is marked UNVERIFIED / ACCT.
+- sf §2f: the Xero sentence now says only what [S120] shows (one idea, 248 votes, "In development").

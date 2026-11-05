@@ -103,13 +103,13 @@ Every font is a SwiftUI `Font` static or method, verified [S55]: `.largeTitle`, 
 | Grand total ("K úhradě / Amount due") | `.total` | `.title3.weight(.semibold).monospacedDigit()` | 15 / 20 Semibold | tabular | primary |
 | Overview KPI figure | `.kpi` | `.largeTitle.bold().monospacedDigit()` | 26 / 32 Bold | tabular | primary |
 | Status badge text | `.badge` | `.callout.weight(.medium)` | 12 / 15 Medium | — | primary |
-| In-app legal notices ("daň odvede zákazník", "Není daňovým dokladem"; exact strings from the §9 legal-strings table) | `.legalNote` | `.callout` | 12 / 15 | — | primary, never secondary |
+| In-app legal notices ("daň odvede zákazník", the not-a-tax-document note on an advance; exact strings from the §9 legal-strings table) | `.legalNote` | `.callout` | 12 / 15 | — | primary, never secondary |
 | Captions: rate source, timestamps, hints | `.caption` | `.caption` | 10 / 13 | — | secondary |
 
 ### Notes
 
 - **Floor.** 10 pt is the on-screen minimum [S3]. Legal notices are never set below Callout (12 pt) in the app.
-- **Text enlargement.** The HIG asks that people can enlarge text by at least 200 % [S5], and macOS has no Dynamic Type, so the app does it itself (RECOMMENDATION). Add View ▸ Bigger (⇧⌘=, which the keyboard table lists as "Increase the size of the selection") and View ▸ Smaller (⌘−) [S13], plus Actual Size (⌘0; see screens-flows §3.1). They scale **every content surface** from 100 % to 200 % in steps, from one app-wide scale value: the Table, the editor, the inspector, the Overview, `TotalsPanel` and sheet content. The amounts Sasa most needs to read live in the inspector, the totals and the Overview, so none of them stays at 100 %. System chrome (toolbar, sidebar, menus) keeps the system sizes. The mechanism is `Font.system(size:weight:design:)` (macOS 13.0 [S55]), fed with the HIG sizes above times the scale. Whether system-size text keeps the text-style tracking is UNVERIFIED; compare it on device. When the scale isn't 1, table row height follows the scaled line height plus padding (§5.3), so text never clips. Test 200 % in the minimum window (§5.3).
+- **Text enlargement.** The HIG asks that people can enlarge text by at least 200 % [S5], and macOS has no Dynamic Type, so the app does it itself (RECOMMENDATION). Add View ▸ Bigger (⇧⌘=, which the keyboard table lists as "Increase the size of the selection") and View ▸ Smaller (⌘−) [S13], plus Actual Size (⌘0; see screens-flows §3.1). They scale **every content surface** from 100 % to 200 % in steps, from one app-wide scale value: the Table, the editor, the inspector, the Overview, `TotalsPanel` and sheet content. The amounts Sasa most needs to read live in the inspector, the totals and the Overview, so none of them stays at 100 %. System chrome (toolbar, sidebar, menus) keeps the system sizes. The mechanism is `Font.system(size:weight:design:)` (macOS 13.0 [S55]), fed with the HIG sizes above times the scale. The one app-wide scale value is the SwiftUI environment value `textScale` (1 to 2, `DesignTokens.swift`): the app sets `.environment(\.textScale, …)` once at the scene root, and `textRole(_:)`, `MoneyText` and `StatusBadge` read it, so callers never pass a scale by hand. Whether system-size text keeps the text-style tracking is UNVERIFIED; compare it on device. When the scale isn't 1, table row height follows the scaled line height plus padding (§5.3), so text never clips. Test 200 % in the minimum window (§5.3).
 - **PDF typography is out of scope.** The PDF is drawn with Core Graphics and has its own A4 sizes. HIG tracking values matter only for custom PDF text [S3].
 
 ---
@@ -222,6 +222,8 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 | **Suggested** | caution (`.orange`) | `checkmark.circle.badge.questionmark` (13.0) | Návrh / Suggested | reason and difference |
 | **Unmatched** | pending (`.primary`) | `circle.dashed` (11.0) | Nespárováno / Unmatched | — |
 | **Ignored** ("not an invoice") | neutral (`.secondary`) | `minus.circle` (10.15) | Není faktura / Not an invoice | category: poplatek, software, nájem, daň, vlastník |
+
+Already recorded uses the outline `checkmark.circle`, so it is told apart from Matched (`checkmark.circle.fill`) by symbol as well as by word.
 
 The reason labels follow Xero's practice of labelling every reconciled line ("Rule, Match, Memory…") [S89].
 
@@ -635,7 +637,7 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
   | DPH v CZK + rate line (EUR documents) | ✓ | **never** (no DUZP, no rate) | ✓, rate for the payment date (ACCT) | ✓ |
   | Advances deducted, as negative amounts, with the VAT already taxed in CZK | — | — | — | ✓ |
   | K úhradě / Amount due | ✓ | ✓ | — (nothing payable) | ✓ |
-  | Legal note | "daň odvede zákazník" when the document treatment is EU PDP | "Není daňovým dokladem" | — | as Faktura |
+  | Legal note | "daň odvede zákazník" when the document treatment is EU PDP | the not-a-tax-document clause (`DocumentClause.notATaxDocument`, §9 table, ACCT) | — | as Faktura |
 
 - **Anatomy:**
   - **Per-rate block** (`Grid`, trailing columns): Sazba · Základ · DPH, with a CZK column on EUR tax documents.
@@ -644,7 +646,7 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
   - **K úhradě / Amount due**, in `TextRole.total`.
   - **Legal notes** (`TextRole.legalNote`, with a symbol), from the §9 legal-strings table, never typed inline:
     - "daň odvede zákazník", exactly the brief's lowercase string, when the **document's** VAT treatment is EU reverse charge. Whether it may be capitalised at the start of a printed line is ACCT.
-    - "Není daňovým dokladem", on an advance invoice
+    - the not-a-tax-document clause from the §9 table (InvoicingCore `DocumentClause.notATaxDocument`: "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby.", ACCT), on an advance invoice
 - **States:**
   - draft: live recalculation
   - issued: the lock glyph, values frozen
@@ -959,7 +961,7 @@ This component is not in the task list, but P2 depends on it.
   - client
   - TotalsPanel (compact), **by document kind** (§8.6):
     - *Faktura*: VAT in CZK and ExchangeRateRow (EUR), QR type
-    - *Zálohová*: no DUZP, no rate, no "DPH v CZK"; the "Není daňovým dokladem" note; QR type
+    - *Zálohová*: no DUZP, no rate, no "DPH v CZK"; the not-a-tax-document clause (§9 table, ACCT); QR type
     - *DDPP*: the rate for its DUZP (the payment date; ACCT), VAT in CZK, no QR
     - *Konečná*: the block of advances deducted, then K úhradě; QR only if something is still payable
   - legal notes
@@ -1049,12 +1051,13 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 |---|---|---|
 | Faktura – daňový doklad (with an en dash) | title of a regular invoice | Brief |
 | Zálohová faktura | title of an advance request | Brief |
-| Není daňovým dokladem | note on an advance | Brief |
+| Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby. / This is not a tax document. A tax document will be issued upon receipt of the payment. | note printed on an advance request (InvoicingCore `DocumentClause.notATaxDocument`) | ACCT |
+| Není daňovým dokladem | the brief's short form; in-app banner or badge label on an advance only, not the printed clause | Brief |
 | Daňový doklad k přijaté platbě | title of a tax document for a received advance | Brief |
 | daň odvede zákazník (lowercase, with diacritics) | reverse-charge clause; capitalising it at the start of a printed line is ACCT | Brief |
 | IČO · DIČ · spisová značka · VS | identifiers | Brief |
 | English gloss of every string above | bilingual PDF | ACCT |
-| Konečná faktura | UI type name of the final invoice (its PDF title is "Faktura – daňový doklad", screens-flows §2d) | ACCT |
+| Konečná faktura | UI type name of the final invoice (its PDF title in InvoicingCore `DocumentKind.title` is "Faktura – daňový doklad (vyúčtování záloh)", screens-flows §2d) | ACCT |
 | Odečet zálohy … / Odečtené zálohy | deduction lines on a final invoice | ACCT |
 | DUZP · Datum uskutečnění zdanitelného plnění | date-of-supply label | ACCT |
 | Tuzemsko 21 % · EU – přenesená daňová povinnost (PDP) · Mimo EU · Osvobozeno | VAT treatments and per-line rate labels | ACCT |
@@ -1064,6 +1067,8 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 | K záloze … , platba ze dne … | reference line on a DDPP | ACCT |
 | Uzavřeno – neuhrazeno · K opravě dobropisem | closing actions (screens-flows §2d) | ACCT |
 | Texts for outside-EU and exempt supplies | PDF notes | ACCT |
+
+The advance note: the brief's short form "Není daňovým dokladem" and the clause InvoicingCore prints (`DocumentClause.notATaxDocument`) differ. The PDF prints the core clause; reconciling the two with the accountant is a follow-up outside the design system (ACCT). If the PDF must print exactly the short form, the change belongs in InvoicingCore `DocumentClause.swift`.
 
 - **In the English UI** the Czech titles appear as "Advance invoice (Zálohová faktura)" wherever the distinction matters: the type picker and the Issue sheet.
 - **Document language** (per document, default from the client; RECOMMENDATION, confirm with Sasa): **"Čeština"** (Czech only) or **"Čeština + English"** (bilingual: Czech first, every legal string in Czech with an English gloss underneath). The label is "Jazyk dokladu / Document language". The client default uses the same two values.

@@ -1,6 +1,6 @@
 // A debug-only gallery of the design system: text roles, status badges, amounts, the accent and
 // the floating surface. Open it in Xcode's canvas to check light, dark and Increase Contrast.
-// The amounts are sample values; 24,310 CZK/EUR is the ČNB rate for 4 Nov 2026.
+// The amounts are sample values; 24,310 CZK/EUR is an illustrative rate, not a published ČNB rate.
 
 #if DEBUG
 import SwiftUI
@@ -17,6 +17,7 @@ struct DesignSystemGallery: View {
                 badgesInRows
                 matchBadges
                 amounts
+                scaled
                 accent
                 floating
             }
@@ -73,11 +74,21 @@ struct DesignSystemGallery: View {
 
     private var amounts: some View {
         section("Amounts") {
-            // 4 840,00 € at 24,310 CZK/EUR = 117 660,40 Kč.
+            // 4 840,00 € at 24,310 CZK/EUR (illustrative rate) = 117 660,40 Kč.
             MoneyText(amount: 4840, currency: "EUR", locale: czech, czk: Decimal(11_766_040) / 100)
             MoneyText(amount: Decimal(2_042_040) / 100, currency: "CZK", locale: czech, role: .total)
             MoneyText(amount: 18_400, currency: "EUR", locale: czech, role: .kpi)
         }
+    }
+
+    /// View ▸ Bigger at 200 %: amounts and badges must scale with the rest of the content.
+    private var scaled: some View {
+        section("Scaled to 200 %") {
+            StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
+            MoneyText(amount: 4840, currency: "EUR", locale: czech, czk: Decimal(11_766_040) / 100)
+            Text(verbatim: "body").textRole(.body)
+        }
+        .environment(\.textScale, 2)
     }
 
     private var accent: some View {
