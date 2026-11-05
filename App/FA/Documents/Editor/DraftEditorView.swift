@@ -560,7 +560,7 @@ struct DraftEditorView: View {
     /// "Raiffeisenbank · CZ65 0800 … · EUR": the account as the header picker and the Issue sheet name it.
     static func accountLabel(_ account: BankConnection) -> LocalizedStringResource {
         let bank = account.bankName ?? ""
-        switch (bank.isEmpty, account.currency) {
+        return switch (bank.isEmpty, account.currency) {
         case (true, nil): L.accountIBAN(account.iban.value)
         case (true, let currency?): L.accountIBANWithCurrency(account.iban.value, currency.code)
         case (false, nil): L.accountWithBank(bank, account.iban.value)
