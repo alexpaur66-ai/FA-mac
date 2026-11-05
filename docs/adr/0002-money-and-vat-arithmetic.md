@@ -25,7 +25,10 @@ Date: 2026-11-05 · Status: accepted, open to the adversarial review
   returns the last rate published on or before that day; whether that matches the company's
   accounting policy is for the accountant to confirm (§ 4 odst. 8 ZDPH).
 - Storage form of money is integer minor units plus the currency code; `Money.minorUnits` and
-  `Money(minorUnits:currency:)` are the only conversions.
+  `Money(minorUnits:currency:)` are the only conversions. `Money.minorUnitsIfRepresentable` is the
+  same conversion returning nil for an amount outside the `Int64` range, where `minorUnits` traps
+  instead of storing a wrong integer. The minor units of a currency follow from its code alone
+  (0 for JPY, KRW and ISK, 2 otherwise), so a stored code always restores the same scale.
 
 ## Alternatives rejected
 

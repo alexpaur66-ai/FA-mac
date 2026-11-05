@@ -1,11 +1,14 @@
 /// An ISO 4217 currency with the number of minor units (2 for CZK and EUR).
+/// The minor units always follow from the code, so two values with the same code are equal and
+/// `Money(minorUnits:currency:)` scales the same way whichever way the currency was built.
 public struct Currency: Hashable, Sendable, CustomStringConvertible {
     public let code: String
     public let minorUnits: Int
 
-    public init(code: String, minorUnits: Int = 2) {
-        self.code = code.uppercased()
-        self.minorUnits = minorUnits
+    public init(code: String) {
+        let upper = code.uppercased()
+        self.code = upper
+        self.minorUnits = Currency.defaultMinorUnits(for: upper)
     }
 
     public static let czk = Currency(code: "CZK")
@@ -15,12 +18,16 @@ public struct Currency: Hashable, Sendable, CustomStringConvertible {
     public static let chf = Currency(code: "CHF")
     public static let pln = Currency(code: "PLN")
 
-    /// Minor units for the currencies the ČNB publishes; everything else defaults to 2.
+    /// Same as `Currency(code:)`; kept for existing callers.
     public static func known(_ code: String) -> Currency {
-        let upper = code.uppercased()
-        switch upper {
-        case "JPY", "KRW", "ISK": return Currency(code: upper, minorUnits: 0)
-        default: return Currency(code: upper, minorUnits: 2)
+        Currency(code: code)
+    }
+
+    /// Minor units for the currencies the ČNB publishes: 0 for JPY, KRW and ISK, 2 for everything else.
+    private static func defaultMinorUnits(for upperCode: String) -> Int {
+        switch upperCode {
+        case "JPY", "KRW", "ISK": return 0
+        default: return 2
         }
     }
 

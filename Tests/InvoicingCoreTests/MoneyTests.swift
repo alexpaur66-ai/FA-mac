@@ -14,6 +14,15 @@ import Testing
         #expect(Money(minorUnits: 9_999_999_999_999, currency: .czk).minorUnits == 9_999_999_999_999)
     }
 
+    @Test func minorUnitsOutOfInt64RangeAreNil() throws {
+        let huge = try #require(Decimal(lenient: "100000000000000000000"))   // 1e20 CZK = 1e22 haléřů
+        #expect(Money(huge, .czk).minorUnitsIfRepresentable == nil)
+        #expect(Money(-huge, .czk).minorUnitsIfRepresentable == nil)
+        #expect(Money(d("100000000000000000"), .czk).minorUnitsIfRepresentable == nil)   // 1e19 haléřů > Int64.max
+        #expect(Money(d("123.45"), .eur).minorUnitsIfRepresentable == 12345)
+        #expect(Money(minorUnits: 9_999_999_999_999, currency: .czk).minorUnitsIfRepresentable == 9_999_999_999_999)
+    }
+
     @Test func roundsToCurrencyMinorUnits() {
         #expect(Money(d("10.005"), .eur).rounded().amount == d("10.01"))
         #expect(Money(d("10.004"), .eur).rounded().amount == d("10.00"))
@@ -64,6 +73,23 @@ import Testing
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(Money.self, from: Data(#"{"amount":"abc","currency":"EUR"}"#.utf8))
         }
+    }
+
+    @Test func zeroDecimalCurrenciesAgreeWhicheverWayTheyAreBuilt() throws {
+        #expect(Currency(code: "JPY") == .known("JPY"))
+        #expect(Currency(code: "jpy").minorUnits == 0)
+        #expect(Currency(code: "KRW").minorUnits == 0)
+        #expect(Currency(code: "ISK") == .known("isk"))
+        #expect(Money(minorUnits: 1000, currency: Currency(code: "JPY")).amount == d("1000"))
+        // Storage round trip: integer minor units plus the code.
+        for money in [Money(1000, Currency.known("JPY")), Money(d("123.45"), .eur)] {
+            #expect(Money(minorUnits: money.minorUnits, currency: Currency(code: money.currency.code)) == money)
+        }
+        let file = try CNBRateFile.parseDaily("04.11.2026 #212\nzemě|měna|množství|kód|kurz\nJaponsko|jen|100|JPY|15,915\n")
+        let yen = try #require(file.rates.first)
+        let table = ExchangeRateTable(rates: [yen])
+        let rate = try #require(table.rate(for: Currency(code: "JPY"), on: day("2026-11-04")))
+        #expect(rate.toCZK(Money(1000, Currency(code: "JPY"))) == Money(d("159.15"), .czk))
     }
 
     @Test func currencyCodesAreUppercased() {

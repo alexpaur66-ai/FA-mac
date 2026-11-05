@@ -1,5 +1,5 @@
 /// A Czech domestic account number "prefix-number/bankCode" with the modulo-11 check used by Czech banks.
-public struct CzechBankAccount: Hashable, Sendable, Codable, CustomStringConvertible {
+public struct CzechBankAccount: Hashable, Sendable, CustomStringConvertible {
     /// Up to 6 digits without leading zeros; empty when the account has no prefix.
     public let prefix: String
     /// 2 to 10 digits without leading zeros.
@@ -59,5 +59,30 @@ public struct CzechBankAccount: Hashable, Sendable, Codable, CustomStringConvert
     /// Leading zeros are not significant; an all-zero prefix is no prefix, an all-zero number is invalid.
     private static func stripLeadingZeros(_ text: String) -> String {
         String(text.drop(while: { $0 == "0" }))
+    }
+}
+
+/// Stored as {"prefix":"19","number":"2000145399","bankCode":"0800"}. Decoding runs the same
+/// validation and normalization as `init?(prefix:number:bankCode:)`, so a stored account that
+/// fails the modulo-11 check throws instead of reaching an IBAN or a payment QR code.
+extension CzechBankAccount: Codable {
+    private enum CodingKeys: String, CodingKey { case prefix, number, bankCode }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let prefix = try container.decodeIfPresent(String.self, forKey: .prefix) ?? ""
+        let number = try container.decode(String.self, forKey: .number)
+        let bankCode = try container.decode(String.self, forKey: .bankCode)
+        guard let account = CzechBankAccount(prefix: prefix, number: number, bankCode: bankCode) else {
+            throw DecodingError.dataCorruptedError(forKey: .number, in: container, debugDescription: "Invalid Czech account: \(prefix)-\(number)/\(bankCode)")
+        }
+        self = account
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(prefix, forKey: .prefix)
+        try container.encode(number, forKey: .number)
+        try container.encode(bankCode, forKey: .bankCode)
     }
 }

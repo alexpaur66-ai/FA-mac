@@ -62,6 +62,25 @@ import Testing
         #expect(throws: CNBRateFile.ParseError.empty) { try CNBRateFile.parseDaily("04.11.2026 #212\n") }
     }
 
+    @Test func skipsZeroAndNegativeRates() throws {
+        let daily = try CNBRateFile.parseDaily("""
+        04.11.2026 #212
+        země|měna|množství|kód|kurz
+        EMU|euro|1|EUR|-24,310
+        USA|dolar|1|USD|0,000
+        Velká Británie|libra|1|GBP|28,000
+        """)
+        #expect(daily.rates.map(\.currency.code) == ["GBP"])
+        let yearly = try CNBRateFile.parseYearly("Datum|1 EUR|1 USD|1 GBP\n02.01.2026|-24,170|0,000|28,000\n")
+        #expect(yearly.map(\.currency.code) == ["GBP"])
+    }
+
+    @Test func ignoresByteOrderMark() throws {
+        let file = try CNBRateFile.parseDaily("\u{FEFF}04.11.2026 #212\nzemě|měna|množství|kód|kurz\nEMU|euro|1|EUR|24,310\n")
+        #expect(file.rates.map(\.currency.code) == ["EUR"])
+        #expect(file.rates.first?.czkPerAmount == d("24.310"))
+    }
+
     @Test func parsesYearlyFile() throws {
         // Layout of the ČNB yearly file; the values are sample data.
         let text = """

@@ -2,7 +2,7 @@ import Foundation
 
 /// A calendar date without a time or a time zone: the kind of date that appears on an
 /// invoice (date of issue, date of taxable supply, due date). Gregorian calendar.
-public struct CalendarDay: Hashable, Comparable, Sendable, Codable, CustomStringConvertible {
+public struct CalendarDay: Hashable, Comparable, Sendable, CustomStringConvertible {
     public let year: Int
     public let month: Int
     public let day: Int
@@ -29,18 +29,23 @@ public struct CalendarDay: Hashable, Comparable, Sendable, Codable, CustomString
         self.day = components.day ?? 1
     }
 
-    /// Parses ISO 8601 "2026-11-04".
+    /// Parses ISO 8601 "2026-11-04". The year must have four digits; "26-11-04" is nil.
     public init?(iso text: String) {
         let parts = text.trimmingCharacters(in: .whitespaces).split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == 3, let y = Int(parts[0]), let m = Int(parts[1]), let d = Int(parts[2]) else { return nil }
+        guard parts.count == 3,
+              Self.isDigits(parts[0], count: 4...4), Self.isDigits(parts[1], count: 1...2), Self.isDigits(parts[2], count: 1...2),
+              let y = Int(parts[0]), let m = Int(parts[1]), let d = Int(parts[2]) else { return nil }
         self.init(year: y, month: m, day: d)
     }
 
     /// Parses Czech notation: "04.11.2026", "4.11.2026" or "4. 11. 2026".
+    /// The year must have four digits; "04.11.26" is nil rather than the year 26.
     public init?(czech text: String) {
         let cleaned = text.replacingOccurrences(of: " ", with: "")
         let parts = cleaned.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 3, let d = Int(parts[0]), let m = Int(parts[1]), let y = Int(parts[2]) else { return nil }
+        guard parts.count == 3,
+              Self.isDigits(parts[0], count: 1...2), Self.isDigits(parts[1], count: 1...2), Self.isDigits(parts[2], count: 4...4),
+              let d = Int(parts[0]), let m = Int(parts[1]), let y = Int(parts[2]) else { return nil }
         self.init(year: y, month: m, day: d)
     }
 
@@ -112,5 +117,34 @@ public struct CalendarDay: Hashable, Comparable, Sendable, Codable, CustomString
 
     private var utcDate: Date {
         Self.utcCalendar.date(from: DateComponents(year: year, month: month, day: day)) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    /// ASCII digits only (no sign), with a length in `count`.
+    private static func isDigits(_ text: Substring, count: ClosedRange<Int>) -> Bool {
+        count.contains(text.count) && text.allSatisfy(\.isASCIIDigit)
+    }
+}
+
+/// Stored as {"year":2026,"month":11,"day":5}. Decoding validates like `init?(year:month:day:)`,
+/// so an impossible day such as 30 February throws instead of drifting to another date.
+extension CalendarDay: Codable {
+    private enum CodingKeys: String, CodingKey { case year, month, day }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let y = try container.decode(Int.self, forKey: .year)
+        let m = try container.decode(Int.self, forKey: .month)
+        let d = try container.decode(Int.self, forKey: .day)
+        guard let value = CalendarDay(year: y, month: m, day: d) else {
+            throw DecodingError.dataCorruptedError(forKey: .day, in: container, debugDescription: "Invalid calendar day \(y)-\(m)-\(d)")
+        }
+        self = value
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(year, forKey: .year)
+        try container.encode(month, forKey: .month)
+        try container.encode(day, forKey: .day)
     }
 }

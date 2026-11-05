@@ -43,6 +43,24 @@ import Testing
         let data = try JSONEncoder().encode(account)
         let back = try JSONDecoder().decode(CzechBankAccount.self, from: data)
         #expect(back == account)
+        let decoder = JSONDecoder()
+        #expect(throws: DecodingError.self) {   // number checksum
+            try decoder.decode(CzechBankAccount.self, from: Data(#"{"prefix":"19","number":"2000145398","bankCode":"0800"}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(CzechBankAccount.self, from: Data(#"{"prefix":"","number":"1234567890","bankCode":"0800"}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(CzechBankAccount.self, from: Data(#"{"prefix":"","number":"2000145399","bankCode":"080"}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(CzechBankAccount.self, from: Data(#"{"prefix":"1a","number":"2000145399","bankCode":"0800"}"#.utf8))
+        }
+        let padded = try decoder.decode(CzechBankAccount.self, from: Data(#"{"prefix":"000019","number":"2000145399","bankCode":"0800"}"#.utf8))
+        #expect(padded == account)
+        #expect(padded.description == "19-2000145399/0800")
+        let noPrefix = try decoder.decode(CzechBankAccount.self, from: Data(#"{"number":"1265098001","bankCode":"5500"}"#.utf8))
+        #expect(noPrefix.description == "1265098001/5500")
     }
 }
 
@@ -128,5 +146,11 @@ import Testing
         let data = try JSONEncoder().encode(symbol)
         let back = try JSONDecoder().decode(PaymentSymbol.self, from: data)
         #expect(back == symbol)
+        for digits in ["12a", "12345678901", "", "１２"] {
+            let json = #"{"kind":"variable","digits":""# + digits + #""}"#
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(PaymentSymbol.self, from: Data(json.utf8)) }
+        }
+        let leadingZeros = try JSONDecoder().decode(PaymentSymbol.self, from: Data(#"{"kind":"variable","digits":"0012"}"#.utf8))
+        #expect(leadingZeros == PaymentSymbol.variable("0012"))
     }
 }

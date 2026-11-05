@@ -64,6 +64,11 @@ public struct DocumentNumberPattern: Hashable, Sendable, CustomStringConvertible
         return 1
     }
 
+    /// True when the template has a `{YYYY}` or `{YY}` token, so numbers of different years differ.
+    public var containsYear: Bool {
+        segments.contains { $0 == .year4 || $0 == .year2 }
+    }
+
     /// Formats a number; a counter wider than the pattern is never truncated.
     public func format(year: Int, counter: Int) -> String {
         var result = ""
@@ -80,39 +85,26 @@ public struct DocumentNumberPattern: Hashable, Sendable, CustomStringConvertible
 
     /// Reads the counter back from a number that was formatted for `year`; nil if it does not match.
     public func parseCounter(from number: String, year: Int) -> Int? {
-        var rest = Substring(number)
-        var counter: Int?
-        for (index, segment) in segments.enumerated() {
+        // Every segment but the counter formats to a fixed text for `year`, so the counter is
+        // whatever lies between the text before it and the text after it; it may be wider than
+        // the pattern, and a year token right after it ("{NNN}{YYYY}") is still found.
+        var head = ""
+        var tail = ""
+        var seenCounter = false
+        for segment in segments {
+            let text: String
             switch segment {
-            case .literal(let text):
-                guard rest.hasPrefix(text) else { return nil }
-                rest = rest.dropFirst(text.count)
-            case .year4:
-                let expected = String(year).leftPadded(to: 4)
-                guard rest.hasPrefix(expected) else { return nil }
-                rest = rest.dropFirst(expected.count)
-            case .year2:
-                let expected = String(year % 100).leftPadded(to: 2)
-                guard rest.hasPrefix(expected) else { return nil }
-                rest = rest.dropFirst(expected.count)
-            case .counter:
-                // The counter runs up to the next literal (or the end); it may be wider than the pattern.
-                var digits = ""
-                let nextLiteral: String? = {
-                    guard index + 1 < segments.count, case .literal(let text) = segments[index + 1] else { return nil }
-                    return text
-                }()
-                while let first = rest.first, first.isASCIIDigit {
-                    if let nextLiteral, rest.hasPrefix(nextLiteral), digits.count >= counterWidth { break }
-                    digits.append(first)
-                    rest = rest.dropFirst()
-                }
-                guard let value = Int(digits) else { return nil }
-                counter = value
+            case .counter: seenCounter = true; continue
+            case .literal(let literal): text = literal
+            case .year4: text = String(year).leftPadded(to: 4)
+            case .year2: text = String(year % 100).leftPadded(to: 2)
             }
+            if seenCounter { tail += text } else { head += text }
         }
-        guard rest.isEmpty else { return nil }
-        return counter
+        guard number.count > head.count + tail.count, number.hasPrefix(head), number.hasSuffix(tail) else { return nil }
+        let digits = number.dropFirst(head.count).dropLast(tail.count)
+        guard digits.allSatisfy(\.isASCIIDigit) else { return nil }
+        return Int(digits)
     }
 
     public var description: String { template }

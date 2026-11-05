@@ -31,7 +31,7 @@ public enum CNBRateFile {
         case unknownDate(String)
     }
 
-    /// Parses a daily file. Rows with an unparsable rate are skipped; a malformed header throws.
+    /// Parses a daily file. Rows with an unparsable, zero or negative rate are skipped; a malformed header throws.
     public static func parseDaily(_ text: String) throws -> DailyFile {
         let lines = Self.lines(of: text)
         guard lines.count >= 2 else { throw ParseError.empty }
@@ -48,7 +48,7 @@ public enum CNBRateFile {
             let cells = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
             guard cells.count == 5 else { throw ParseError.malformedLine(lineNumber: index + 3, text: line) }
             guard let amount = Int(cells[2].trimmingCharacters(in: .whitespaces)), amount > 0,
-                  let rate = Decimal(lenient: cells[4]) else { continue }
+                  let rate = Decimal(lenient: cells[4]), rate > 0 else { continue }
             let code = cells[3].trimmingCharacters(in: .whitespaces)
             guard code.count == 3 else { continue }
             rates.append(ExchangeRate(currency: Currency.known(code), amount: amount, czkPerAmount: rate, validFor: day, source: .cnb(order: order)))
@@ -57,6 +57,7 @@ public enum CNBRateFile {
     }
 
     /// Parses a yearly file into rates for every currency and every published day.
+    /// Cells with an unparsable, zero or negative rate are skipped.
     public static func parseYearly(_ text: String) throws -> [ExchangeRate] {
         let lines = Self.lines(of: text)
         guard let header = lines.first else { throw ParseError.empty }
@@ -82,7 +83,7 @@ public enum CNBRateFile {
             guard cells.count == columns.count else { throw ParseError.malformedLine(lineNumber: index + 2, text: line) }
             guard let day = Self.parseDate(cells[0]) else { throw ParseError.unknownDate(cells[0]) }
             for (cell, column) in zip(cells.dropFirst(), parsedColumns) {
-                guard let column, let rate = Decimal(lenient: cell) else { continue }
+                guard let column, let rate = Decimal(lenient: cell), rate > 0 else { continue }
                 rates.append(ExchangeRate(currency: column.currency, amount: column.amount, czkPerAmount: rate, validFor: day, source: .cnb(order: nil)))
             }
         }
@@ -91,8 +92,11 @@ public enum CNBRateFile {
 
     // MARK: Helpers
 
+    /// Trimmed, non-empty lines; a UTF-8 byte order mark at the start (added by some editors) is ignored.
     private static func lines(of text: String) -> [String] {
-        text.replacingOccurrences(of: "\r\n", with: "\n")
+        var cleaned = text
+        if cleaned.unicodeScalars.first == "\u{FEFF}" { cleaned.unicodeScalars.removeFirst() }
+        return cleaned.replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }

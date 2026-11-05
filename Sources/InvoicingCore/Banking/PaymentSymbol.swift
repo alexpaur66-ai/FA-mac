@@ -1,5 +1,5 @@
 /// Czech payment symbols: variabilní, specifický and konstantní symbol. Digits only, at most 10.
-public struct PaymentSymbol: Hashable, Sendable, Codable, CustomStringConvertible {
+public struct PaymentSymbol: Hashable, Sendable, CustomStringConvertible {
     public enum Kind: String, Sendable, Codable {
         case variable, specific, constant
     }
@@ -33,4 +33,26 @@ public struct PaymentSymbol: Hashable, Sendable, Codable, CustomStringConvertibl
     }
 
     public var description: String { digits }
+}
+
+/// Stored as {"kind":"variable","digits":"2026001"}. Decoding applies the rules of `init?(_:_:)`
+/// (1 to 10 ASCII digits, trimmed), so a stored symbol can never carry other characters.
+extension PaymentSymbol: Codable {
+    private enum CodingKeys: String, CodingKey { case kind, digits }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        let text = try container.decode(String.self, forKey: .digits)
+        guard let symbol = PaymentSymbol(kind, text) else {
+            throw DecodingError.dataCorruptedError(forKey: .digits, in: container, debugDescription: "Payment symbol must be 1 to 10 ASCII digits: \(text)")
+        }
+        self = symbol
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(digits, forKey: .digits)
+    }
 }

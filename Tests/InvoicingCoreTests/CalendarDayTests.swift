@@ -25,6 +25,15 @@ import Testing
         #expect(day("0999-01-01").isoString == "0999-01-01")
     }
 
+    @Test func rejectsShortYearsAndSigns() {
+        #expect(CalendarDay(czech: "04.11.26") == nil)
+        #expect(CalendarDay(iso: "26-11-04") == nil)
+        #expect(CalendarDay(iso: "+2026-11-04") == nil)
+        #expect(CalendarDay(czech: "4.11.+2026") == nil)
+        #expect(CalendarDay(czech: "4. 11. 2026") == day("2026-11-04"))
+        #expect(CalendarDay(iso: "2026-11-04") == day("2026-11-04"))
+    }
+
     @Test func parsesAndFormatsCzech() {
         #expect(CalendarDay(czech: "04.11.2026") == day("2026-11-04"))
         #expect(CalendarDay(czech: "4.11.2026") == day("2026-11-04"))
@@ -88,5 +97,15 @@ import Testing
         let data = try JSONEncoder().encode(day("2026-11-05"))
         let back = try JSONDecoder().decode(CalendarDay.self, from: data)
         #expect(back == day("2026-11-05"))
+        #expect(String(decoding: data, as: UTF8.self).contains(#""year":2026"#))
+    }
+
+    @Test func decodingRejectsImpossibleDay() throws {
+        for json in [#"{"year":2026,"month":2,"day":30}"#, #"{"year":2026,"month":13,"day":1}"#,
+                     #"{"year":0,"month":1,"day":1}"#, #"{"year":2026,"month":1,"day":0}"#] {
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(CalendarDay.self, from: Data(json.utf8)) }
+        }
+        let leap = try JSONDecoder().decode(CalendarDay.self, from: Data(#"{"year":2024,"month":2,"day":29}"#.utf8))
+        #expect(leap == day("2024-02-29"))
     }
 }

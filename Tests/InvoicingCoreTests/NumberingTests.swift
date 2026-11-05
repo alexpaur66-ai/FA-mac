@@ -35,6 +35,23 @@ import Testing
         #expect(suffixed.parseCounter(from: "012/27", year: 2026) == nil)
     }
 
+    @Test func parsesCounterFollowedDirectlyByYear() throws {
+        for template in ["{NNN}{YYYY}", "{NNN}{YY}"] {
+            let pattern = try DocumentNumberPattern(template: template)
+            for counter in [1, 2026, 12345] {
+                #expect(pattern.parseCounter(from: pattern.format(year: 2026, counter: counter), year: 2026) == counter)
+            }
+            #expect(pattern.parseCounter(from: pattern.format(year: 2025, counter: 1), year: 2026) == nil)
+        }
+        let full = try DocumentNumberPattern(template: "{NNN}{YYYY}")
+        #expect(full.format(year: 2026, counter: 1) == "0012026")
+        #expect(full.parseCounter(from: "0012026", year: 2026) == 1)
+        #expect(full.parseCounter(from: "2026", year: 2026) == nil)   // no counter digits at all
+        #expect(full.containsYear)
+        let yearless = try DocumentNumberPattern(template: "FV-{NNN}")
+        #expect(!yearless.containsYear)
+    }
+
     @Test func rejectsBadTemplates() {
         #expect(throws: DocumentNumberPattern.PatternError.missingCounter) { try DocumentNumberPattern(template: "FV-{YYYY}") }
         #expect(throws: DocumentNumberPattern.PatternError.multipleCounters) { try DocumentNumberPattern(template: "{NN}-{NN}") }
@@ -58,7 +75,7 @@ import Testing
 @Suite struct DocumentNumberSeriesTests {
     @Test func issuesContinuousNumbersAndResetsYearly() throws {
         let pattern = try DocumentNumberPattern(template: "FV-{YYYY}-{NNN}")
-        var series = DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026)
+        var series = try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026)
         #expect(series.lastNumber == nil)
         let peeked = try series.peek(on: day("2026-01-10"))
         #expect(peeked == "FV-2026-001")
@@ -80,20 +97,65 @@ import Testing
 
     @Test func nonResettingSeriesKeepsCounting() throws {
         let pattern = try DocumentNumberPattern(template: "ZF{YYYY}-{NN}")
-        var series = DocumentNumberSeries(id: "advance", pattern: pattern, resetsYearly: false, year: 2026, lastCounter: 98)
+        var series = try DocumentNumberSeries(id: "advance", pattern: pattern, resetsYearly: false, year: 2026, lastCounter: 98)
         let a = try series.next(on: day("2026-12-31"))
+        #expect(series.lastNumber == a)
         let b = try series.next(on: day("2027-01-02"))
+        #expect(series.lastNumber == b)
         let c = try series.next(on: day("2026-06-01"))
         #expect(a == "ZF2026-99")
         #expect(b == "ZF2027-100")
         #expect(c == "ZF2026-101")
+        #expect(series.lastNumber == "ZF2026-101")
         #expect(series.year == 2026)
         #expect(series.lastCounter == 101)
     }
 
+    @Test func lastNumberUsesTheYearItWasIssuedIn() throws {
+        let pattern = try DocumentNumberPattern(template: "ZF{YYYY}-{NN}")
+        var series = try DocumentNumberSeries(id: "advance", pattern: pattern, resetsYearly: false, year: 2026, lastCounter: 98)
+        let issued = try series.next(on: day("2027-01-02"))
+        #expect(issued == "ZF2027-99")
+        #expect(series.lastNumber == "ZF2027-99")
+        let back = try JSONDecoder().decode(DocumentNumberSeries.self, from: JSONEncoder().encode(series))
+        #expect(back == series)
+        #expect(back.lastNumber == "ZF2027-99")
+    }
+
+    @Test func resettingSeriesNeedsAYearInThePattern() throws {
+        let counterOnly = try DocumentNumberPattern(template: "{NNNNN}")
+        #expect(throws: DocumentNumberSeries.NumberingError.resettingSeriesRequiresYearInPattern) {
+            try DocumentNumberSeries(id: "invoice", pattern: counterOnly, resetsYearly: true, year: 2026)
+        }
+        var continuous = try DocumentNumberSeries(id: "invoice", pattern: counterOnly, resetsYearly: false, year: 2026)
+        let first = try continuous.next(on: day("2026-01-10"))
+        let second = try continuous.next(on: day("2027-01-05"))
+        #expect(first == "00001")
+        #expect(second == "00002")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DocumentNumberSeries.self, from: Data(#"{"id":"invoice","pattern":"FV-{NNN}","resetsYearly":true,"year":2026,"lastCounter":0}"#.utf8))
+        }
+    }
+
+    @Test func rejectsImpossibleState() throws {
+        let pattern = try DocumentNumberPattern(template: "FV-{YYYY}-{NNN}")
+        #expect(throws: DocumentNumberSeries.NumberingError.invalidState(year: 2026, lastCounter: -3)) {
+            try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, lastCounter: -3)
+        }
+        #expect(throws: DocumentNumberSeries.NumberingError.invalidState(year: 0, lastCounter: 0)) {
+            try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 0)
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DocumentNumberSeries.self, from: Data(#"{"id":"invoice","pattern":"FV-{YYYY}-{NNN}","resetsYearly":true,"year":2026,"lastCounter":-3}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DocumentNumberSeries.self, from: Data(#"{"id":"invoice","pattern":"FV-{YYYY}-{NNN}","resetsYearly":true,"year":0,"lastCounter":0}"#.utf8))
+        }
+    }
+
     @Test func codable() throws {
         let pattern = try DocumentNumberPattern(template: "{YYYY}{NNNN}")
-        let series = DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, lastCounter: 5)
+        let series = try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, lastCounter: 5)
         let data = try JSONEncoder().encode(series)
         let back = try JSONDecoder().decode(DocumentNumberSeries.self, from: data)
         #expect(back == series)

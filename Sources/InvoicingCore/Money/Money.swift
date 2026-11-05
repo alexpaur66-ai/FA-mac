@@ -24,8 +24,19 @@ public struct Money: Hashable, Sendable, CustomStringConvertible {
     public func rounded() -> Money { Money(amount.rounded(scale: currency.minorUnits), currency) }
 
     /// Integer minor units of the rounded amount, the storage form.
+    /// Traps when the amount does not fit in `Int64`; use `minorUnitsIfRepresentable` to check first.
     public var minorUnits: Int64 {
+        guard let value = minorUnitsIfRepresentable else {
+            preconditionFailure("\(amount.plainString) \(currency.code) is outside the Int64 minor-unit range")
+        }
+        return value
+    }
+
+    /// Integer minor units of the rounded amount, or nil when they do not fit in `Int64`
+    /// (an amount of roughly 9.2 × 10^16 CZK or more), instead of a silently wrong integer.
+    public var minorUnitsIfRepresentable: Int64? {
         let scaled = amount.rounded(scale: currency.minorUnits) * Decimal(sign: .plus, exponent: currency.minorUnits, significand: 1)
+        guard scaled >= Decimal(Int64.min), scaled <= Decimal(Int64.max) else { return nil }
         return NSDecimalNumber(decimal: scaled).int64Value
     }
 
