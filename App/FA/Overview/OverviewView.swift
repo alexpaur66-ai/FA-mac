@@ -119,7 +119,8 @@ struct OverviewView: View {
         let name = monthName(month)
         // The This month filter is the month of today; for another month the tile has no list to open.
         let isCurrentMonth = month.year == documents.today.year && month.month == documents.today.month
-        let issuedAction: (@MainActor () -> Void)? = isCurrentMonth ? { show(.filter(.thisMonth)) } : nil
+        var issuedAction: (@MainActor () -> Void)?
+        if isCurrentMonth { issuedAction = { show(.filter(.thisMonth)) } }
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.l, alignment: .top)],
                          alignment: .leading, spacing: Spacing.l) {
             Tile(symbol: "clock", title: L.tileUnpaid,
