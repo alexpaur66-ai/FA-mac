@@ -70,4 +70,6 @@ public enum DataError: Error, Equatable, Sendable {
     case documentNotPayable(String)
     /// Credit moves only between documents of the same customer.
     case creditCustomerMismatch(sourceDocumentID: String, targetDocumentID: String)
+    /// No PDF is stored for the document yet (`storePDF` first).
+    case pdfNotStored(String)
 }

@@ -1,5 +1,5 @@
 // swift-tools-version: 6.0
-// FA-mac Swift package: the pure-Swift core and the SQLite data layer.
+// FA-mac Swift package: the pure-Swift core, the SQLite data layer and the PDF renderer.
 // The macOS app in App/FA.xcodeproj depends on this package as a local package.
 import PackageDescription
 
@@ -24,6 +24,12 @@ targets += [
         path: "Sources/InvoicingData"
     ),
     .testTarget(name: "InvoicingDataTests", dependencies: ["InvoicingData"], path: "Tests/InvoicingDataTests"),
+]
+// The PDF renderer draws with Core Graphics, Core Text and Core Image (ADR 0010), so it is Apple-only too.
+products.append(.library(name: "InvoicingPDF", targets: ["InvoicingPDF"]))
+targets += [
+    .target(name: "InvoicingPDF", dependencies: ["InvoicingCore"], path: "Sources/InvoicingPDF"),
+    .testTarget(name: "InvoicingPDFTests", dependencies: ["InvoicingPDF"], path: "Tests/InvoicingPDFTests"),
 ]
 #endif
 

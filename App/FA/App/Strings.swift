@@ -260,7 +260,7 @@ enum L {
     static let createDefaultSeries = r("series.createDefaults", "Create the default series (FV with VS prefix 1, ZF with 2, DD without)")
     static let noSeries = r("series.none", "No number series yet")
     static let seriesPrefixCollision = r("series.collision", "Two series with the same pattern and the same prefix would give two documents the same variable symbol.")
-    static let documentsPaneNote = r("settings.documentsNote", "Default due days, footer texts, file-name pattern, QR defaults and payment tolerance arrive with the PDF step.")
+    static let documentsPaneNote = r("settings.documentsNote", "The default due days and the footer text are in Company. The QR default per client and the payment tolerance arrive with later steps.")
     static let vatPaneNote = r("settings.vatNote", "Rates 21 / 12 / 0 %, the treatments (Czech, EU reverse charge, outside the EU, exempt) and the default treatment by client country live in InvoicingCore. The pane to edit them arrives with the draft editor.")
     static let backupPaneNote = r("settings.backupNote", "Backup folder, automatic backups and Restore arrive with the export step. Until then: quit the app and copy the data file shown under General.")
 
@@ -280,6 +280,35 @@ enum L {
     static let sourceECB = r("rates.sourceECB", "ECB")
     static let sourceManual = r("rates.sourceManual", "Manual")
     static let sourceFixed = r("rates.sourceFixed", "Fixed accounting rate")
+
+    // MARK: PDF (screens-flows.md §1.4, §2b, §2c, §2i; ADR 0010)
+
+    static let savePDF = r("pdf.save", "Save PDF…")
+    static let showPDFInFinder = r("pdf.showInFinder", "Show PDF in Finder")
+    static let printDocument = r("pdf.print", "Print…")
+    static let showPreview = r("pdf.showPreview", "Show Preview")
+    static let hidePreview = r("pdf.hidePreview", "Hide Preview")
+    static let pdfPreviewUnavailable = r("pdf.previewUnavailable", "Preview unavailable.")
+    static let pdfPageImage = r("pdf.pageImage", "Page of the document")
+    static let pdfRow = r("pdf.row", "PDF")
+    static let pdfFile = r("pdf.file", "PDF file")
+    static let pdfNotSavedYet = r("pdf.notSavedYet", "Kept in the app, not saved as a file yet.")
+    static let pdfFileMoved = r("pdf.fileMoved", "File moved – use Save PDF…")
+    static func pdfSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.savedTo", "PDF saved to \(path)") }
+    static func pdfSaveFailed(_ folder: String) -> LocalizedStringResource { r("pdf.saveFailed", "PDF couldn't be saved to \(folder).") }
+    static func pdfWillBeSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.willBeSavedTo", "Will be saved to \(path)") }
+    static let pdfNoFolder = r("pdf.noFolder", "No PDF folder chosen: the PDF stays in the app until you use Save PDF….")
+    static let pdfSection = r("pdf.section", "PDF")
+    static let pdfFolder = r("pdf.folder", "PDF folder")
+    static let pdfFolderPrompt = r("pdf.folderPrompt", "Choose the folder where issued documents are saved as PDF files.")
+    static let pdfFolderNone = r("pdf.folderNone", "No folder chosen")
+    static let choose = r("action.choose", "Choose")
+    static let chooseFolder = r("pdf.chooseFolder", "Choose Folder…")
+    static let clearFolder = r("pdf.clearFolder", "Forget Folder")
+    static let pdfAutoSave = r("pdf.autoSave", "Save PDF automatically when issuing")
+    static let pdfYearSubfolder = r("pdf.yearSubfolder", "Subfolder per year")
+    static let pdfFileName = r("pdf.fileName", "File name")
+    static let pdfFileNamePattern = r("pdf.fileNamePattern", "{number} {client}.pdf")
 
     // MARK: Exports (screens-flows.md §2h)
 

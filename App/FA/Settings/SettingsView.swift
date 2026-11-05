@@ -1,5 +1,6 @@
 // Settings (screens-flows.md §1.3, §2i): seven panes. Company, Bank accounts and Numbering edit the
-// data layer's CompanyProfile and number series; the other panes name what arrives with later steps.
+// data layer's CompanyProfile and number series; Documents & PDF holds the PDF folder and its switches
+// (ADR 0010); the other panes name what arrives with later steps.
 
 import AppKit
 import InvoicingCore
@@ -31,7 +32,7 @@ struct SettingsView: View {
                 .tabItem { Label(String(localized: L.settingsBank), systemImage: "building.columns") }
             NumberingPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsNumbering), systemImage: "number") }
-            PlaceholderPane(note: L.documentsPaneNote)
+            DocumentsPane()
                 .tabItem { Label(String(localized: L.settingsDocuments), systemImage: Symbols.document) }
             PlaceholderPane(note: L.vatPaneNote)
                 .tabItem { Label(String(localized: L.settingsVAT), systemImage: "percent") }

@@ -239,6 +239,28 @@ enum Schema {
                 BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END
                 """)
         }
+
+        // v2 (ADR 0010): the PDF of an issued document, rendered once at issue and kept as evidence next to
+        // the frozen snapshot, plus where the app last wrote it as a file.
+        migrator.registerMigration("v2") { db in
+            try db.create(table: "documentPDF") { t in
+                t.column("documentID", .text).primaryKey().references("document", onDelete: .restrict)
+                t.column("data", .blob).notNull()
+                t.column("sha256", .text).notNull()
+                t.column("renderedAt", .text).notNull()
+                t.column("savedPath", .text)
+                t.column("savedAt", .text)
+            }
+            // The bytes are frozen with the document; only the file location may change.
+            try db.execute(sql: """
+                CREATE TRIGGER documentPDF_frozen BEFORE UPDATE OF data, sha256, renderedAt ON documentPDF
+                BEGIN SELECT RAISE(ABORT, 'a stored PDF is frozen'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER documentPDF_no_delete BEFORE DELETE ON documentPDF
+                BEGIN SELECT RAISE(ABORT, 'a stored PDF is frozen'); END
+                """)
+        }
         return migrator
     }
 }
