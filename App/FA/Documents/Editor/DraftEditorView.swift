@@ -446,8 +446,8 @@ struct DraftEditorView: View {
     }
 
     private static func ratePercentLabel(_ kind: VATRateKind, on day: CalendarDay) -> String {
-        if let rate = VATRate.rate(kind, on: day) {
-            return rate.percent.plainString(minimumFractionDigits: 0) + " %"
+        if let rate = CzechVATRates.rate(kind, on: day) {
+            return rate.percent.plainString + " %"
         }
         return kind.rawValue
     }
