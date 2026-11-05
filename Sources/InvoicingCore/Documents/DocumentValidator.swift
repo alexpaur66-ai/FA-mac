@@ -21,6 +21,7 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case advancesExceedSupply
         case documentTotalNegative, receivedAmountNotPositive
         case paymentInstructionsMissing, bankAccountCurrencyDiffers, amountsUnavailable
+        case paymentQRCodeNameTooLong, paymentQRCodeUnavailable
     }
 
     public let code: Code
@@ -162,8 +163,14 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
             return ("Účet je vedený v měně {detail}, doklad je v jiné měně.",
                     "The bank account is kept in {detail}, the document is in another currency.")
         case .amountsUnavailable:
-            return ("Částky nelze spočítat: {detail}",
-                    "The amounts cannot be computed: {detail}")
+            return ("Částky dokladu nelze spočítat; zkontrolujte položky, odečtené zálohy a kurz.",
+                    "The document's amounts cannot be computed; check the lines, the deducted advances and the exchange rate.")
+        case .paymentQRCodeNameTooLong:
+            return ("Název dodavatele je pro QR kód k platbě příliš dlouhý (nejvýše {detail} znaků); doklad se vystaví bez QR kódu.",
+                    "The supplier's name is too long for the payment QR code (at most {detail} characters); the document will be issued without the code.")
+        case .paymentQRCodeUnavailable:
+            return ("QR kód k platbě nelze vytvořit (částka nebo text přesahuje limity formátu); doklad se vystaví bez QR kódu.",
+                    "The payment QR code cannot be created (the amount or a text exceeds the format's limits); the document will be issued without the code.")
         }
     }
 }
@@ -324,6 +331,7 @@ public enum DocumentValidator {
                     if let accountCurrency = payment.bankConnection.currency, accountCurrency != document.currency {
                         add(.bankAccountCurrencyDiffers, .warning, detail: accountCurrency.code)
                     }
+                    if let qrIssue = Self.paymentQRCodeIssue(for: document, totals: totals) { issues.append(qrIssue) }
                 } else {
                     add(.paymentInstructionsMissing, .warning)
                 }
@@ -331,10 +339,32 @@ public enum DocumentValidator {
         } catch DocumentAmountError.exchangeRateCurrencyMismatch(let rateCurrency, _) {
             add(.exchangeRateCurrencyMismatch, .error, detail: rateCurrency.code)
         } catch {
+            // The message is fixed; the detail keeps the error for logs and bug reports.
             add(.amountsUnavailable, .error, detail: String(describing: error))
         }
 
         return issues
+    }
+
+    /// The warning when the document's payment QR code cannot be encoded, so the PDF would print a notice
+    /// in its place (ADR 0010). A draft is probed with a stand-in number: what breaks the payload (the EPC's
+    /// 70-character name, an amount above the format's maximum) does not depend on the number.
+    private static func paymentQRCodeIssue(for document: Document, totals: DocumentTotals) -> ValidationIssue? {
+        guard let kind = document.payment?.qrCode, kind != PaymentQRKind.none else { return nil }
+        var probe = document
+        if (probe.number ?? "").trimmingWhitespace().isEmpty { probe.number = "0" }
+        do {
+            switch kind {
+            case .qrPlatba: _ = try probe.qrPlatba(totals: totals)?.encoded()
+            case .sepa: _ = try probe.sepaQRCode(totals: totals)?.encoded()
+            case .none: break
+            }
+            return nil
+        } catch SEPAQRCode.EncodingError.tooLong(let element, let maximum, _) where element == "Name" {
+            return ValidationIssue(code: .paymentQRCodeNameTooLong, severity: .warning, detail: String(maximum))
+        } catch {
+            return ValidationIssue(code: .paymentQRCodeUnavailable, severity: .warning)
+        }
     }
 
     /// True when the document can be issued: no errors.

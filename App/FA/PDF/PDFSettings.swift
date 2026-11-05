@@ -21,8 +21,8 @@ enum PDFSettings {
         UserDefaults.standard.object(forKey: yearSubfolderKey) as? Bool ?? true
     }
 
-    /// The chosen folder, resolved from its bookmark; nil when none was chosen or the bookmark no longer
-    /// resolves (the folder was deleted). A stale bookmark is refreshed in place.
+    /// The chosen folder, resolved from its bookmark; nil when none was chosen, the bookmark no longer
+    /// resolves, or the folder sits in the Trash. A stale bookmark is refreshed in place.
     static func folderURL() -> URL? {
         guard let data = UserDefaults.standard.data(forKey: folderBookmarkKey) else { return nil }
         var stale = false
@@ -32,7 +32,25 @@ enum PDFSettings {
         if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(fresh, forKey: folderBookmarkKey)
         }
-        return url
+        // A deleted folder's bookmark resolves into the Trash; the PDFs must not be written there.
+        return isInTrash(url) ? nil : url
+    }
+
+    /// True when `url` lies in a Trash folder (the user deleted the PDF folder after choosing it): the home
+    /// Trash (`.Trash`) or the Trash of another volume (`/Volumes/X/.Trashes/501/…`).
+    static func isInTrash(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        if url.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" || $0.hasPrefix(".Trash-") }) {
+            return true
+        }
+        var relationship = FileManager.URLRelationship.other
+        if (try? FileManager.default.getRelationship(&relationship, of: .trashDirectory, in: .userDomainMask, toItemAt: url)) != nil,
+           relationship == .contains {
+            return true
+        }
+        return FileManager.default.urls(for: .trashDirectory, in: .allDomainsMask).contains { trash in
+            path.hasPrefix(trash.standardizedFileURL.path + "/")
+        }
     }
 
     /// Keeps `url` as the PDF folder (nil clears it). The bookmark needs the app-scope bookmark entitlement

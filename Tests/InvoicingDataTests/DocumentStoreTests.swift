@@ -25,6 +25,7 @@ import InvoicingCore
         #expect(summary.amountDue == Money(Fixtures.d("12100"), .czk))
         #expect(summary.taxableVATCZK == Money(Fixtures.d("2100"), .czk))
         #expect(summary.issuedAt == nil)
+        #expect(summary.updatedAt == "2026-11-05T05:00:00Z")
         #expect(summary.variableSymbol == nil)
 
         // Saving a draft marked issued or numbered keeps it a draft: only issue() issues.

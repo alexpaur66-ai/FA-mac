@@ -66,26 +66,32 @@ public struct ExchangeRateTable: Sendable, Hashable {
     }
 
     /// The rate for `day`, under § 4 odst. 8 ZDPH: the day's own rate; on a weekend or holiday the last
-    /// working day's rate; on a working day the ČNB skipped, the last imported rate before it. A rate
-    /// stored for some other earlier day is never used, because it is not the rate valid on `day`.
+    /// working day's rate; on a working day the ČNB skipped (no imported row between two imported
+    /// neighbours), the last imported rate before it, also when that skipped day is the publication day
+    /// of a weekend or holiday. A rate stored for some other earlier day is never used, because it is
+    /// not the rate valid on `day`.
     public func resolve(_ currency: Currency, on day: CalendarDay) -> Resolution {
         let publicationDay = CzechHolidays.lastWorkingDay(onOrBefore: day)
         let rates = byCurrency[currency.code] ?? [:]
         if let exact = rates[day] {
             return Resolution(requested: day, publicationDay: publicationDay, rate: exact, rule: .storedForDay)
         }
-        if publicationDay != day {
-            if let rate = rates[publicationDay] {
-                return Resolution(requested: day, publicationDay: publicationDay, rate: rate, rule: .weekendOrHoliday)
-            }
-            return Resolution(requested: day, publicationDay: publicationDay, rate: nil, rule: .missing)
+        if publicationDay != day, let rate = rates[publicationDay] {
+            return Resolution(requested: day, publicationDay: publicationDay, rate: rate, rule: .weekendOrHoliday)
         }
-        let previous = CzechHolidays.previousWorkingDay(before: day)
-        let next = CzechHolidays.nextWorkingDay(after: day)
-        if let before = rates[previous], before.isImportedFromCNB, rates[next]?.isImportedFromCNB == true {
-            return Resolution(requested: day, publicationDay: publicationDay, rate: before, rule: .noPublicationThatDay)
+        if let bridged = Self.bridgedRate(in: rates, overSkippedWorkingDay: publicationDay) {
+            return Resolution(requested: day, publicationDay: publicationDay, rate: bridged, rule: .noPublicationThatDay)
         }
         return Resolution(requested: day, publicationDay: publicationDay, rate: nil, rule: .missing)
+    }
+
+    /// The imported rate of the working day before `workingDay` when the working day after it was imported
+    /// too: the ČNB published none for `workingDay` itself. Typed rates are no evidence of a publication gap.
+    private static func bridgedRate(in rates: [CalendarDay: ExchangeRate], overSkippedWorkingDay workingDay: CalendarDay) -> ExchangeRate? {
+        let previous = CzechHolidays.previousWorkingDay(before: workingDay)
+        let next = CzechHolidays.nextWorkingDay(after: workingDay)
+        guard let before = rates[previous], before.isImportedFromCNB, rates[next]?.isImportedFromCNB == true else { return nil }
+        return before
     }
 }
 

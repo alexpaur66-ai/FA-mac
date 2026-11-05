@@ -1,11 +1,22 @@
 // Settings (screens-flows.md §1.3, §2i): seven panes. Company, Bank accounts and Numbering edit the
-// data layer's CompanyProfile and number series; Documents & PDF holds the PDF folder and its switches
-// (ADR 0010); the other panes name what arrives with later steps.
+// data layer's CompanyProfile and number series; Documents & PDF holds the document defaults, the PDF
+// folder and its switches (ADR 0010); VAT defaults and Backup name what arrives with later steps. The
+// window reopens on the pane viewed last, and the Overview's setup card opens the pane of its step.
 
 import AppKit
 import InvoicingCore
 import InvoicingData
 import SwiftUI
+
+/// The panes, stored by name so the window reopens on the last one (screens-flows.md §1.3) and the
+/// Getting started card can open a step's pane (§2j).
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general, company, bank, numbering, documents, vat, backup
+
+    static let storageKey = "settings.pane"
+
+    var id: Self { self }
+}
 
 struct SettingsRoot: View {
     let model: AppModel
@@ -14,32 +25,40 @@ struct SettingsRoot: View {
         if let stores = model.stores {
             SettingsView(stores: stores)
         } else {
-            DatabaseErrorView(detail: model.openError ?? "")
+            DatabaseErrorView(detail: model.openError ?? "", databaseURL: model.databaseURL)
         }
     }
 }
 
 struct SettingsView: View {
     let stores: Stores
+    @AppStorage(SettingsPane.storageKey) private var pane: SettingsPane = .general
 
     var body: some View {
-        TabView {
+        TabView(selection: $pane) {
             GeneralPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsGeneral), systemImage: "gearshape") }
+                .tag(SettingsPane.general)
             CompanyPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsCompany), systemImage: "building.2") }
+                .tag(SettingsPane.company)
             BankAccountsPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsBank), systemImage: "building.columns") }
+                .tag(SettingsPane.bank)
             NumberingPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsNumbering), systemImage: "number") }
-            DocumentsPane()
+                .tag(SettingsPane.numbering)
+            DocumentsPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsDocuments), systemImage: Symbols.document) }
+                .tag(SettingsPane.documents)
             PlaceholderPane(note: L.vatPaneNote)
                 .tabItem { Label(String(localized: L.settingsVAT), systemImage: "percent") }
+                .tag(SettingsPane.vat)
             PlaceholderPane(note: L.backupPaneNote)
                 .tabItem { Label(String(localized: L.settingsBackup), systemImage: "externaldrive") }
+                .tag(SettingsPane.backup)
         }
-        .frame(minWidth: 620, minHeight: 440)
+        .frame(minWidth: 640, minHeight: 480)
     }
 }
 
@@ -82,6 +101,8 @@ struct GeneralPane: View {
 
 // MARK: - Company
 
+/// The supplier's details and the VAT status. The payment term and the footer live in Documents & PDF
+/// (screens-flows.md §1.3); the bank accounts in their own pane. Save keeps what this pane does not show.
 struct CompanyPane: View {
     let stores: Stores
 
@@ -98,10 +119,11 @@ struct CompanyPane: View {
     @State private var email = ""
     @State private var phone = ""
     @State private var isVATPayer = true
-    @State private var currencyCode = "CZK"
-    @State private var termDays = 14
-    @State private var footer = ""
-    @State private var bankConnections: [BankConnection] = []
+    @State private var currencyCode = "EUR"
+    /// The stored profile, so Save keeps the bank accounts, the term and the footer.
+    @State private var loaded: CompanyProfile?
+    /// The profile exists but could not be read: Save would overwrite it with an empty one, so it is off.
+    @State private var loadFailed = false
     @State private var message: LocalizedStringResource?
     @State private var isError = false
 
@@ -115,9 +137,9 @@ struct CompanyPane: View {
                 TextField(text: $street) { Text(L.fieldStreet) }
                 TextField(text: $city) { Text(L.fieldCity) }
                 TextField(text: $postalCode) { Text(L.fieldPostalCode) }
-                TextField(text: $countryCode) { Text(L.fieldCountry) }
-                TextField(text: $ico) { Text(L.fieldICO) }
-                TextField(text: $dic) { Text(L.fieldVATID) }
+                CountryPicker(code: $countryCode)
+                TextField(text: $ico) { Text(L.fieldCompanyID) }
+                TextField(text: $dic) { Text(L.fieldCompanyVATID) }
                 Picker(selection: $court) {
                     Text(L.noCourt).tag(RegistryCourt?.none)
                     ForEach(RegistryCourt.allCases, id: \.self) { court in
@@ -142,20 +164,20 @@ struct CompanyPane: View {
                 } label: {
                     Text(L.fieldDefaultCurrency)
                 }
-                Stepper(value: $termDays, in: 0...365) {
-                    LabeledContent { Text(verbatim: String(termDays)) } label: { Text(L.fieldDefaultTerm) }
-                }
-                TextField(text: $footer, axis: .vertical) { Text(L.fieldFooter) }
-                    .lineLimit(2...4)
             }
             Section {
                 HStack {
                     if let message {
-                        Text(message).textRole(.caption).foregroundStyle(isError ? Color.red : Color.secondary)
+                        if isError {
+                            InlineMessage(message)
+                        } else {
+                            Text(message).textRole(.caption)
+                        }
                     }
                     Spacer()
                     Button { save() } label: { Text(L.save) }
                         .buttonStyle(.borderedProminent)
+                        .disabled(loadFailed)
                 }
             }
         }
@@ -164,7 +186,16 @@ struct CompanyPane: View {
     }
 
     private func load() {
-        guard let profile = try? stores.profile.load() else { return }
+        do {
+            loaded = try stores.profile.load()
+            loadFailed = false
+        } catch {
+            loadFailed = true
+            isError = true
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            return
+        }
+        guard let profile = loaded else { return }
         let supplier = profile.supplier
         name = supplier.name
         street = supplier.address.street
@@ -180,15 +211,14 @@ struct CompanyPane: View {
         phone = supplier.phone ?? ""
         isVATPayer = profile.isVATPayer
         currencyCode = profile.defaultCurrency.code
-        termDays = profile.defaultPaymentTermDays
-        footer = profile.footer ?? ""
-        bankConnections = profile.bankConnections
     }
 
     private func save() {
         isError = true
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { message = L.nameRequired; return }
+        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !country.isEmpty else { message = L.countryRequired; return }
         var identification: IdentificationNumber?
         let icoText = ico.trimmingCharacters(in: .whitespaces)
         if !icoText.isEmpty {
@@ -209,16 +239,15 @@ struct CompanyPane: View {
             }
             registry = entry
         }
-        let address = PostalAddress(street: street, city: city, postalCode: postalCode,
-                                    countryCode: countryCode.trimmingCharacters(in: .whitespaces).uppercased())
+        let address = PostalAddress(street: street, city: city, postalCode: postalCode, countryCode: country)
         let supplier = Party(name: trimmedName, address: address, identificationNumber: identification, vatIdentifier: vat,
                              registryEntry: registry, email: email.isEmpty ? nil : email, phone: phone.isEmpty ? nil : phone)
-        let trimmedFooter = footer.trimmingCharacters(in: .whitespacesAndNewlines)
-        let profile = CompanyProfile(supplier: supplier, bankConnections: bankConnections, isVATPayer: isVATPayer,
-                                     defaultCurrency: Currency.known(currencyCode), defaultPaymentTermDays: termDays,
-                                     footer: trimmedFooter.isEmpty ? nil : trimmedFooter)
+        let profile = CompanyProfile(supplier: supplier, bankConnections: loaded?.bankConnections ?? [], isVATPayer: isVATPayer,
+                                     defaultCurrency: Currency.known(currencyCode),
+                                     defaultPaymentTermDays: loaded?.defaultPaymentTermDays ?? 14, footer: loaded?.footer)
         do {
             try stores.profile.save(profile)
+            loaded = profile
             isError = false
             message = L.saved
         } catch {
@@ -232,14 +261,25 @@ struct CompanyPane: View {
 struct BankAccountsPane: View {
     let stores: Stores
 
+    /// A removed account, kept until the next change so Undo can put it back where it was.
+    private struct RemovedAccount {
+        let connection: BankConnection
+        let index: Int
+    }
+
     @State private var profile: CompanyProfile?
     @State private var iban = ""
     @State private var czechAccount = ""
     @State private var bic = ""
     @State private var bankName = ""
+    /// Empty means any currency (the account serves every currency without its own account).
     @State private var currencyCode = ""
+    @State private var removed: RemovedAccount?
     @State private var message: LocalizedStringResource?
     @State private var isError = false
+
+    /// Any, then the currencies Saša invoices in (decision of 5 Nov 2026).
+    private static let currencyCodes = [""] + ClientFormSheet.currencies.map(\.code)
 
     var body: some View {
         Form {
@@ -251,7 +291,7 @@ struct BankAccountsPane: View {
                     ForEach(Array(profile.bankConnections.enumerated()), id: \.offset) { index, connection in
                         LabeledContent {
                             HStack {
-                                Text(verbatim: connection.currency?.code ?? "—").textRole(.rowSecondary)
+                                Text(verbatim: connection.currency?.code ?? String(localized: L.bankCurrencyAny)).textRole(.rowSecondary)
                                 Button { remove(at: index) } label: { Text(L.remove) }
                             }
                         } label: {
@@ -263,6 +303,14 @@ struct BankAccountsPane: View {
                             }
                         }
                     }
+                    // Remove has no confirmation: Undo puts the account back (design-system.md §10).
+                    if removed != nil {
+                        HStack(spacing: Spacing.m) {
+                            Label { Text(L.accountRemoved) } icon: { Image(systemName: "checkmark.circle").foregroundStyle(.green) }
+                                .textRole(.caption)
+                            Button { undoRemove() } label: { Text(L.undo) }
+                        }
+                    }
                     Text(L.bankNote).textRole(.caption)
                 }
                 Section {
@@ -270,10 +318,20 @@ struct BankAccountsPane: View {
                     TextField(text: $czechAccount) { Text(L.bankCzechAccount) }
                     TextField(text: $bic) { Text(L.bankBIC) }
                     TextField(text: $bankName) { Text(L.bankName) }
-                    TextField(text: $currencyCode) { Text(L.bankCurrency) }
+                    Picker(selection: $currencyCode) {
+                        ForEach(Self.currencyCodes, id: \.self) { code in
+                            Text(code.isEmpty ? L.bankCurrencyAny : LocalizedStringResource(stringLiteral: code)).tag(code)
+                        }
+                    } label: {
+                        Text(L.bankCurrency)
+                    }
                     HStack {
                         if let message {
-                            Text(message).textRole(.caption).foregroundStyle(isError ? Color.red : Color.secondary)
+                            if isError {
+                                InlineMessage(message)
+                            } else {
+                                Text(message).textRole(.caption)
+                            }
                         }
                         Spacer()
                         Button { add() } label: { Text(L.add) }
@@ -302,10 +360,7 @@ struct BankAccountsPane: View {
             guard let parsed = BIC(bicText) else { message = L.invalidBIC; return }
             parsedBIC = parsed
         }
-        let currencyText = currencyCode.trimmingCharacters(in: .whitespaces).uppercased()
-        // CompanyProfile.bankConnection(for:) matches the code exactly, so "EURO" would never be used.
-        guard currencyText.isEmpty || Self.isCurrencyCode(currencyText) else { message = L.invalidCurrency; return }
-        let currency: Currency? = currencyText.isEmpty ? nil : Currency.known(currencyText)
+        let currency: Currency? = currencyCode.isEmpty ? nil : Currency.known(currencyCode)
         let name = bankName.trimmingCharacters(in: .whitespaces)
         let connection: BankConnection
         let ibanText = iban.trimmingCharacters(in: .whitespaces)
@@ -319,6 +374,7 @@ struct BankAccountsPane: View {
             connection = fromAccount
         }
         updated.bankConnections.append(connection)
+        removed = nil
         store(updated)
         if !isError {
             iban = ""
@@ -329,15 +385,23 @@ struct BankAccountsPane: View {
         }
     }
 
-    /// Three ASCII letters, the form of an ISO 4217 code.
-    static func isCurrencyCode(_ text: String) -> Bool {
-        text.count == 3 && text.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) }
-    }
-
     private func remove(at index: Int) {
         guard var updated = profile, updated.bankConnections.indices.contains(index) else { return }
-        updated.bankConnections.remove(at: index)
+        let connection = updated.bankConnections.remove(at: index)
         store(updated)
+        if !isError {
+            removed = RemovedAccount(connection: connection, index: index)
+            message = nil
+        }
+    }
+
+    private func undoRemove() {
+        guard var updated = profile, let removed else { return }
+        updated.bankConnections.insert(removed.connection, at: min(removed.index, updated.bankConnections.count))
+        store(updated)
+        if !isError {
+            self.removed = nil
+        }
     }
 
     private func store(_ updated: CompanyProfile) {
@@ -369,6 +433,7 @@ struct NumberingPane: View {
                 if series.isEmpty {
                     Text(L.noSeries).textRole(.rowSecondary)
                     Button { createDefaults() } label: { Text(L.createDefaultSeries) }
+                    Text(L.defaultSeriesCaption).textRole(.caption)
                 }
                 ForEach(series) { stored in
                     LabeledContent {
@@ -385,9 +450,11 @@ struct NumberingPane: View {
                         }
                     }
                 }
+                if numbersCollide {
+                    InlineMessage(L.seriesNumbersCollide, kind: .warning)
+                }
                 if collides {
-                    Label { Text(L.seriesPrefixCollision) } icon: { Image(systemName: "exclamationmark.triangle") }
-                        .textRole(.caption)
+                    InlineMessage(L.seriesPrefixCollision, kind: .warning)
                 }
             } header: {
                 Text(L.seriesTitle)
@@ -395,7 +462,11 @@ struct NumberingPane: View {
             Section {
                 HStack {
                     if let message {
-                        Text(message).textRole(.caption).foregroundStyle(isError ? Color.red : Color.secondary)
+                        if isError {
+                            InlineMessage(message)
+                        } else {
+                            Text(message).textRole(.caption)
+                        }
                     }
                     Spacer()
                     Button { editing = SeriesDraft() } label: { Text(L.newSeries) }
@@ -405,7 +476,7 @@ struct NumberingPane: View {
         .formStyle(.grouped)
         .onAppear(perform: load)
         .sheet(item: $editing) { draft in
-            SeriesFormSheet(stores: stores, draft: draft) {
+            SeriesFormSheet(stores: stores, draft: draft, others: series.filter { $0.id != draft.id }) {
                 load()
             }
         }
@@ -429,31 +500,44 @@ struct NumberingPane: View {
         return kinds.map { String(localized: $0.shortTitle) }.joined(separator: ", ")
     }
 
-    /// Two series with the same template and the same prefix (or none) give two documents one variable
-    /// symbol (ADR 0003 addendum).
+    /// Two series whose numbers give one variable symbol (ADR 0003 addendum): "FV 2026-0042" and
+    /// "ZF 2026-0042" both become 20260042, so the check compares the symbols of a sample number.
     private var collides: Bool {
         var seen: Set<String> = []
         for stored in series {
-            let key = stored.series.pattern.template + "|" + (stored.series.variableSymbolPrefix ?? "")
-            if !seen.insert(key).inserted { return true }
+            guard let symbol = SeriesFormSheet.sampleVariableSymbol(template: stored.series.pattern.template,
+                                                                     prefix: stored.series.variableSymbolPrefix) else { continue }
+            if !seen.insert(symbol).inserted { return true }
+        }
+        return false
+    }
+
+    /// Two series that issue the same document numbers ("FV {YYYY}-{NNNN}" twice, with other VS prefixes):
+    /// the second one's first number already exists, so issuing from it would fail.
+    private var numbersCollide: Bool {
+        var seen: Set<String> = []
+        for stored in series {
+            guard let number = SeriesFormSheet.sampleNumber(template: stored.series.pattern.template) else { continue }
+            if !seen.insert(number).inserted { return true }
         }
         return false
     }
 
     /// FV with prefix 1 for invoices and final invoices, ZF with prefix 2 for advance requests, DD without
-    /// a prefix for payment tax documents (screens-flows.md §2i).
+    /// a prefix for payment tax documents (screens-flows.md §2i; decision of 5 Nov 2026). English names:
+    /// the UI is English, the Czech titles stay on the PDF.
     private func createDefaults() {
         let year = CalendarDay(Date(), in: .current).year
         do {
-            let defaults: [(String, String, Set<DocumentKind>, String?, String)] = [
-                ("invoice", "FV {YYYY}-{NNNN}", [.invoice, .finalInvoice], "1", "Faktury"),
-                ("advance", "ZF {YYYY}-{NNNN}", [.advanceRequest], "2", "Zálohové faktury"),
-                ("paymentReceipt", "DD {YYYY}-{NNNN}", [.paymentTaxDocument], nil, "Daňové doklady k platbě"),
+            let defaults: [(String, String, Set<DocumentKind>, String?, LocalizedStringResource)] = [
+                ("invoice", "FV {YYYY}-{NNNN}", [.invoice, .finalInvoice], "1", L.defaultSeriesInvoices),
+                ("advance", "ZF {YYYY}-{NNNN}", [.advanceRequest], "2", L.defaultSeriesAdvances),
+                ("paymentReceipt", "DD {YYYY}-{NNNN}", [.paymentTaxDocument], nil, L.defaultSeriesReceipts),
             ]
             for (id, template, kinds, prefix, name) in defaults {
                 let numbering = try DocumentNumberSeries(id: id, pattern: DocumentNumberPattern(template: template),
                                                          year: year, variableSymbolPrefix: prefix)
-                try stores.series.save(StoredNumberSeries(name: name, kinds: kinds, series: numbering))
+                try stores.series.save(StoredNumberSeries(name: String(localized: name), kinds: kinds, series: numbering))
             }
             isError = false
             message = L.saved
@@ -496,28 +580,77 @@ struct SeriesDraft: Identifiable, Hashable {
         resetsYearly = stored.series.resetsYearly
         prefix = stored.series.variableSymbolPrefix ?? ""
     }
+
+    /// The app issued a number from this series: its year and counter are no longer edited here
+    /// (screens-flows.md §2i).
+    var isLocked: Bool { lastIssuedYear != nil }
 }
 
 struct SeriesFormSheet: View {
     let stores: Stores
     @State var draft: SeriesDraft
+    /// The other stored series, for the variable-symbol collision check.
+    let others: [StoredNumberSeries]
     let onSave: @MainActor () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var error: LocalizedStringResource?
 
-    init(stores: Stores, draft: SeriesDraft, onSave: @escaping @MainActor () -> Void) {
+    private let currentYear = CalendarDay(Date(), in: .current).year
+
+    init(stores: Stores, draft: SeriesDraft, others: [StoredNumberSeries], onSave: @escaping @MainActor () -> Void) {
         self.stores = stores
         _draft = State(initialValue: draft)
+        self.others = others
         self.onSave = onSave
     }
 
-    private var preview: (number: String, symbol: String)? {
-        guard let pattern = try? DocumentNumberPattern(template: draft.template) else { return nil }
-        let number = pattern.format(year: draft.year, counter: draft.lastCounter + 1)
+    private enum Preview {
+        case ready(number: String, symbol: String)
+        case invalid(String)
+    }
+
+    /// The next number as the store would assign it today (the same rule as the list), with its variable
+    /// symbol; or why the series is not valid yet.
+    private func preview() -> Preview {
+        do {
+            let series = try buildSeries()
+            let number = try series.peek(on: CalendarDay(Date(), in: .current))
+            let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: series.variableSymbolPrefix)?.digits ?? "—"
+            return .ready(number: number, symbol: symbol)
+        } catch {
+            return .invalid(ErrorText.message(error))
+        }
+    }
+
+    /// The variable symbol a series gives the sample number of 2026 with counter 42; two series with the
+    /// same digits would give two documents one symbol (ADR 0003 addendum, screens-flows.md §2i).
+    static func sampleVariableSymbol(template: String, prefix: String?) -> String? {
+        guard let pattern = try? DocumentNumberPattern(template: template) else { return nil }
+        let number = pattern.format(year: 2026, counter: 42)
+        return PaymentSymbol.variable(fromDocumentNumber: number, prefix: prefix)?.digits
+    }
+
+    /// The sample number of 2026 with counter 42; two series with the same one issue the same document
+    /// numbers. Nil while the template is not valid.
+    static func sampleNumber(template: String) -> String? {
+        guard let pattern = try? DocumentNumberPattern(template: template) else { return nil }
+        return pattern.format(year: 2026, counter: 42)
+    }
+
+    /// The stored series whose document numbers this draft would repeat, if any.
+    private var numberCollidingSeries: StoredNumberSeries? {
+        guard let mine = Self.sampleNumber(template: draft.template) else { return nil }
+        return others.first { other in Self.sampleNumber(template: other.series.pattern.template) == mine }
+    }
+
+    /// The stored series this draft would collide with, if any.
+    private var collidingSeries: StoredNumberSeries? {
         let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
-        let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: prefix.isEmpty ? nil : prefix)?.digits ?? "—"
-        return (number, symbol)
+        guard let mine = Self.sampleVariableSymbol(template: draft.template, prefix: prefix.isEmpty ? nil : prefix) else { return nil }
+        return others.first { other in
+            Self.sampleVariableSymbol(template: other.series.pattern.template, prefix: other.series.variableSymbolPrefix) == mine
+        }
     }
 
     var body: some View {
@@ -526,32 +659,56 @@ struct SeriesFormSheet: View {
             Form {
                 TextField(text: $draft.name) { Text(L.seriesName) }
                 TextField(text: $draft.template) { Text(L.seriesTemplate) }
+                if let patternError {
+                    InlineMessage(patternError)
+                }
                 Section {
                     ForEach(DocumentKind.allCases, id: \.self) { kind in
                         Toggle(isOn: Binding(
                             get: { draft.kinds.contains(kind) },
                             set: { on in if on { draft.kinds.insert(kind) } else { draft.kinds.remove(kind) } })) {
-                            Text(verbatim: kind.title(language: .czech))
+                            Text(verbatim: kind.pickerTitle)
                         }
                     }
+                    Text(L.seriesKindsCaption).textRole(.caption)
                 } header: {
                     Text(L.seriesKinds)
                 }
-                Stepper(value: $draft.year, in: 2000...2100) {
-                    LabeledContent { Text(verbatim: String(draft.year)) } label: { Text(L.seriesYear) }
+                if draft.isLocked {
+                    // Numbers were issued: the year and the counter are read-only (screens-flows.md §2i).
+                    LabeledContent { Text(verbatim: String(draft.year)).textRole(.amount) } label: { Text(L.seriesYear) }
+                    LabeledContent { Text(verbatim: String(draft.lastCounter)).textRole(.amount) } label: { Text(L.seriesLastCounter) }
+                    Text(L.seriesLockedNote).textRole(.caption)
+                } else {
+                    Stepper(value: $draft.year, in: 2000...max(2000, currentYear)) {
+                        LabeledContent { Text(verbatim: String(draft.year)) } label: { Text(L.seriesYear) }
+                    }
+                    if draft.year > currentYear {
+                        InlineMessage(L.seriesYearInFuture)
+                    }
+                    TextField(value: $draft.lastCounter, format: IntegerFormatStyle<Int>.number.grouping(.never)) {
+                        Text(L.seriesLastCounter)
+                    }
+                    Text(L.seriesLastCounterNote).textRole(.caption)
                 }
-                TextField(value: $draft.lastCounter, format: IntegerFormatStyle<Int>.number.grouping(.never)) {
-                    Text(L.seriesLastCounter)
-                }
-                Text(L.seriesLastCounterNote).textRole(.caption)
                 Toggle(isOn: $draft.resetsYearly) { Text(L.seriesResetsYearly) }
                 TextField(text: $draft.prefix) { Text(L.seriesVSPrefix) }
-                if let preview {
-                    LabeledContent { Text(verbatim: preview.number).textRole(.amount) } label: { Text(L.seriesNext) }
-                    LabeledContent { Text(verbatim: preview.symbol).textRole(.amount) } label: { Text(L.seriesVSPreview) }
+                switch preview() {
+                case .ready(let number, let symbol):
+                    LabeledContent { Text(verbatim: number).textRole(.amount) } label: { Text(L.seriesNext) }
+                    LabeledContent { Text(verbatim: symbol).textRole(.amount) } label: { Text(L.seriesVSPreview) }
+                case .invalid(let text):
+                    if patternError == nil {
+                        InlineMessage(text)
+                    }
+                }
+                if let other = numberCollidingSeries {
+                    InlineMessage(L.seriesNumberCollisionWith(other.name), kind: .warning)
+                } else if let other = collidingSeries {
+                    InlineMessage(L.seriesCollisionWith(other.name), kind: .warning)
                 }
                 if let error {
-                    Text(error).textRole(.caption).foregroundStyle(.red)
+                    InlineMessage(error)
                 }
             }
             .formStyle(.grouped)
@@ -566,18 +723,41 @@ struct SeriesFormSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 480, minHeight: 520)
+        .frame(minHeight: 600)
+        .formSheetSized(minWidth: 520, maxWidth: 640)
+    }
+
+    /// The pattern's own problem, under the template field, where the preview would just disappear.
+    private var patternError: String? {
+        do {
+            _ = try DocumentNumberPattern(template: draft.template)
+            return nil
+        } catch {
+            return ErrorText.message(error)
+        }
+    }
+
+    private func buildSeries() throws -> DocumentNumberSeries {
+        let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
+        return try DocumentNumberSeries(
+            id: draft.id, pattern: DocumentNumberPattern(template: draft.template), resetsYearly: draft.resetsYearly,
+            year: draft.year, lastCounter: max(0, draft.lastCounter), lastIssuedYear: draft.lastIssuedYear,
+            variableSymbolPrefix: prefix.isEmpty ? nil : prefix)
     }
 
     private func save() {
         do {
-            let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
-            let numbering = try DocumentNumberSeries(
-                id: draft.id, pattern: DocumentNumberPattern(template: draft.template), resetsYearly: draft.resetsYearly,
-                year: draft.year, lastCounter: max(0, draft.lastCounter), lastIssuedYear: draft.lastIssuedYear,
-                variableSymbolPrefix: prefix.isEmpty ? nil : prefix)
-            try stores.series.save(StoredNumberSeries(name: draft.name.trimmingCharacters(in: .whitespaces), kinds: draft.kinds, series: numbering))
+            let numbering = try buildSeries()
+            let name = draft.name.trimmingCharacters(in: .whitespaces)
+            try stores.series.save(StoredNumberSeries(name: name, kinds: draft.kinds, series: numbering))
             onSave()
+            // A counter never goes backwards: when the store kept its own year or counter, say so and stay open.
+            if let stored = try stores.series.series(id: draft.id),
+               stored.series.year != numbering.year || stored.series.lastCounter != numbering.lastCounter {
+                draft = SeriesDraft(stored)
+                error = L.seriesStoreKeptCounter
+                return
+            }
             dismiss()
         } catch {
             self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))

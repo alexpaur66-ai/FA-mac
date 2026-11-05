@@ -1,4 +1,5 @@
-// Clients (screens-flows.md §2e): the table, the client detail with their documents, and the client form.
+// Clients (screens-flows.md §2e): the table, the client detail with their documents, the inspector with
+// the client's defaults, and the client form.
 
 import InvoicingCore
 import InvoicingData
@@ -10,6 +11,8 @@ import SwiftUI
 final class ClientsModel {
     private(set) var customers: [Customer] = []
     private(set) var error: String?
+    /// False until a load succeeded, so a failed first load is not shown as "no clients yet".
+    private(set) var loaded = false
     let stores: Stores
 
     init(stores: Stores) {
@@ -21,6 +24,7 @@ final class ClientsModel {
         do {
             customers = try stores.customers.all()
             error = nil
+            loaded = true
         } catch {
             self.error = ErrorText.message(error)
         }
@@ -36,17 +40,17 @@ struct ClientRow: Identifiable, Hashable {
     let open: [Money]
     let overdue: [Money]
     let lastDocument: CalendarDay?
+    let documentCount: Int
 
     init(customer: Customer, states: [DocumentState]) {
         self.customer = customer
         let own = states.filter { $0.summary.customerID == customer.id }
-        let unpaid = own.filter {
-            $0.summary.status == .issued && ($0.summary.kind == .invoice || $0.summary.kind == .finalInvoice)
-                && ($0.settlement == .open || $0.settlement == .partlyPaid) && !$0.markedForCreditNote
-        }
-        open = MoneyList.sums(unpaid.map { $0.outstanding })
-        overdue = MoneyList.sums(unpaid.filter { $0.isOverdue }.map { $0.outstanding })
-        lastDocument = own.filter { $0.summary.status == .issued }.map { $0.summary.issueDate }.max()
+        // The same rule as the Unpaid and Overdue filters (screens-flows.md §2a).
+        let unpaid = own.filter(\.countsAsUnpaidInvoice)
+        open = MoneyList.sums(unpaid.map(\.outstanding))
+        overdue = MoneyList.sums(unpaid.filter(\.isOverdue).map(\.outstanding))
+        lastDocument = own.filter { $0.summary.status == .issued }.map(\.summary.issueDate).max()
+        documentCount = own.count
     }
 
     var id: String { customer.id }
@@ -76,43 +80,35 @@ struct ClientsView: View {
 
     var body: some View {
         let rows = self.rows
-        Group {
+        VStack(spacing: 0) {
+            if let error = clients.error {
+                HStack(spacing: Spacing.m) {
+                    InlineMessage(error)
+                    Spacer()
+                    Button { clients.reload() } label: { Text(L.retry) }
+                }
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, Spacing.s)
+                Divider()
+            }
             if rows.isEmpty && search.isEmpty {
-                ContentUnavailableView {
-                    Label { Text(L.noClients) } icon: { Image(systemName: "person.2") }
-                } description: {
-                    EmptyView()
-                } actions: {
-                    Button { editClient(nil) } label: { Text(L.newClient) }
+                // After a failed first load the error line and Retry are the content: no "no clients" claim.
+                if clients.loaded {
+                    ContentUnavailableView {
+                        Label { Text(L.noClients) } icon: { Image(systemName: "person.2") }
+                    } description: {
+                        Text(L.noClientsDescription)
+                    } actions: {
+                        Button { editClient(nil) } label: { Text(L.newClient) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    Spacer()
                 }
             } else if rows.isEmpty {
                 ContentUnavailableView.search(text: search)
             } else {
-                Table(rows, selection: $selection, sortOrder: $sortOrder) {
-                    TableColumn(Text(L.colName), value: \.name) { row in
-                        Text(verbatim: row.name).textRole(.body)
-                    }
-                    TableColumn(Text(L.colCountry), value: \.country).width(min: 50, ideal: 60)
-                    TableColumn(Text(L.colVATID), value: \.vatID).width(min: 90, ideal: 120)
-                    TableColumn(Text(L.colCurrency), value: \.currencyCode).width(min: 50, ideal: 60)
-                    TableColumn(Text(L.colOpen)) { row in
-                        Text(verbatim: MoneyList.text(row.open, locale: locale)).textRole(.amount)
-                    }
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colOverdue)) { row in
-                        Text(verbatim: MoneyList.text(row.overdue, locale: locale)).textRole(.amount)
-                    }
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colLastDocument), value: \.lastDocumentText) { row in
-                        if let day = row.lastDocument { DayText(day) } else { Text(verbatim: "—") }
-                    }
-                    .alignment(.trailing)
-                }
-                .contextMenu(forSelectionType: String.self) { ids in
-                    if ids.count == 1, let id = ids.first {
-                        Button { editClient(id) } label: { Text(L.edit) }
-                    }
-                }
+                table(rows)
             }
         }
         .navigationTitle(Text(L.clients))
@@ -123,7 +119,46 @@ struct ClientsView: View {
                 Button { editClient(nil) } label: {
                     Label { Text(L.newClient) } icon: { Image(systemName: "person.badge.plus") }
                 }
-                .help(Text(L.newClient))
+                .help(Text(L.newClientHelp))
+            }
+        }
+    }
+
+    private func table(_ rows: [ClientRow]) -> some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn(Text(L.colName), value: \.name) { row in
+                Text(verbatim: row.name).textRole(.body)
+            }
+            TableColumn(Text(L.colCountry), value: \.country) { row in
+                Text(verbatim: row.country).textRole(.body)
+            }
+            .width(min: 50, ideal: 60)
+            TableColumn(Text(L.colVATID), value: \.vatID) { row in
+                Text(verbatim: row.vatID).textRole(.amount)
+            }
+            .width(min: 90, ideal: 120)
+            TableColumn(Text(L.colCurrency), value: \.currencyCode) { row in
+                Text(verbatim: row.currencyCode).textRole(.body)
+            }
+            .width(min: 50, ideal: 60)
+            TableColumn(Text(L.colOpenBalance)) { row in
+                MoneyListText(monies: row.open, locale: locale)
+            }
+            .width(min: 110, ideal: 150)
+            .alignment(.trailing)
+            TableColumn(Text(L.colOverdue)) { row in
+                MoneyListText(monies: row.overdue, locale: locale)
+            }
+            .width(min: 110, ideal: 150)
+            .alignment(.trailing)
+            TableColumn(Text(L.colLastDocument), value: \.lastDocumentText) { row in
+                if let day = row.lastDocument { DayText(day) } else { Text(verbatim: "—").textRole(.body) }
+            }
+            .alignment(.trailing)
+        }
+        .contextMenu(forSelectionType: String.self) { ids in
+            if ids.count == 1, let id = ids.first {
+                Button { editClient(id) } label: { Text(L.editClientDetails) }
             }
         }
     }
@@ -134,6 +169,8 @@ struct ClientDetailView: View {
     let documents: DocumentListModel
     let customerID: String
     let editClient: @MainActor () -> Void
+    /// New Invoice / New Advance Invoice for this client (screens-flows.md §2e).
+    let newDocument: @MainActor (DocumentKind) -> Void
 
     @State private var documentSelection: Set<String> = []
     @Environment(\.locale) private var locale
@@ -141,14 +178,15 @@ struct ClientDetailView: View {
     var body: some View {
         if let customer = clients.customer(id: customerID) {
             let row = ClientRow(customer: customer, states: documents.states)
-            let own = documents.states.filter { $0.summary.customerID == customerID }.map { DocumentRow(state: $0) }
+            let own = documents.states.filter { $0.summary.customerID == customerID }
+                .map { DocumentRow(state: $0, today: documents.today) }
                 .sorted(using: [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)])
             VStack(alignment: .leading, spacing: Spacing.l) {
                 header(customer)
                 HStack(spacing: Spacing.l) {
-                    figure(L.clientOpenBalance, MoneyList.text(row.open, locale: locale))
-                    figure(L.colOverdue, MoneyList.text(row.overdue, locale: locale))
-                    figure(L.clientInvoicedThisYear, MoneyList.text(invoicedThisYear(own), locale: locale))
+                    figure(L.clientOpenBalance, row.open)
+                    figure(L.colOverdue, row.overdue)
+                    figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
                 Text(L.clientDocuments).textRole(.sectionTitle)
                 Table(own, selection: $documentSelection) {
@@ -156,16 +194,21 @@ struct ClientDetailView: View {
                         StatusBadge(row.badgeInputs, detail: row.badgeDetail(locale: locale))
                     }
                     .width(min: 110, ideal: 180)
-                    TableColumn(Text(L.colNumber)) { row in Text(verbatim: row.number.isEmpty ? "—" : row.number) }
-                    TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName) }
+                    TableColumn(Text(L.colNumber)) { row in DocumentNumberText(row: row) }
+                    TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName).textRole(.body) }
                     TableColumn(Text(L.colIssued)) { row in DayText(row.issueDate) }.alignment(.trailing)
                     TableColumn(Text(L.colDue)) { row in DayText(row.dueDate) }.alignment(.trailing)
                     TableColumn(Text(L.colTotal)) { row in
-                        MoneyText(amount: row.total, currency: row.currencyCode, locale: locale)
+                        if let total = row.totalOrNil {
+                            MoneyText(amount: total, currency: row.currencyCode, locale: locale)
+                        } else {
+                            Text(verbatim: "—").textRole(.amountSecondary)
+                        }
                     }
                     .alignment(.trailing)
                     TableColumn(Text(L.colOpen)) { row in
-                        MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale)
+                        MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
+                                  role: row.outstanding > 0 ? .amountStrong : .amount)
                     }
                     .alignment(.trailing)
                 }
@@ -173,10 +216,21 @@ struct ClientDetailView: View {
             .padding(Spacing.xl)
             .navigationTitle(Text(verbatim: customer.party.name))
             .toolbar {
+                ToolbarItemGroup {
+                    Button { newDocument(.invoice) } label: {
+                        Label { Text(L.newInvoice) } icon: { Image(systemName: DocumentKind.invoice.symbol) }
+                    }
+                    .help(Text(L.newInvoiceFor(customer.party.name)))
+                    Button { newDocument(.advanceRequest) } label: {
+                        Label { Text(L.newAdvance) } icon: { Image(systemName: DocumentKind.advanceRequest.symbol) }
+                    }
+                    .help(Text(L.newAdvanceFor(customer.party.name)))
+                }
                 ToolbarItem {
                     Button { editClient() } label: {
                         Label { Text(L.edit) } icon: { Image(systemName: "pencil") }
                     }
+                    .help(Text(L.editClientHelp))
                 }
             }
         } else {
@@ -195,40 +249,170 @@ struct ClientDetailView: View {
             }
             HStack(spacing: Spacing.l) {
                 if let ico = party.identificationNumber {
-                    Text(verbatim: "IČO " + ico.digits).textRole(.rowSecondary).textSelection(.enabled)
+                    Text(L.companyIDChip(ico.digits)).textRole(.rowSecondary).textSelection(.enabled)
                 }
                 if let vat = party.vatIdentifier {
-                    Text(verbatim: "DIČ " + vat.value).textRole(.rowSecondary).textSelection(.enabled)
+                    Text(L.vatIDChip(vat.value)).textRole(.rowSecondary).textSelection(.enabled)
                 }
             }
-            Text(verbatim: [customer.currency.code, String(localized: customer.language == .czech ? L.languageCzech : L.languageEnglish),
-                            String(customer.paymentTermDays) + " d"].joined(separator: " · "))
-                .textRole(.rowSecondary)
+            ClientDefaultsChips(customer: customer)
         }
     }
 
-    private func figure(_ title: LocalizedStringResource, _ value: String) -> some View {
+    private func figure(_ title: LocalizedStringResource, _ monies: [Money]) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title).textRole(.label)
-            Text(verbatim: value).textRole(.amountStrong)
+            MoneyListText(monies: monies, locale: locale, role: .amountStrong)
         }
         .padding(Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.m))
+        .tileSurface(radius: Radius.m)
     }
 
-    /// Each supply once: invoices and final invoices (the full supply). Payment tax documents are left
-    /// out, because the final invoice's gross already contains the advances they record.
+    /// The Overview's revenue rule (screens-flows.md §2a): invoices, payment tax documents, and a final
+    /// invoice net of the advances its tax documents already taxed, so the two screens agree.
     private func invoicedThisYear(_ rows: [DocumentRow]) -> [Money] {
         let year = documents.today.year
-        return rows.filter {
-            !$0.isDraft && $0.kind.isTaxDocument && $0.kind != .paymentTaxDocument && $0.issueDate.year == year
-        }
-        .compactMap { $0.summary.totalGross }
+        return rows.filter { $0.isIssued && $0.issueDate.year == year }
+            .compactMap { OverviewFigures.revenueAmount($0.summary) }
     }
 }
 
-/// New Client / Client details. IČO and VAT ID are checked by the core's parsers; there is no online check.
+/// "EUR · Czech + English · EU business (reverse charge) · 14 days" (screens-flows.md §2e).
+struct ClientDefaultsChips: View {
+    let customer: Customer
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Text(verbatim: customer.currency.code).textRole(.rowSecondary)
+            dot
+            Text(customer.language.title).textRole(.rowSecondary)
+            dot
+            Text(customer.vatStatus.title).textRole(.rowSecondary)
+            dot
+            Text(customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays)).textRole(.rowSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var dot: some View {
+        Text(verbatim: "·").textRole(.rowSecondary).accessibilityHidden(true)
+    }
+}
+
+/// The inspector of Clients (design-system.md §8.12): the client's defaults, contacts and figures, read-only.
+struct ClientInspectorView: View {
+    let clients: ClientsModel
+    let documents: DocumentListModel
+    let customerID: String
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        if let customer = clients.customer(id: customerID) {
+            let row = ClientRow(customer: customer, states: documents.states)
+            Form {
+                Section {
+                    LabeledContent {
+                        Text(verbatim: customer.currency.code).textRole(.body)
+                    } label: {
+                        Text(L.fieldCurrency).textRole(.body)
+                    }
+                    LabeledContent {
+                        Text(customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays)).textRole(.body)
+                    } label: {
+                        Text(L.clientPaymentTerm).textRole(.body)
+                    }
+                    LabeledContent {
+                        Text(customer.language.title).textRole(.body)
+                    } label: {
+                        Text(L.fieldLanguage).textRole(.body)
+                    }
+                    LabeledContent {
+                        Text(customer.vatStatus.title).textRole(.body)
+                    } label: {
+                        Text(L.fieldVATTreatment).textRole(.body)
+                    }
+                } header: {
+                    Text(L.clientDefaultsTitle)
+                }
+                if customer.party.email != nil || customer.party.phone != nil {
+                    Section {
+                        if let email = customer.party.email {
+                            LabeledContent {
+                                Text(verbatim: email).textRole(.body).textSelection(.enabled)
+                            } label: {
+                                Text(L.fieldEmail).textRole(.body)
+                            }
+                        }
+                        if let phone = customer.party.phone {
+                            LabeledContent {
+                                Text(verbatim: phone).textRole(.body).textSelection(.enabled)
+                            } label: {
+                                Text(L.fieldPhone).textRole(.body)
+                            }
+                        }
+                    } header: {
+                        Text(L.clientContacts)
+                    }
+                }
+                Section {
+                    LabeledContent {
+                        MoneyListText(monies: row.open, locale: locale)
+                    } label: {
+                        Text(L.clientOpenBalance).textRole(.body)
+                    }
+                    LabeledContent {
+                        MoneyListText(monies: row.overdue, locale: locale)
+                    } label: {
+                        Text(L.colOverdue).textRole(.body)
+                    }
+                    LabeledContent {
+                        if let day = row.lastDocument { DayText(day) } else { Text(verbatim: "—").textRole(.body) }
+                    } label: {
+                        Text(L.colLastDocument).textRole(.body)
+                    }
+                } header: {
+                    Text(verbatim: Count.clientDocuments(row.documentCount))
+                }
+                if !customer.notes.isEmpty {
+                    Section {
+                        Text(verbatim: customer.notes).textRole(.body).textSelection(.enabled)
+                    } header: {
+                        Text(L.fieldNotes)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        } else {
+            ContentUnavailableView {
+                Label { Text(L.noClientSelected) } icon: { Image(systemName: "person.2") }
+            }
+        }
+    }
+}
+
+extension CustomerVATStatus {
+    var title: LocalizedStringResource {
+        switch self {
+        case .czechVATPayer: L.vatCzechPayer
+        case .czechNonPayer: L.vatCzechNonPayer
+        case .euBusiness: L.vatEUBusiness
+        case .euConsumer: L.vatEUConsumer
+        case .nonEUBusiness: L.vatNonEUBusiness
+        case .nonEUConsumer: L.vatNonEUConsumer
+        }
+    }
+}
+
+extension DocumentLanguage {
+    /// "Czech" or "Czech + English": the bilingual document, not an English one (design-system.md §9).
+    var title: LocalizedStringResource {
+        self == .czech ? L.languageCzech : L.languageEnglish
+    }
+}
+
+/// New Client / Client details (screens-flows.md §2e). IČO and VAT ID are checked by the core's parsers;
+/// there is no online check. A new client gets the defaults of 5 Nov 2026: EUR, 14 days, EU reverse charge.
 struct ClientFormSheet: View {
     let clients: ClientsModel
     let customer: Customer?
@@ -245,49 +429,104 @@ struct ClientFormSheet: View {
     @State private var countryCode = "CZ"
     @State private var ico = ""
     @State private var vatID = ""
+    @State private var vatStatus: CustomerVATStatus = .euBusiness
     @State private var email = ""
     @State private var phone = ""
-    @State private var currencyCode = "CZK"
+    @State private var currencyCode = "EUR"
     @State private var paymentTermDays = 14
     @State private var language: DocumentLanguage = .czech
+    /// False until the language was picked by hand: a new client's language follows the country, as the
+    /// core's rule has it (Czech for a Czech address, Czech + English otherwise).
+    @State private var languagePicked = false
     @State private var notes = ""
     @State private var error: LocalizedStringResource?
 
-    static let currencies: [Currency] = [.czk, .eur, .usd, .gbp, .chf, .pln]
+    /// The currencies Saša invoices in (decision of 5 Nov 2026).
+    static let currencies: [Currency] = [.eur, .czk, .usd]
+
+    struct CountryOption: Identifiable {
+        let code: String
+        let name: String
+        var id: String { code }
+    }
+
+    /// Every ISO 3166 country with its English name, A to Z; the pop-up of the country field.
+    static let countries: [CountryOption] = {
+        let english = Locale(identifier: "en_US")
+        return Locale.Region.isoRegions
+            .map(\.identifier)
+            .filter { $0.count == 2 }
+            .compactMap { code in english.localizedString(forRegionCode: code).map { CountryOption(code: code, name: $0) } }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }()
+
+    private var currencyOptions: [Currency] {
+        var list = Self.currencies
+        let current = Currency.known(currencyCode)
+        if !list.contains(current) { list.append(current) }
+        return list
+    }
+
+    private var languageBinding: Binding<DocumentLanguage> {
+        Binding(
+            get: { language },
+            set: { newValue in
+                language = newValue
+                languagePicked = true
+            })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Text(customer == nil ? L.newClientTitle : L.editClientTitle).textRole(.screenTitle)
             Form {
-                TextField(text: $name) { Text(L.fieldName) }
-                TextField(text: $countryCode) { Text(L.fieldCountry) }
-                TextField(text: $street) { Text(L.fieldStreet) }
-                TextField(text: $city) { Text(L.fieldCity) }
-                TextField(text: $postalCode) { Text(L.fieldPostalCode) }
-                TextField(text: $ico) { Text(L.fieldICO) }
-                TextField(text: $vatID) { Text(L.fieldVATID) }
-                TextField(text: $email) { Text(L.fieldEmail) }
-                TextField(text: $phone) { Text(L.fieldPhone) }
-                Picker(selection: $currencyCode) {
-                    ForEach(Self.currencies, id: \.code) { currency in
-                        Text(verbatim: currency.code).tag(currency.code)
+                Section {
+                    TextField(text: $name) { Text(L.fieldName) }
+                    CountryPicker(code: $countryCode)
+                    TextField(text: $street) { Text(L.fieldStreet) }
+                    TextField(text: $city) { Text(L.fieldCity) }
+                    TextField(text: $postalCode) { Text(L.fieldPostalCode) }
+                }
+                Section {
+                    TextField(text: $ico) { Text(L.fieldICO) }
+                    TextField(text: $vatID) { Text(L.fieldVATID) }
+                    Picker(selection: $vatStatus) {
+                        ForEach(CustomerVATStatus.allCases, id: \.self) { status in
+                            Text(status.title).tag(status)
+                        }
+                    } label: {
+                        Text(L.fieldVATTreatment)
                     }
-                } label: {
-                    Text(L.fieldCurrency)
+                    if vatStatus == .euBusiness && vatID.trimmingCharacters(in: .whitespaces).isEmpty {
+                        InlineMessage(L.reverseChargeNeedsVATID, kind: .warning)
+                    }
                 }
-                Stepper(value: $paymentTermDays, in: 0...365) {
-                    LabeledContent { Text(verbatim: String(paymentTermDays)) } label: { Text(L.fieldPaymentTerm) }
+                Section {
+                    TextField(text: $email) { Text(L.fieldEmail) }
+                    TextField(text: $phone) { Text(L.fieldPhone) }
                 }
-                Picker(selection: $language) {
-                    Text(L.languageCzech).tag(DocumentLanguage.czech)
-                    Text(L.languageEnglish).tag(DocumentLanguage.english)
-                } label: {
-                    Text(L.fieldLanguage)
+                Section {
+                    Picker(selection: $currencyCode) {
+                        ForEach(currencyOptions, id: \.code) { currency in
+                            Text(verbatim: currency.code).tag(currency.code)
+                        }
+                    } label: {
+                        Text(L.fieldCurrency)
+                    }
+                    Stepper(value: $paymentTermDays, in: 0...365) {
+                        LabeledContent { Text(verbatim: String(paymentTermDays)) } label: { Text(L.fieldPaymentTerm) }
+                    }
+                    Picker(selection: languageBinding) {
+                        Text(L.languageCzech).tag(DocumentLanguage.czech)
+                        Text(L.languageEnglish).tag(DocumentLanguage.english)
+                    } label: {
+                        Text(L.fieldLanguage)
+                    }
+                    TextField(text: $notes, axis: .vertical) { Text(L.fieldNotes) }
+                        .lineLimit(2...5)
                 }
-                TextField(text: $notes, axis: .vertical) { Text(L.fieldNotes) }
-                    .lineLimit(2...5)
                 if let error {
-                    Text(error).textRole(.caption).foregroundStyle(.red)
+                    InlineMessage(error)
                 }
             }
             .formStyle(.grouped)
@@ -301,8 +540,12 @@ struct ClientFormSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 480, minHeight: 560)
+        .frame(minHeight: 640)
+        .formSheetSized(minWidth: 520, maxWidth: 640)
         .onAppear(perform: fill)
+        .onChange(of: countryCode) { _, code in
+            if !languagePicked { language = code == "CZ" ? .czech : .english }
+        }
     }
 
     private func fill() {
@@ -318,17 +561,21 @@ struct ClientFormSheet: View {
         countryCode = party.address.countryCode
         ico = party.identificationNumber?.digits ?? ""
         vatID = party.vatIdentifier?.value ?? ""
+        vatStatus = customer.vatStatus
         email = party.email ?? ""
         phone = party.phone ?? ""
         currencyCode = customer.currency.code
         paymentTermDays = customer.paymentTermDays
         language = customer.language
+        languagePicked = true
         notes = customer.notes
     }
 
     private func save() {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { error = L.nameRequired; return }
+        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !country.isEmpty else { error = L.countryRequired; return }
         let icoText = ico.trimmingCharacters(in: .whitespaces)
         var identification: IdentificationNumber?
         if !icoText.isEmpty {
@@ -341,11 +588,12 @@ struct ClientFormSheet: View {
             guard let parsed = VATIdentifier(vatText) else { error = L.invalidVATID; return }
             vat = parsed
         }
-        let address = PostalAddress(street: street, city: city, postalCode: postalCode,
-                                    countryCode: countryCode.trimmingCharacters(in: .whitespaces).uppercased())
+        let address = PostalAddress(street: street, city: city, postalCode: postalCode, countryCode: country)
+        // The register entry has no field here; an existing one is kept.
         let party = Party(name: trimmedName, address: address, identificationNumber: identification, vatIdentifier: vat,
+                          registryEntry: customer?.party.registryEntry,
                           email: email.isEmpty ? nil : email, phone: phone.isEmpty ? nil : phone)
-        let saved = Customer(id: customer?.id ?? UUID().uuidString, party: party, vatStatus: nil,
+        let saved = Customer(id: customer?.id ?? UUID().uuidString, party: party, vatStatus: vatStatus,
                              currency: Currency.known(currencyCode), paymentTermDays: paymentTermDays,
                              language: language, notes: notes)
         do {
@@ -355,6 +603,31 @@ struct ClientFormSheet: View {
             dismiss()
         } catch {
             self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+        }
+    }
+}
+
+/// The country pop-up of the client form and the Company pane (screens-flows.md §2e): every ISO 3166
+/// country by its English name. A stored code the list does not know (an old free-text entry) is added,
+/// so the picker always shows the saved value.
+struct CountryPicker: View {
+    @Binding var code: String
+
+    private var options: [ClientFormSheet.CountryOption] {
+        var options = ClientFormSheet.countries
+        if !options.contains(where: { $0.code == code }) {
+            options.insert(ClientFormSheet.CountryOption(code: code, name: code), at: 0)
+        }
+        return options
+    }
+
+    var body: some View {
+        Picker(selection: $code) {
+            ForEach(options) { option in
+                Text(verbatim: option.name).tag(option.code)
+            }
+        } label: {
+            Text(L.fieldCountry)
         }
     }
 }

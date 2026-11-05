@@ -1,5 +1,6 @@
 // Exchange rates (screens-flows.md §2g): the stored ČNB rates per currency and the file import.
-// The app has no network access, so the rates come from the ČNB text files Saša downloads.
+// The app has no network access, so the rates come from the ČNB text files Saša downloads, or are
+// typed on the document (decision of 5 Nov 2026).
 
 import InvoicingCore
 import InvoicingData
@@ -15,19 +16,30 @@ struct RateRow: Identifiable, Hashable {
     var amount: Int { rate.amount }
 
     var sourceName: String { RateSourceName.text(rate.source) }
+
+    /// "1 EUR = 24,315 CZK" (screens-flows.md §2g), with the quoted amount when the ČNB quotes per 100.
+    func rateText(locale: Locale) -> String {
+        let rate = value.formatted(Decimal.FormatStyle.number.precision(.fractionLength(3)).locale(locale))
+        return amount == 1
+            ? String(localized: L.rateEquals(self.rate.currency.code, rate))
+            : String(localized: L.rateEqualsAmount(amount, self.rate.currency.code, rate))
+    }
 }
 
 struct RatesView: View {
     let stores: Stores
     /// Bumped after each import; the window holds it so the coverage column reloads too.
     @Binding var version: Int
+    /// The file importer; File ▸ Import ČNB Rates… opens it from anywhere.
+    @Binding var importing: Bool
+    /// The result line of an import, shown by the window at the top of the content pane; true marks an error.
+    let report: @MainActor (String, Bool) -> Void
 
-    static let currencies: [Currency] = [.eur, .usd, .gbp, .chf, .pln]
+    /// The currencies Saša invoices in (decision of 5 Nov 2026).
+    static let currencies: [Currency] = [.eur, .usd]
 
     @State private var currencyCode = "EUR"
     @State private var rows: [RateRow] = []
-    @State private var importing = false
-    @State private var resultLine: String?
     @State private var sortOrder = [KeyPathComparator(\RateRow.day, order: .reverse)]
     @Environment(\.locale) private var locale
 
@@ -46,8 +58,7 @@ struct RatesView: View {
                 } label: {
                     Text(L.colCurrency)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
+                .fixedSize()
                 Spacer()
             }
             .padding(Spacing.m)
@@ -55,7 +66,7 @@ struct RatesView: View {
                 ContentUnavailableView {
                     Label { Text(L.noRates) } icon: { Image(systemName: "arrow.left.arrow.right") }
                 } description: {
-                    Text(L.ratesNote)
+                    Text(L.noRatesDescription)
                 } actions: {
                     Button { importing = true } label: { Text(L.importRates) }
                 }
@@ -64,23 +75,14 @@ struct RatesView: View {
                     TableColumn(Text(L.colDate), value: \.day) { row in DayText(row.day) }
                         .width(min: 90, ideal: 110)
                     TableColumn(Text(L.colRate), value: \.value) { row in
-                        Text(verbatim: row.value.formatted(Decimal.FormatStyle.number.precision(.fractionLength(3)).locale(locale))
-                             + (row.amount == 1 ? "" : " / " + String(row.amount)))
-                            .textRole(.amount)
+                        Text(verbatim: row.rateText(locale: locale)).textRole(.amount)
                     }
-                    .width(min: 90, ideal: 120)
+                    .width(min: 150, ideal: 190)
                     .alignment(.trailing)
-                    TableColumn(Text(L.colSource), value: \.sourceName)
+                    TableColumn(Text(L.colSource), value: \.sourceName) { row in
+                        Text(verbatim: row.sourceName).textRole(.body)
+                    }
                 }
-            }
-            if let resultLine {
-                Divider()
-                Text(verbatim: resultLine)
-                    .textRole(.caption)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Spacing.m)
-                    .padding(.vertical, Spacing.xs)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .navigationTitle(Text(L.rates))
@@ -89,7 +91,7 @@ struct RatesView: View {
                 Button { importing = true } label: {
                     Label { Text(L.importRates) } icon: { Image(systemName: "tray.and.arrow.down") }
                 }
-                .help(Text(L.importRates))
+                .help(Text(L.importRatesHelp))
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .data], allowsMultipleSelection: false) { result in
@@ -106,12 +108,13 @@ struct RatesView: View {
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
-        resultLine = outcome.line
-        if outcome.count != nil { version += 1 }
+        if let count = outcome.count {
+            report(Count.ratesImported(count), false)
+            version += 1
+        } else {
+            report(outcome.line, true)
+        }
     }
-
-    /// Kept for the tests and callers of the old name; the parser lives in `RateImport`.
-    static func isYearlyFile(_ text: String) -> Bool { RateImport.isYearlyFile(text) }
 }
 
 /// The detail column of the rates section: the latest stored day per currency.
@@ -129,7 +132,7 @@ struct RatesCoverageView: View {
                 LabeledContent {
                     Text(verbatim: day.map { $0.formatted(locale) } ?? "—").textRole(.body)
                 } label: {
-                    Text(verbatim: currency.code)
+                    Text(verbatim: currency.code).textRole(.body)
                 }
             }
             Text(L.ratesNote).textRole(.caption)

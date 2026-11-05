@@ -26,6 +26,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
 
     var id: Self { self }
 
+    /// The sidebar label, in sentence case.
     var title: LocalizedStringResource {
         switch self {
         case .overview: L.overview
@@ -34,6 +35,14 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .payments: L.payments
         case .rates: L.rates
         case .exports: L.exports
+        }
+    }
+
+    /// The View menu item, in title case where the two differ.
+    var menuTitle: LocalizedStringResource {
+        switch self {
+        case .rates: L.menuRates
+        default: title
         }
     }
 
@@ -56,6 +65,14 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .payments: "4"
         case .rates: "5"
         case .exports: "6"
+        }
+    }
+
+    /// Exchange rates and Exports & Backup have no inspector (design-system.md §8.11): the item is disabled there.
+    var hasInspector: Bool {
+        switch self {
+        case .overview, .documents, .clients, .payments: true
+        case .rates, .exports: false
         }
     }
 }
@@ -102,32 +119,29 @@ enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
         case .drafts:
             return summary.status == .draft
         case .unpaid:
-            return summary.status == .issued
-                && (summary.kind == .invoice || summary.kind == .finalInvoice)
-                && (state.settlement == .open || state.settlement == .partlyPaid)
-                && !state.markedForCreditNote
+            return state.countsAsUnpaidInvoice
         case .overdue:
             // Like Unpaid: invoices and final invoices only. Overdue advances are counted on their own
             // line (Open advances), and an advance deducted by a final invoice is never overdue (§2a).
-            return state.isOverdue
-                && (summary.kind == .invoice || summary.kind == .finalInvoice)
-                && !state.markedForCreditNote
+            return state.countsAsUnpaidInvoice && state.isOverdue
         case .thisMonth:
-            return summary.issueDate.year == today.year && summary.issueDate.month == today.month
+            // Issued this month: a draft has no issue date yet, whatever date it carries.
+            return summary.status == .issued && summary.issueDate.year == today.year && summary.issueDate.month == today.month
         case .openAdvances:
-            return summary.status == .issued && summary.kind == .advanceRequest
-                && !state.deductedInFinal && state.closure == nil
+            return state.isOpenAdvance
         }
     }
 
-    /// Each filter opens with its own sort (screens-flows.md §2b).
+    /// Each filter opens with its own sort (screens-flows.md §2b); drafts by their last edit.
     var defaultSortOrder: [KeyPathComparator<DocumentRow>] {
         switch self {
         case .overdue, .unpaid:
             [KeyPathComparator(\DocumentRow.dueDate, order: .forward)]
         case .openAdvances:
             [KeyPathComparator(\DocumentRow.issueDate, order: .forward)]
-        case .all, .drafts, .thisMonth:
+        case .drafts:
+            [KeyPathComparator(\DocumentRow.updatedAt, order: .reverse)]
+        case .all, .thisMonth:
             [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
         }
     }

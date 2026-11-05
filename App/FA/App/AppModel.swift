@@ -33,17 +33,28 @@ final class AppModel {
     static let textScaleSteps: [CGFloat] = [1, 1.25, 1.5, 1.75, 2]
     private static let textScaleKey = "textScale"
 
+    /// The database file, known even when opening it failed, so the error view can show the folder.
+    let databaseURL: URL?
+
     init() {
         let saved = CGFloat(UserDefaults.standard.double(forKey: Self.textScaleKey))
         textScale = Self.textScaleSteps.contains(saved) ? saved : 1
+        var url: URL?
         do {
-            let (database, url) = try Self.openDatabase()
+            url = try Self.databaseLocation()
+            let database: AppDatabase
+            if let url {
+                database = try AppDatabase(at: url)
+            } else {
+                database = try AppDatabase()
+            }
             stores = Stores(database: database, databaseURL: url)
             openError = nil
         } catch {
             stores = nil
             openError = String(describing: error)
         }
+        databaseURL = url
     }
 
     func setTextScale(_ scale: CGFloat) {
@@ -60,21 +71,18 @@ final class AppModel {
     }
 
     /// The database lives in the app's sandbox container under Application Support/FA/fa.sqlite.
-    /// `FA_DATABASE_PATH` overrides the path; `FA_IN_MEMORY_DATABASE=1` opens a throwaway database.
-    private static func openDatabase() throws -> (AppDatabase, URL?) {
+    /// `FA_DATABASE_PATH` overrides the path; `FA_IN_MEMORY_DATABASE=1` (nil here) opens a throwaway database.
+    private static func databaseLocation() throws -> URL? {
         let environment = ProcessInfo.processInfo.environment
         if environment["FA_IN_MEMORY_DATABASE"] == "1" {
-            return (try AppDatabase(), nil)
+            return nil
         }
-        let url: URL
         if let path = environment["FA_DATABASE_PATH"], !path.isEmpty {
-            url = URL(fileURLWithPath: path)
-        } else {
-            let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                                      appropriateFor: nil, create: true)
-            url = support.appendingPathComponent("FA", isDirectory: true)
-                .appendingPathComponent("fa.sqlite", isDirectory: false)
+            return URL(fileURLWithPath: path)
         }
-        return (try AppDatabase(at: url), url)
+        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                  appropriateFor: nil, create: true)
+        return support.appendingPathComponent("FA", isDirectory: true)
+            .appendingPathComponent("fa.sqlite", isDirectory: false)
     }
 }

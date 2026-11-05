@@ -136,6 +136,8 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
     public let relatedDocumentNumber: String?
     /// ISO 8601 timestamp of the issue, nil on a draft.
     public let issuedAt: String?
+    /// ISO 8601 timestamp of the last save: the issue for an issued document, the last edit for a draft.
+    public let updatedAt: String
 }
 
 struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
@@ -221,7 +223,8 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
             taxableVATCZK: taxableVATCZK.map { MinorUnits.money($0, .czk) },
             variableSymbol: variableSymbol,
             relatedDocumentNumber: relatedDocumentNumber,
-            issuedAt: issuedAt
+            issuedAt: issuedAt,
+            updatedAt: updatedAt
         )
     }
 }

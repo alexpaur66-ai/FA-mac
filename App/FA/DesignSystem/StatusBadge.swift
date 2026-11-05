@@ -4,7 +4,7 @@ import SwiftUI
 
 struct StatusBadge: View {
     let style: StatusStyle
-    /// Already localized and formatted by the caller, for example "+12 dní · zbývá 1 000,00 €".
+    /// Already localized and formatted by the caller, for example "+12 days · 1 000,00 € left".
     var detail: String?
     /// Symbol only, whatever the width. The word and detail move to the tooltip and VoiceOver.
     /// Without it the badge drops the detail, then the word, when its column is too narrow.

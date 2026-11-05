@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -28,14 +29,18 @@ struct RootView: View {
         if let stores = model.stores {
             MainSplitView(stores: stores)
         } else {
-            DatabaseErrorView(detail: model.openError ?? "")
+            DatabaseErrorView(detail: model.openError ?? "", databaseURL: model.databaseURL)
         }
     }
 }
 
-/// Shown instead of the content when the database cannot be opened. Never an alert at launch.
+/// Shown instead of the content when the database cannot be opened (screens-flows.md §2a, Error): the
+/// reason as selectable text, the data folder, and Restore from Backup… (disabled until backups exist).
+/// Never an alert at launch.
 struct DatabaseErrorView: View {
     let detail: String
+    /// The file that could not be opened; nil for the in-memory database.
+    var databaseURL: URL? = nil
 
     var body: some View {
         ContentUnavailableView {
@@ -47,6 +52,12 @@ struct DatabaseErrorView: View {
                     .textRole(.caption)
                     .textSelection(.enabled)
             }
+        } actions: {
+            if let databaseURL {
+                Button { NSWorkspace.shared.activateFileViewerSelecting([databaseURL]) } label: { Text(L.showDataFolder) }
+            }
+            Button {} label: { Text(L.restoreFromBackup) }
+                .disabled(true)
         }
         .frame(minWidth: 480, minHeight: 320)
     }

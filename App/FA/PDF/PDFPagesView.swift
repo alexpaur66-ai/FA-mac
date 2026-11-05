@@ -13,7 +13,10 @@ struct PDFPagesView: View {
     var body: some View {
         VStack(spacing: Spacing.m) {
             if failed {
-                Text(L.pdfPreviewUnavailable).textRole(.rowSecondary)
+                HStack(spacing: Spacing.m) {
+                    Text(L.pdfPreviewUnavailable).textRole(.rowSecondary)
+                    Button { render() } label: { Text(L.retry) }
+                }
             }
             ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                 Image(nsImage: page)

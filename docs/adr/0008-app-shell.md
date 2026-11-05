@@ -33,8 +33,8 @@ existing data to import.
   the rows the filter and the search show, so the detail column, the menu bar and ⌫ act only on
   visible rows.
 - **Errors are sentences.** A failed action shows one line from `ErrorText` (what happened, how to fix
-  it) beside the place it was taken: in the sheet, in the detail, or in the result line under the
-  content column of every section. If the live observation fails, the document list shows the error
+  it) beside the place it was taken: in the sheet, in the detail, or in the result line at the top of the
+  content column of every section (design-system.md §8.17); a result that can be taken back carries Undo. If the live observation fails, the document list shows the error
   inline with a Try again button that restarts it.
 - **Menu bar through focused scene values.** `MainActions` carries closures; `AppCommands` reads
   `@FocusedValue(\.mainActions)`, so menu items enable per window. Shortcuts follow
@@ -48,8 +48,9 @@ existing data to import.
   UserDefaults, 1.0–2.0 in five steps, and applied through the design system's environment value.
 - **Settings** is the standard Settings scene: General, Company, Bank accounts, Numbering (defaults
   FV `{YYYY}-{NNNN}` with VS prefix 1 for invoices and final invoices, ZF with prefix 2, DD without a
-  prefix), Rates, About. The Overview shows a "Getting started" card until company, bank account and
-  series exist.
+  prefix), Documents & PDF, VAT defaults, Backup; the window reopens on the pane viewed last. The Overview
+  shows a "Getting started" card until company, bank account and series exist; the ČNB rates are optional,
+  because the rate is typed on the document.
 - **Accent colour** is the asset-catalog colour `AccentColor` (light, dark, both high-contrast
   variants, the same values as `Brand.accent`), named by `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME`,
   so system controls and the design system agree.
@@ -70,8 +71,35 @@ existing data to import.
 - The shell lists, filters, inspects and settles documents and creates drafts, but does not yet edit
   draft lines or issue documents; the editor and the Issue sheet are the next PR (the Issue… menu item
   exists and is disabled).
-- PDF rendering, exports and backups are placeholders with their final layout.
+- Exports and backups show their cards and commands with the controls disabled until the export step;
+  PDF rendering arrived with ADR 0010.
 - The Payments section loads payments per issued document; the data layer should gain
   `payments(filter:)` across documents.
 - Carried from the ADR 0007 review: a prefix collision between series is warned about in the Numbering
   pane, not enforced; `observeStates`' fixed `today` is handled by the midnight restart.
+
+## Amendments (PR 18, follow-ups of the design check)
+
+- The result line sits at the top of the content column; Delete Draft and Delete Payment have no
+  confirmation and register an undo instead (the line offers Undo; ⌘Z works too). Undo of a deleted
+  draft writes it back under its id and relinks a payment tax document to its payment (as the payment is
+  now: recorded again by an earlier Undo, or left alone when it has another tax document by then). Undo of
+  Delete Payment Only relinks the draft tax document that was kept. The line's Undo carries out its own
+  registration, not the top of the window's stack, and takes it off the stack; after ⌘Z it is cleared.
+  Delete Payment and Draft in Payments & Bank deletes the draft too, as in the detail.
+- Record Payment… applies only to an issued document with an open balance; an overpaid document offers
+  Record Refund… as its own command. The Document menu, the context menu and the detail's toolbar share
+  one `DocumentActions` value, so they never disagree.
+- The inspector exists in Overview, Documents, Clients and Payments & Bank; Exchange rates and Exports &
+  Backup disable View ▸ Show Inspector. Clients has its own inspector with the client's defaults.
+- A Client menu (New Invoice for ‹client›, New Advance Invoice for ‹client›, Edit Client Details…),
+  Help ▸ Getting Started, and Window ▸ Main Window that brings the existing window to the front.
+- Payments & Bank keeps its selection per window and lists Date · Client · Document · Amount · Source · Note.
+- The client form has a country pop-up and a VAT treatment pop-up; new clients default to EUR, 14 days
+  and EU reverse charge (decision of 5 Nov 2026). The company's term and footer live in Documents & PDF.
+- The Numbering pane and the series sheet compare the variable symbols and the document numbers of a
+  sample number across series (two series issuing the same numbers get a warning),
+  preview the next number as the store assigns it today, and lock year and counter once the app issued a
+  number from the series.
+- The inspector's Activity maps the audit actions to sentences. The store also records `create` and
+  `update` for every draft save: the first `create` shows as "Draft created", autosaves are not listed.

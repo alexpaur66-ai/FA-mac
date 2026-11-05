@@ -350,7 +350,7 @@ struct DraftEditorView: View {
                 }
             }
             if let stale = model.warnings.first(where: { $0.code == .exchangeRateStale }) {
-                InlineMessage(stale.message(language: .ui(locale)), kind: .warning)
+                InlineMessage(stale.message(language: .english), kind: .warning)
             }
             if let rateError = model.rateError {
                 InlineMessage(rateError)
@@ -359,9 +359,12 @@ struct DraftEditorView: View {
     }
 
     private func fallbackText(_ from: CalendarDay, document: Document) -> LocalizedStringResource {
-        let wanted = document.taxPoint.formatted(locale)
         let used = from.formatted(locale)
-        return model.rateResolution?.rule == .noPublicationThatDay ? L.rateNotPublished(wanted, used) : L.rateFallback(wanted, used)
+        if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
+            // The day the ČNB skipped: the tax point itself, or the last working day before a weekend tax point.
+            return L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
+        }
+        return L.rateFallback(document.taxPoint.formatted(locale), used)
     }
 
     /// "24,315": the rate for one unit in the UI locale; `czechLabel` stays on the PDF.
@@ -1257,7 +1260,7 @@ struct VATRateField<Focus: Hashable>: View {
     /// "21", "21%" and "21 %" all name the standard rate; an empty field is not an error while typing.
     private func apply(_ text: String, finishing: Bool) {
         let trimmed = text.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if let value = DecimalInput.parseRate(trimmed), let rate = rates.first(where: { $0.percent == value }) {
+        if let value = DecimalInput.parsePercent(trimmed), let rate = rates.first(where: { $0.percent == value }) {
             setInvalid(false)
             if rate.kind != kind { commit(rate.kind) }
             if finishing { self.text = display(rate.kind) }

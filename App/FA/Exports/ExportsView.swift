@@ -1,5 +1,6 @@
-// Exports & Backup (screens-flows.md §2h): the two cards. The CSV export, Back Up Now and Restore arrive
-// with the export step; until then the card shows where the one data file lives.
+// Exports & Backup (screens-flows.md §2h): the two cards with their controls. The CSV export, Back Up Now
+// and Restore arrive with the export step, so their buttons are disabled; until then the backup card shows
+// where the one data file lives.
 
 import AppKit
 import SwiftUI
@@ -9,11 +10,16 @@ struct ExportsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.l) {
+            VStack(alignment: .leading, spacing: Spacing.xxl) {
                 card(symbol: "square.and.arrow.up", title: L.exportAccountant, note: L.exportAccountantNote) {
-                    Button {} label: { Text(L.exportAccountant) }.disabled(true)
+                    Button {} label: { Text(L.exportButton) }
+                        .disabled(true)
                 }
                 card(symbol: "externaldrive", title: L.backupTitle, note: L.backupNote) {
+                    Button {} label: { Text(L.backUpNow) }
+                        .disabled(true)
+                    Button {} label: { Text(L.restoreFromBackup) }
+                        .disabled(true)
                     if let url = stores.databaseURL {
                         Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Text(L.showDataFolder) }
                     }
@@ -30,12 +36,12 @@ struct ExportsView: View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Label { Text(title) } icon: { Image(systemName: symbol) }
                 .textRole(.sectionTitle)
-            Text(note).textRole(.body)
-            HStack { actions() }
+            Text(note).textRole(.body).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Spacing.m) { actions() }
         }
         .padding(Spacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.l))
+        .tileSurface()
     }
 }
 
