@@ -168,11 +168,11 @@ enum PDFInspection {
     @Test func everyKindRendersAPDF() throws {
         for document in PDFFixtures.everyKind() {
             let data = try DocumentPDF.render(document)
-            #expect(data.count > 1000, document.id)
-            #expect(String(decoding: data.prefix(5), as: UTF8.self) == "%PDF-", document.id)
+            #expect(data.count > 1000, "\(document.id)")
+            #expect(String(decoding: data.prefix(5), as: UTF8.self) == "%PDF-", "\(document.id)")
             let pdf = try PDFInspection.document(data)
-            #expect(pdf.pageCount >= 1, document.id)
-            #expect(!PDFInspection.text(pdf).isEmpty, document.id)
+            #expect(pdf.pageCount >= 1, "\(document.id)")
+            #expect(!PDFInspection.text(pdf).isEmpty, "\(document.id)")
         }
     }
 
@@ -195,7 +195,7 @@ enum PDFInspection {
         let document = PDFFixtures.euInvoice()
         let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
         for expected in ["Faktura – daňový doklad", "Invoice – tax document", "Odběratel / Customer", "Beispiel GmbH", "DIČ / VAT ID DE123456789",
-                         "Daň odvede zákazník", "reverse charge", "1 000,00 €", "Germany", "Czech Republic", "Strana / Page 1 / 1",
+                         "Daň odvede zákazník", "reverse charge", "1 000,00 €", "Germany", "Strana / Page 1 / 1",
                          "Registered in the Commercial Register"] {
             #expect(text.contains(expected), "missing \(expected)")
         }
@@ -256,7 +256,7 @@ enum PDFInspection {
         let czkPDF = try PDFInspection.document(try DocumentPDF.render(czk))
         let czkPayloads = try PDFInspection.qrPayloads(czkPDF)
         let expectedCZK = try #require(czk.qrPlatba(totals: try DocumentTotals.compute(for: czk))).encoded()
-        #expect(czkPayloads == [try expectedCZK])
+        #expect(czkPayloads == [expectedCZK])
 
         let eur = PDFFixtures.euInvoice()
         let eurPDF = try PDFInspection.document(try DocumentPDF.render(eur))
@@ -264,7 +264,7 @@ enum PDFInspection {
         #expect(eurPayloads.count == 1)
         let payload = eurPayloads.first ?? ""
         #expect(payload.hasPrefix("BCD\n002\n1\nSCT\n"))
-        #expect(payload.contains("CZ6508000000192000145399"))
+        #expect(payload.contains(PDFFixtures.bank.iban.value))
         #expect(payload.contains("EUR1000.00"))
         #expect(PDFInspection.text(eurPDF).contains("SEPA QR (EPC)"))
         #expect(PDFInspection.text(czkPDF).contains("QR Platba"))

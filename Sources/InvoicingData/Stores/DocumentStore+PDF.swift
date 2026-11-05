@@ -63,9 +63,12 @@ extension DocumentStore {
         try database.queue.write { db in
             guard var pdf = try DocumentPDFRecord.fetchOne(db, key: documentID) else { throw DataError.pdfNotStored(documentID) }
             let stamp = Timestamps.string(now)
-            pdf.savedPath = path
-            pdf.savedAt = stamp
-            try pdf.update(db)
+            // Only the changed columns go into the UPDATE: the frozen-bytes trigger refuses any statement
+            // that names data, sha256 or renderedAt.
+            try pdf.updateChanges(db) { record in
+                record.savedPath = path
+                record.savedAt = stamp
+            }
             try AuditLog.append(db, entity: "document", id: documentID, action: "pdfSaved", details: ["path": path], at: stamp)
         }
     }
