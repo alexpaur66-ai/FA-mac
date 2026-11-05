@@ -15,6 +15,9 @@ public enum DocumentClause: Hashable, Sendable {
     case advancesDeducted(documentNumbers: [String])
     /// The rate behind the CZK amounts (§ 4 odst. 8 ZDPH).
     case exchangeRate(ExchangeRate)
+    /// The rate applied to the advances, which a negative difference is converted at (§ 37a odst. 2
+    /// písm. b) ZDPH).
+    case advanceExchangeRate(ExchangeRate)
 
     public func text(language: DocumentLanguage) -> String {
         switch (self, language) {
@@ -47,12 +50,18 @@ public enum DocumentClause: Hashable, Sendable {
         case (.exchangeRate(let rate), .czech):
             return "Přepočet na Kč \(Self.czechSource(rate)) \(rate.czechLabel) ze dne \(rate.validFor.czechString) (§ 4 odst. 8 zákona o DPH)."
         case (.exchangeRate(let rate), .english):
-            return "Amounts in CZK converted at the \(Self.englishSource(rate)) \(rate.czechLabel) of \(Self.english(rate.validFor)) (Section 4(8) of the Czech VAT Act)."
+            return "Amounts in CZK converted at the \(Self.englishSource(rate)) \(Self.englishLabel(rate)) of \(Self.english(rate.validFor)) (Section 4(8) of the Czech VAT Act)."
+        case (.advanceExchangeRate(let rate), .czech):
+            return "Záporný rozdíl základu daně přepočten \(Self.czechSource(rate)) \(rate.czechLabel) ze dne \(rate.validFor.czechString), uplatněným u přijaté zálohy (§ 37a odst. 2 písm. b) zákona o DPH)."
+        case (.advanceExchangeRate(let rate), .english):
+            return "The negative difference in the tax base is converted at the \(Self.englishSource(rate)) \(Self.englishLabel(rate)) of \(Self.english(rate.validFor)) applied to the advance payment (Section 37a(2)(b) of the Czech VAT Act)."
         }
     }
 
-    /// The clauses a document prints, derived from its kind, lines, deductions and exchange rate.
-    public static func clauses(for document: Document) -> [DocumentClause] {
+    /// The clauses a document prints, derived from its kind, lines, deductions and exchange rate. `totals`
+    /// are the document's amounts when the caller has them; they decide whether a negative difference was
+    /// converted at an advance's rate, and are computed here when not given.
+    public static func clauses(for document: Document, totals: DocumentTotals? = nil) -> [DocumentClause] {
         var result: [DocumentClause] = []
         if !document.kind.isTaxDocument {
             result.append(.notATaxDocument)
@@ -77,6 +86,11 @@ public enum DocumentClause: Hashable, Sendable {
         }
         if document.kind.isTaxDocument, document.currency != .czk, let rate = document.exchangeRate {
             result.append(.exchangeRate(rate))
+            if document.kind.deductsAdvances, let totals = totals ?? (try? DocumentTotals.compute(for: document)) {
+                for advanceRate in totals.advanceExchangeRates {
+                    result.append(.advanceExchangeRate(advanceRate))
+                }
+            }
         }
         return result
     }
@@ -87,6 +101,12 @@ public enum DocumentClause: Hashable, Sendable {
     /// "4 November 2026"; `CalendarDay` guarantees the month is 1...12.
     static func english(_ day: CalendarDay) -> String {
         "\(day.day) \(englishMonths[day.month - 1]) \(day.year)"
+    }
+
+    /// "24.310 CZK/EUR", "6.512 CZK/100 HUF": the rate with a decimal point for English documents.
+    private static func englishLabel(_ rate: ExchangeRate) -> String {
+        let rateText = rate.czkPerAmount.plainString(minimumFractionDigits: 3)
+        return rate.amount == 1 ? "\(rateText) CZK/\(rate.currency.code)" : "\(rateText) CZK/\(rate.amount) \(rate.currency.code)"
     }
 
     private static func czechSource(_ rate: ExchangeRate) -> String {
