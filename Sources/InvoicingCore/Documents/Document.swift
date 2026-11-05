@@ -1,0 +1,87 @@
+import Foundation
+
+/// A document in its own currency: who, what, when and how to pay. Amounts are computed by
+/// `DocumentTotals`, the rules are checked by `DocumentValidator`, the printed legal texts come from
+/// `DocumentClause`. The supplier and customer are snapshots, so the document stays as issued when the
+/// company profile or the customer card change later (§ 35 ZDPH).
+public struct Document: Hashable, Sendable, Codable, Identifiable {
+    public var id: String
+    public var kind: DocumentKind
+    public var status: DocumentStatus
+    /// Evidenční číslo (§ 29 odst. 1 písm. e) ZDPH); nil until the document is issued.
+    public var number: String?
+    public var supplier: Party
+    public var customer: Party
+    /// Id of the customer record the document belongs to, when any.
+    public var customerID: String?
+    public var language: DocumentLanguage
+    public var currency: Currency
+    public var pricing: PricingMode
+    /// Datum vystavení (§ 29 odst. 1 písm. g) ZDPH).
+    public var issueDate: CalendarDay
+    /// Datum uskutečnění zdanitelného plnění for an invoice, the day the payment was received for a payment
+    /// tax document (§ 29 odst. 1 písm. h) ZDPH); nil on an advance request.
+    public var taxPointDate: CalendarDay?
+    public var dueDate: CalendarDay
+    public var lines: [DocumentLine]
+    /// Advances deducted on a final invoice (§ 37a ZDPH); empty on every other kind.
+    public var advanceDeductions: [AdvanceDeduction]
+    /// The rate behind the CZK amounts (§ 4 odst. 8, § 29 odst. 1 písm. l) ZDPH); nil on CZK documents.
+    public var exchangeRate: ExchangeRate?
+    public var payment: PaymentInstructions?
+    /// Number of the advance request a payment tax document settles.
+    public var relatedDocumentNumber: String?
+    /// The customer's order or contract reference.
+    public var orderReference: String?
+    public var note: String?
+    public var footer: String?
+
+    public init(id: String = UUID().uuidString, kind: DocumentKind, status: DocumentStatus = .draft, number: String? = nil,
+                supplier: Party, customer: Party, customerID: String? = nil, language: DocumentLanguage = .czech,
+                currency: Currency = .czk, pricing: PricingMode = .net, issueDate: CalendarDay, taxPointDate: CalendarDay? = nil,
+                dueDate: CalendarDay, lines: [DocumentLine] = [], advanceDeductions: [AdvanceDeduction] = [],
+                exchangeRate: ExchangeRate? = nil, payment: PaymentInstructions? = nil, relatedDocumentNumber: String? = nil,
+                orderReference: String? = nil, note: String? = nil, footer: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.status = status
+        self.number = number
+        self.supplier = supplier
+        self.customer = customer
+        self.customerID = customerID
+        self.language = language
+        self.currency = currency
+        self.pricing = pricing
+        self.issueDate = issueDate
+        self.taxPointDate = taxPointDate
+        self.dueDate = dueDate
+        self.lines = lines
+        self.advanceDeductions = advanceDeductions
+        self.exchangeRate = exchangeRate
+        self.payment = payment
+        self.relatedDocumentNumber = relatedDocumentNumber
+        self.orderReference = orderReference
+        self.note = note
+        self.footer = footer
+    }
+
+    /// The day the obligation to declare the tax arose: the tax point, or the issue date when none is set.
+    public var taxPoint: CalendarDay { taxPointDate ?? issueDate }
+
+    public var isTaxDocument: Bool { kind.isTaxDocument }
+
+    /// The distinct VAT treatments of the lines, in order of first appearance.
+    public var treatments: [VATTreatment] {
+        var seen: [VATTreatment] = []
+        for line in lines where !seen.contains(line.treatment) {
+            seen.append(line.treatment)
+        }
+        return seen
+    }
+
+    /// True when any line is a reverse-charge supply (§ 29 odst. 2 písm. c) ZDPH).
+    public var hasReverseCharge: Bool { lines.contains { $0.treatment == .reverseChargeEU } }
+
+    /// The heading in the document's language.
+    public var title: String { kind.title(language: language) }
+}
