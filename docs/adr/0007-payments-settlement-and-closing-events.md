@@ -103,4 +103,6 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
   (`paidAdvance` links, schema v3), which settles and locks them like an issued receipt does
   (`paymentSettled`), and `deductedInFinal` and `deductedBy` count those final invoices too. A refund or a
   credit moved away from such an advance may take only what no final invoice settled and no issued payment
-  tax document covers, and deleting a payment row may not undo that (`paymentBacksSettlement`).
+  tax document covers, and deleting a payment row may not undo that (`paymentBacksSettlement`). Any advance
+  that an issued final invoice deducted or settled takes no further payment in the app (`acceptsPayment`):
+  money that arrives later is recorded on the final invoice.

@@ -81,10 +81,13 @@ struct DocumentRow: Identifiable, Hashable {
 
 extension DocumentState {
     /// Record Payment… applies: an issued document with an open balance that is not a payment tax document
-    /// (the store refuses those) and has no closing event. Shared by the toolbar, the context menu and the
-    /// menu bar.
+    /// (the store refuses those) and has no closing event. An advance that an issued final invoice deducted
+    /// or settled as paid in advance takes none: money that arrives later is recorded on the final invoice,
+    /// so it cannot change what the final invoice counted (the design thread's lean pass, ADR 0012). Shared
+    /// by the toolbar, the context menu and the menu bar.
     var acceptsPayment: Bool {
         summary.status == .issued && summary.kind != .paymentTaxDocument && closure == nil && outstanding.amount > 0
+            && !deductedInFinal
     }
 
     /// Record Refund… applies: an overpaid document gives the surplus back (screens-flows.md §2f).

@@ -753,9 +753,6 @@ enum L {
     static let paymentRecordedGoodsAdvance = r(
         "rp.recordedGoodsAdvance",
         "Payment recorded. An advance for EU goods needs no tax document: the final invoice lists it as paid in advance.")
-    /// Record Payment's last step on a goods advance that a final invoice already settled: no second final invoice.
-    static let paymentRecordedSettledGoodsAdvance = r(
-        "rp.recordedSettledGoodsAdvance", "Payment recorded. An advance for EU goods needs no tax document.")
     static func advanceAlreadyInFinalInvoice(_ numbers: String) -> LocalizedStringResource {
         r("finalInvoice.advanceAlreadyIn", "This advance is already in final invoice \(numbers).")
     }

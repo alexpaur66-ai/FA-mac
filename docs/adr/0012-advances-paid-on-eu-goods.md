@@ -85,10 +85,12 @@ The names, the wording and the steps are the design thread's spec of 5 Nov 2026.
 - **App** (design thread's names):
   - Record Payment on a goods advance ends with "Payment recorded. An advance for EU goods needs no tax
     document: the final invoice lists it as paid in advance." and the default button "Create Final
-    Invoice" (↩), with Later (⎋). Create Tax Document is not offered for such an advance. Once a final
-    invoice settled the advance, the step says "Payment recorded. An advance for EU goods needs no tax
-    document." with Later only: the Document menu offers no second final invoice for it either, and Create
-    Final Invoice reached any other way names the final invoice instead of drafting one.
+    Invoice" (↩), with Later (⎋). Create Tax Document is not offered for such an advance. An advance that an
+    issued final invoice deducted or settled takes no further payment (`acceptsPayment`, the design thread's
+    lean pass): money that arrives later is recorded on the final invoice, so it cannot change what the final
+    invoice counted. The Document menu offers no second final invoice for it, and Create Final Invoice
+    reached any other way names the final invoice ("This advance is already in final invoice …") instead of
+    drafting one.
   - Create Final Invoice from a goods advance lists its open payments under "Paid in advance" instead of
     refusing while they have no tax document. Each payment is offered for at most what the advance still
     holds.
