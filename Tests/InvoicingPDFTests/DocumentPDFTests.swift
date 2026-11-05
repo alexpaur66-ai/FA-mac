@@ -125,6 +125,52 @@ enum PDFFixtures {
         return document
     }
 
+    /// The CZK invoice from a supplier with a long business name and long street lines.
+    static func longNamesInvoice() -> Document {
+        var document = czkInvoice()
+        document.id = "long-names"
+        document.supplier.name = "Stavební a projekční společnost Novák a partneři, obchodní a poradenská skupina s. r. o."
+        document.supplier.address = PostalAddress(street: "Na Příkopě 1234/56, budova C, vchod z Panské ulice, 5. patro, kancelář 512",
+                                                  city: "Praha 1", postalCode: "110 00", countryCode: "CZ")
+        document.customer.address = PostalAddress(street: "Krátká 1, areál Technologického parku, budova Jih, vrátnice 3",
+                                                  city: "Brno", postalCode: "602 00")
+        document.orderReference = "Objednávka zákazníka č. 2026/1145 pro projekt Praha Sever"
+        guard let account = CzechBankAccount(parsing: "19-2000145399/0800"), let bic = BIC("GIBACZPX"),
+              let connection = BankConnection(czech: account, bic: bic, bankName: "Československá obchodní banka, a. s., pobočka Praha 1 – Na Poříčí",
+                                              currency: nil) else {
+            fatalError("bad bank fixture")
+        }
+        document.payment?.bankConnection = connection
+        return document
+    }
+
+    /// The final invoice in English: the longest bilingual totals captions.
+    static func englishFinalInvoice() -> Document {
+        var document = finalInvoice()
+        document.id = "fin-en"
+        document.language = .english
+        return document
+    }
+
+    /// A supply at 21 % that deducts a larger advance taxed at the former reduced 15 %: a negative
+    /// difference, taxed at the advance's rate (§ 37a odst. 2 písm. b) ZDPH).
+    static func negativeDifferenceFinalInvoice() -> Document {
+        var document = finalInvoice()
+        document.id = "fin-neg"
+        document.lines = [DocumentLine(id: "l1", text: "Konzultace", quantity: 1, unitPrice: d("1000"), treatment: .taxable(.standard))]
+        document.advanceDeductions = [AdvanceDeduction(id: "ded1", documentNumber: "DD-2023-001", paymentDate: day("2023-10-10"),
+                                                       treatment: .taxable(.reduced), ratePercent: 15, base: d("2000"), vat: d("300"), currency: .czk)]
+        return document
+    }
+
+    /// Czech VAT and reverse charge on one document (the validator only warns).
+    static func mixedTreatmentsInvoice() -> Document {
+        var document = euInvoiceWithCzechVAT()
+        document.id = "doc-mixed"
+        document.lines.append(DocumentLine(id: "l2", text: "Consulting – November 2026", quantity: 10, unit: "h", unitPrice: 100, treatment: .reverseChargeEU))
+        return document
+    }
+
     static func everyKind() -> [Document] {
         [czkInvoice(), euInvoice(), euInvoiceWithCzechVAT(), advanceRequest(), paymentTaxDocument(), finalInvoice(), draft(), longInvoice()]
     }
@@ -138,6 +184,25 @@ enum PDFInspection {
 
     static func normalized(_ text: String) -> String {
         text.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ")
+    }
+
+    /// The words of `text`, for strings that may wrap (PDF text extraction can interleave wrapped lines
+    /// with text of the other column at the same height).
+    static func words(_ text: String) -> [String] {
+        normalized(text).split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    }
+
+    /// The text at the height of every occurrence of `needle`, across the whole page width.
+    static func linesContaining(_ needle: String, in pdf: PDFDocument) -> [String] {
+        var lines: [String] = []
+        for selection in pdf.findString(needle, withOptions: []) {
+            guard let page = selection.pages.first else { continue }
+            let bounds = selection.bounds(for: page)
+            let pageBounds = page.bounds(for: .mediaBox)
+            let rect = CGRect(x: pageBounds.minX, y: bounds.minY - 4, width: pageBounds.width, height: bounds.height + 8)
+            lines.append(normalized(page.selection(for: rect)?.string ?? ""))
+        }
+        return lines
     }
 
     static func document(_ data: Data) throws -> PDFDocument {
@@ -234,10 +299,43 @@ enum PDFInspection {
     @Test func aFinalInvoiceListsTheDeductedAdvances() throws {
         let document = PDFFixtures.finalInvoice()
         let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        // Supply 20 000 + 4 200 = 24 200; advance 10 000 + 2 100 = 12 100; due 12 100.
         for expected in ["Odečet záloh", "Odečet zálohy – daňový doklad č. DD-2026-001, platba ze dne 10. 10. 2026", "-12 100,00 Kč",
-                         "Odečteny zálohy zdaněné daňovými doklady č. DD-2026-001", "20 000,00 Kč", "10 000,00 Kč", "2 100,00 Kč", "12 100,00 Kč"] {
+                         "Odečteny zálohy zdaněné daňovými doklady č. DD-2026-001", "20 000,00 Kč", "4 200,00 Kč", "24 200,00 Kč",
+                         "10 000,00 Kč", "2 100,00 Kč", "12 100,00 Kč"] {
             #expect(text.contains(expected) || text.contains(expected.replacingOccurrences(of: "-", with: "−")), "missing \(expected)")
         }
+        // The amount due, in the totals band and in the payment block, is the balance, not the supply.
+        let dueLines = PDFInspection.linesContaining("K úhradě", in: try PDFInspection.document(try DocumentPDF.render(document)))
+        #expect(!dueLines.isEmpty)
+        for line in dueLines {
+            #expect(line.contains("12 100,00 Kč"), "amount due line: \(line)")
+            #expect(!line.contains("24 200,00 Kč"), "amount due line: \(line)")
+        }
+    }
+
+    @Test func aNegativeDifferenceCaptionsTheSupplyAndTheDifferenceWithTheirOwnRates() throws {
+        let document = PDFFixtures.negativeDifferenceFinalInvoice()
+        let totals = try DocumentTotals.compute(for: document)
+        let rows = DocumentPDFRenderer(document: document, totals: totals, totalPages: nil).summaryRows()
+        let captions = rows.map(\.caption)
+        #expect(captions.contains("Tuzemsko \(PDFFormat.percent(21)) – Plnění"), "\(captions)")
+        #expect(captions.contains("Tuzemsko \(PDFFormat.percent(15)) – Základ daně a daň dokladu"), "\(captions)")
+        #expect(!captions.contains("Tuzemsko \(PDFFormat.percent(15)) – Plnění"), "\(captions)")
+        _ = try DocumentPDF.render(document)
+    }
+
+    @Test func rowsWithoutCzechVATPrintNoTaxInTheSummary() throws {
+        let document = PDFFixtures.mixedTreatmentsInvoice()
+        let totals = try DocumentTotals.compute(for: document)
+        let rows = DocumentPDFRenderer(document: document, totals: totals, totalPages: nil).summaryRows()
+        let reverseCharge = try #require(rows.first { $0.caption.hasPrefix("EU – přenesená daňová povinnost (PDP)") })
+        #expect(reverseCharge.values.count == 3)
+        #expect(reverseCharge.values[1] == nil, "no tax under reverse charge")
+        #expect(reverseCharge.values[0] == 1000)
+        let taxable = try #require(rows.first { $0.caption.hasPrefix("Tuzemsko") })
+        #expect(taxable.values.compactMap { $0 } == [800, 168, 968])
+        _ = try DocumentPDF.render(document)
     }
 
     @Test func aDraftCarriesTheThreeMarkersAndNoQRCode() throws {
@@ -268,6 +366,48 @@ enum PDFInspection {
         #expect(payload.contains("EUR1000.00"))
         #expect(PDFInspection.text(eurPDF).contains("SEPA QR (EPC)"))
         #expect(PDFInspection.text(czkPDF).contains("QR Platba"))
+
+        // A final invoice asks for the balance after the advances, not the supply.
+        let final = PDFFixtures.finalInvoice()
+        let finalPayloads = try PDFInspection.qrPayloads(try PDFInspection.document(try DocumentPDF.render(final)))
+        let expectedFinal = try #require(final.qrPlatba(totals: try DocumentTotals.compute(for: final))).encoded()
+        #expect(finalPayloads == [expectedFinal])
+        #expect(expectedFinal.contains("AM:12100.00"))
+    }
+
+    @Test func anIssuedDocumentWhoseQRCodeCannotBeEncodedSaysSoInItsPlace() throws {
+        var document = PDFFixtures.euInvoice()
+        // More than the 70 characters the EPC name field takes.
+        document.supplier.name = "Nováková a synové, stavební, projekční a poradenská společnost s. r. o."
+        let pdf = try PDFInspection.document(try DocumentPDF.render(document))
+        let text = PDFInspection.text(pdf)
+        #expect(text.contains("QR kód není k dispozici / QR code unavailable"), "the notice stands where the code would be")
+        #expect(!text.contains("SEPA QR (EPC)"), "no caption without a code")
+        #expect(try PDFInspection.qrPayloads(pdf).isEmpty, "no code is drawn")
+        #expect(text.contains("IBAN"), "the payment details still let the customer pay")
+        // The draft shows the placeholder and renders.
+        document.status = .draft
+        document.number = nil
+        let draft = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        #expect(draft.contains("QR po vystavení / QR after issue"))
+        #expect(!draft.contains("QR code unavailable"))
+    }
+
+    @Test func largeAmountsShrinkInsteadOfBeingCut() throws {
+        var document = PDFFixtures.finalInvoice()
+        document.id = "fin-big"
+        document.lines = [DocumentLine(id: "l1", text: "Stavba haly – konečné vyúčtování", quantity: 1, unit: "ks",
+                                       unitPrice: PDFFixtures.d("3000000"), treatment: .taxable(.standard))]
+        document.advanceDeductions = [AdvanceDeduction(id: "ded1", documentNumber: "DD-2026-007", paymentDate: PDFFixtures.day("2026-10-10"),
+                                                       treatment: .taxable(.standard), ratePercent: 21,
+                                                       base: PDFFixtures.d("2000000"), vat: PDFFixtures.d("420000"), currency: .czk)]
+        let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        #expect(!text.contains("…"), "no amount is cut")
+        // Supply 3 000 000 + 630 000; advance 2 000 000 + 420 000; due 1 210 000.
+        for expected in ["3 000 000,00 Kč", "630 000,00 Kč", "-2 000 000,00 Kč", "-420 000,00 Kč", "1 210 000,00 Kč",
+                         "Odečet zálohy – daňový doklad č. DD-2026-007, platba ze dne 10. 10. 2026, sazba DPH 21 %"] {
+            #expect(text.contains(expected) || text.contains(expected.replacingOccurrences(of: "-", with: "−")), "missing \(expected)")
+        }
     }
 
     @Test func aLongDocumentPaginatesWithRunningHeadersAndPageNumbers() throws {
@@ -292,6 +432,86 @@ enum PDFInspection {
         #expect(text.contains("K úhradě"))
     }
 
+    @Test func theLinesTableFitsTheContentWidth() throws {
+        let contentWidth = DocumentPDF.pageSize.width - 2 * DocumentPDFRenderer.horizontalMargin
+        for document in PDFFixtures.everyKind() + [PDFFixtures.longNamesInvoice(), PDFFixtures.mixedTreatmentsInvoice()] {
+            let columns = DocumentPDFRenderer.tableColumns(for: document, contentWidth: contentWidth)
+            let description = try #require(columns.first)
+            #expect(description.key == .description)
+            #expect(description.width >= DocumentPDFRenderer.minimumDescriptionWidth, "\(document.id)")
+            var x: CGFloat = 0
+            for column in columns {
+                #expect(x + column.width <= contentWidth + 0.01, "\(document.id): \(column.key) ends at \(x + column.width)")
+                x += column.width + DocumentPDFRenderer.gap
+            }
+        }
+        // The CZK invoice has a unit and a discount: the unit joins the quantity, the per-line VAT goes.
+        let keys = DocumentPDFRenderer.tableColumns(for: PDFFixtures.czkInvoice(), contentWidth: contentWidth).map(\.key)
+        #expect(keys == [.description, .quantity, .unitPrice, .discount, .rate, .base, .total])
+
+        // On the page: the first line's total (10 h × 1 000 Kč + 21 %) ends inside the right margin.
+        let pdf = try PDFInspection.document(try DocumentPDF.render(PDFFixtures.czkInvoice()))
+        let needle = PDFFormat.money(PDFFixtures.d("12100"), .czk)
+        let selections = pdf.findString(needle, withOptions: []) + pdf.findString(PDFInspection.normalized(needle), withOptions: [])
+        #expect(!selections.isEmpty)
+        let contentRight = DocumentPDF.pageSize.width - DocumentPDFRenderer.horizontalMargin
+        for selection in selections {
+            guard let page = selection.pages.first else { continue }
+            #expect(selection.bounds(for: page).maxX <= contentRight + 1, "line total at \(selection.bounds(for: page))")
+        }
+        #expect(PDFInspection.text(pdf).contains("10 h"), "the unit is printed with the quantity")
+    }
+
+    @Test func longNamesAndValuesWrapInsteadOfBeingCut() throws {
+        let document = PDFFixtures.longNamesInvoice()
+        let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        #expect(!text.contains("…"), "nothing is truncated")
+        for value in [document.supplier.name, document.supplier.address.street, document.customer.address.street,
+                      document.orderReference ?? "", document.payment?.bankConnection.bankName ?? ""] {
+            for word in PDFInspection.words(value) {
+                #expect(text.contains(word), "missing \(word) of \(value)")
+            }
+        }
+        // What follows the wrapped name is still there.
+        #expect(text.contains("IČO 12345679"))
+        #expect(text.contains("fakturace@novakova.cz"))
+        #expect(text.contains("Zapsána v obchodním rejstříku"))
+    }
+
+    @Test func englishTotalsCaptionsAreNotCut() throws {
+        for document in [PDFFixtures.euInvoiceWithCzechVAT(), PDFFixtures.englishFinalInvoice()] {
+            let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+            #expect(!text.contains("…"), "\(document.id): nothing is truncated")
+            for word in ["Total", "excl.", "VAT", "Amount", "due"] {
+                #expect(text.contains(word), "\(document.id): missing \(word)")
+            }
+        }
+        let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(PDFFixtures.englishFinalInvoice())))
+        for word in ["Less", "advance", "payments"] {
+            #expect(text.contains(word), "missing \(word)")
+        }
+    }
+
+    @Test func identifiersAreGlossedOnBilingualDocuments() throws {
+        let english = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(PDFFixtures.euInvoice())))
+        #expect(english.contains("IČO / Company ID (IČO) 12345679"))
+        #expect(english.contains("DIČ / VAT ID CZ12345679"))
+        let czech = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(PDFFixtures.czkInvoice())))
+        #expect(czech.contains("IČO 12345679"))
+        #expect(czech.contains("DIČ CZ12345679"))
+        #expect(!czech.contains("Company ID"))
+    }
+
+    @Test func grossPricesAreCaptionedAsIncludingVAT() throws {
+        let document = PDFFixtures.paymentTaxDocument()
+        #expect(document.pricing == .gross)
+        let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        #expect(text.contains("Cena za MJ s DPH"))
+        #expect(!text.contains("…"))
+        let net = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(PDFFixtures.czkInvoice())))
+        #expect(!net.contains("Cena za MJ s DPH"))
+    }
+
     @Test func renderingIsDeterministicForTheSameDocument() throws {
         let document = PDFFixtures.czkInvoice()
         let first = try DocumentPDF.render(document)
@@ -303,7 +523,7 @@ enum PDFInspection {
 
     @Test func fileNamesAreSafe() {
         #expect(DocumentPDF.fileName(for: PDFFixtures.euInvoice()) == "FV-2026-002 Beispiel GmbH.pdf")
-        #expect(DocumentPDF.fileName(for: PDFFixtures.draft()) == "Koncept Odběratel s. r. o..pdf")
+        #expect(DocumentPDF.fileName(for: PDFFixtures.draft()) == "Koncept Odběratel s. r. o.pdf")
         var document = PDFFixtures.czkInvoice()
         document.number = "FV/2026/001"
         document.customer.name = "A: B\\C  D"

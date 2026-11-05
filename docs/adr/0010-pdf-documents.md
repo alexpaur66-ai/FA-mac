@@ -28,7 +28,16 @@ and leaves the image to the app.
   prints the deduction rows in the VAT summary and names every deducted tax document (§ 37a ZDPH); a
   document without Czech VAT prints no rate, base or VAT columns and no VAT totals (§ 29 odst. 3 písm. e)
   ZDPH), only the clause. The VAT in CZK appears with its base and the rate on foreign-currency documents
-  that charge VAT (§ 29 odst. 1 písm. l), the exchange-rate clause explains it (§ 4 odst. 8).
+  that charge VAT (§ 29 odst. 1 písm. l), the exchange-rate clause explains it (§ 4 odst. 8). The lines
+  table always fits the content width: the unit is printed in the quantity cell ("10 h"), and when the
+  description would get less than 80 pt the per-line VAT column is dropped, the VAT per rate staying in
+  the VAT summary. Gross unit prices (a payment tax document) are captioned "Cena za MJ s DPH". Rows
+  without Czech VAT print "—" for the tax in the summary, as in the lines. On a final invoice the supply
+  row carries the rate of its lines and the after-deduction row the rate the difference was taxed at, and
+  each deduction line names the rate of its advance. Names, addresses, order references, bank names and
+  totals captions wrap; an amount wider than its column shrinks (down to 6 pt) instead of being cut; the
+  page footer drops the supplier name when the number and the name would not fit. Nothing on the page is
+  cut.
 - **Bilingual means Czech first, English after a slash** on every caption (`DocumentLabel`), two-line
   table headers, the English title under the Czech one, and both sentences of every clause; the
   reverse-charge clause prints once because its English text already starts with the prescribed Czech
@@ -43,7 +52,14 @@ and leaves the image to the app.
   same account in (ADR 0009).
 - **The QR code is vector**: Core Image computes the module grid, the renderer fills one square per
   dark module, so the code stays sharp at any zoom and in print. 85 pt (about 30 mm), level M; QR platba
-  for CZK, the EPC code for EUR, as `PaymentInstructions.standard` decides.
+  for CZK, the EPC code for EUR, as `PaymentInstructions.standard` decides. The QR platba payload is
+  encoded in ISO-8859-1, the character set the core builds it from; the EPC payload in UTF-8, as its
+  character-set field says. When an issued document's payment asks for a code the core cannot encode (for
+  example a supplier name over the EPC's 70 characters), the code's place carries the notice "QR kód není
+  k dispozici / QR code unavailable" instead of a silent gap: the payment details beside it still let the
+  customer pay, and the document is not held back. A format that does not apply to the document (no
+  payload) prints no code and no caption. Checking the payload before Issue belongs to the core's validator
+  (follow-up).
 - **Helvetica**, 9 pt body, on white: it is on every Mac, embeds as a subset and has the Czech glyphs. The
   colours are fixed sRGB values; a PDF has no appearance.
 - **Stored bytes.** The data layer gains `documentPDF` (migration v2): the PDF of an issued document is

@@ -2,7 +2,8 @@ import Foundation
 import InvoicingCore
 
 /// Texts printed on documents that are neither legal wording (`DocumentClause`) nor field captions
-/// (`DocumentLabel`): the draft markers, the VAT summary row labels and the QR captions. Wording marked
+/// (`DocumentLabel`): the draft markers, the VAT summary row labels, the gross unit-price caption and the
+/// QR captions. Wording marked
 /// ACCT follows the design system's legal-strings table and waits for the accountant's confirmation.
 enum PDFStrings {
     /// Czech first, the English gloss after a slash on bilingual documents (design-system.md §9).
@@ -23,6 +24,12 @@ enum PDFStrings {
 
     static func qrPlaceholder(_ language: DocumentLanguage) -> String {
         bilingual("QR po vystavení", "QR after issue", language)
+    }
+
+    /// In the code's place on an issued document whose payload the core refused to encode (ADR 0010): the
+    /// gap is never silent, the payment details beside it still let the customer pay.
+    static func qrUnavailable(_ language: DocumentLanguage) -> String {
+        bilingual("QR kód není k dispozici", "QR code unavailable", language)
     }
 
     static func continued(_ language: DocumentLanguage) -> String {
@@ -60,11 +67,21 @@ enum PDFStrings {
         bilingual("Základ daně a daň dokladu", "tax base and VAT of this document", language)
     }
 
-    /// "Odečet zálohy – daňový doklad č. DD-2026-001, platba ze dne 10. 10. 2026" (ACCT).
-    static func deductionLine(number: String, paymentDate: CalendarDay, _ language: DocumentLanguage) -> String {
-        let czech = "Odečet zálohy – daňový doklad č. \(number), platba ze dne \(PDFFormat.day(paymentDate))"
+    /// "Odečet zálohy – daňový doklad č. DD-2026-001, platba ze dne 10. 10. 2026, sazba DPH 21 %" (ACCT). The
+    /// rate tells the deductions of one tax document apart when it carried several rates; nil prints none.
+    static func deductionLine(number: String, paymentDate: CalendarDay, ratePercent: Decimal?, _ language: DocumentLanguage) -> String {
+        var czech = "Odečet zálohy – daňový doklad č. \(number), platba ze dne \(PDFFormat.day(paymentDate))"
+        if let ratePercent { czech += ", sazba DPH \(PDFFormat.percent(ratePercent))" }
         guard language == .english else { return czech }
-        return czech + " / advance payment deducted – tax document No. \(number), paid on \(PDFFormat.day(paymentDate))"
+        var english = "advance payment deducted – tax document No. \(number), paid on \(PDFFormat.day(paymentDate))"
+        if let ratePercent { english += ", VAT rate \(PDFFormat.percent(ratePercent))" }
+        return czech + " / " + english
+    }
+
+    /// The unit-price caption of a document priced with VAT (a payment tax document), so quantity × price
+    /// is not read as the tax base (ACCT).
+    static func unitPriceIncludingVAT(_ language: DocumentLanguage) -> String {
+        bilingual("Cena za MJ s DPH", "Unit price incl. VAT", language)
     }
 
     static func totalExcludingVAT(_ language: DocumentLanguage) -> String {

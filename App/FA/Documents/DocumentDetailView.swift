@@ -19,7 +19,8 @@ struct DocumentDetailView: View {
     /// Opens a payment's draft tax document in the editor.
     var openDraft: (@MainActor (String) -> Void)? = nil
     /// Bumped by the window after a menu action changed the stored PDF's saved path, so the PDF row reloads.
-    var pdfVersion = 0
+    /// Bumped by whoever saves the PDF (the File menu, this view), so the row and the menu items reload.
+    var pdfVersion: Binding<Int> = .constant(0)
     /// Issue could not write the PDF file (screens-flows.md §2c): the banner offers Choose Folder… and Save PDF….
     var pdfSaveFailure: Binding<PDFSaveFailure?> = .constant(nil)
 
@@ -52,7 +53,7 @@ struct DocumentDetailView: View {
             }
         }
         .navigationTitle(Text(verbatim: documents.state(id: documentID)?.summary.number ?? String(localized: L.draftTitle)))
-        .task(id: LoadKey(id: documentID, states: documents.states, pdfVersion: pdfVersion)) {
+        .task(id: LoadKey(id: documentID, states: documents.states, pdfVersion: pdfVersion.wrappedValue)) {
             load()
         }
     }
@@ -339,6 +340,7 @@ struct DocumentDetailView: View {
             guard try PDFActions.save(stores, documentID: documentID) != nil else { return }
             pdfSaveFailure.wrappedValue = nil
             loadPDF()
+            pdfVersion.wrappedValue += 1
         } catch {
             loadError = ErrorText.message(error, locale: locale)
         }
@@ -350,6 +352,7 @@ struct DocumentDetailView: View {
             _ = try PDFActions.save(stores, documentID: documentID, into: folder)
             pdfSaveFailure.wrappedValue = nil
             loadPDF()
+            pdfVersion.wrappedValue += 1
         } catch {
             loadError = ErrorText.message(error, locale: locale)
         }

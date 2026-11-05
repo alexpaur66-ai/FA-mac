@@ -46,7 +46,9 @@ public enum DocumentPDF {
             }
         }
         let collapsed = cleaned.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        let trimmed = String(collapsed.prefix(120))
+        var trimmed = String(collapsed.prefix(120))
+        // "Odběratel s. r. o." would otherwise end in "..pdf".
+        while trimmed.hasSuffix(".") || trimmed.hasSuffix(" ") { trimmed.removeLast() }
         return (trimmed.isEmpty ? "document" : trimmed) + ".pdf"
     }
 }
@@ -78,7 +80,14 @@ final class DocumentPDFRenderer {
     private let styleTableHeader: PDFTextStyle
     private let styleWatermark: PDFTextStyle
 
-    private let columnGap: CGFloat = 6
+    /// The left and right page margins.
+    static let horizontalMargin: CGFloat = 46
+    /// The gap after every column of the lines table and the summary.
+    static let gap: CGFloat = 6
+    /// The narrowest the description column of the lines table may get.
+    static let minimumDescriptionWidth: CGFloat = 80
+
+    private let columnGap: CGFloat = DocumentPDFRenderer.gap
 
     init(document: Document, totals: DocumentTotals, totalPages: Int?) {
         self.document = document
@@ -119,7 +128,8 @@ final class DocumentPDFRenderer {
             throw DocumentPDFError.graphicsContextUnavailable
         }
         let writer = PDFPageWriter(context: context, pageSize: DocumentPDF.pageSize,
-                                   marginLeft: 46, marginRight: 46, marginTop: 46, marginBottom: 40)
+                                   marginLeft: DocumentPDFRenderer.horizontalMargin, marginRight: DocumentPDFRenderer.horizontalMargin,
+                                   marginTop: 46, marginBottom: 40)
         writer.onPageStart = { [weak self] writer, page in self?.pageStart(writer, page: page) }
         writer.onPageEnd = { [weak self] writer, page in self?.pageEnd(writer, page: page) }
 
@@ -140,11 +150,12 @@ final class DocumentPDFRenderer {
     private func label(_ label: DocumentLabel) -> String { PDFStrings.label(label, language) }
     private func money(_ amount: Decimal, _ currency: Currency? = nil) -> String { PDFFormat.money(amount, currency ?? self.currency) }
 
-    /// "IČO 12345679 · DIČ CZ12345679"; bilingual documents gloss the VAT ID.
+    /// "IČO 12345679 · DIČ CZ12345679"; bilingual documents gloss both captions ("IČO / Company ID (IČO)",
+    /// "DIČ / VAT ID").
     private func identifiers(_ party: Party) -> String? {
         var parts: [String] = []
-        if let ico = party.identificationNumber { parts.append("IČO \(ico.digits)") }
-        if let dic = party.vatIdentifier { parts.append((language == .english ? "DIČ / VAT ID " : "DIČ ") + dic.value) }
+        if let ico = party.identificationNumber { parts.append("\(label(.identificationNumber)) \(ico.digits)") }
+        if let dic = party.vatIdentifier { parts.append("\(label(.vatIdentifier)) \(dic.value)") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -174,8 +185,11 @@ final class DocumentPDFRenderer {
         let pages = totalPages.map { "\(pageLabel) \(page) / \($0)" } ?? "\(pageLabel) \(page)"
         let pagesWidth = writer.width(of: pages, styleLabel) + 4
         writer.text(pages, styleLabel, x: writer.contentRight - pagesWidth, top: top + 4, width: pagesWidth, alignment: .right)
-        let left = "\(numberText) · \(document.supplier.name)"
-        writer.text(left, styleLabel, x: writer.contentLeft, top: top + 4, width: writer.contentWidth - pagesWidth - 12)
+        // The footer only repeats the name: when both would not fit, the number stands there alone.
+        let leftWidth = writer.contentWidth - pagesWidth - 12
+        let full = "\(numberText) · \(document.supplier.name)"
+        let left = writer.width(of: full, styleLabel) <= leftWidth ? full : numberText
+        writer.text(left, styleLabel, x: writer.contentLeft, top: top + 4, width: leftWidth)
     }
 
     // MARK: Header: supplier and title
@@ -220,17 +234,18 @@ final class DocumentPDFRenderer {
         let supplier = document.supplier
 
         var leftY = writer.y
-        leftY += writer.text(supplier.name, styleName, x: writer.contentLeft, top: leftY, width: leftWidth)
+        // The supplier's business name and seat are § 29 elements: they wrap, they are never cut.
+        leftY += writer.paragraph(supplier.name, styleName, x: writer.contentLeft, top: leftY, width: leftWidth)
         leftY += 2
         for line in supplier.address.lines(countryName: countryName(supplier.address.countryCode), alwaysIncludeCountry: language == .english) {
-            leftY += writer.text(line, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
+            leftY += writer.paragraph(line, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
         }
         if let ids = identifiers(supplier) {
-            leftY += writer.text(ids, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
+            leftY += writer.paragraph(ids, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
         }
         let contact = [supplier.email, supplier.phone].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         if !contact.isEmpty {
-            leftY += writer.text(contact, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
+            leftY += writer.paragraph(contact, styleBody, x: writer.contentLeft, top: leftY, width: leftWidth)
         }
         if let registry = supplier.registryEntry {
             // § 435 OZ: the registry entry on every business document.
@@ -276,11 +291,11 @@ final class DocumentPDFRenderer {
         leftY += 3
         leftY += writer.paragraph(customer.name, PDFTextStyle(font: .bold(10.5), color: ink), x: writer.contentLeft, top: leftY, width: columnWidth)
         for line in customer.address.lines(countryName: countryName(customer.address.countryCode)) {
-            leftY += writer.text(line, styleBody, x: writer.contentLeft, top: leftY, width: columnWidth)
+            leftY += writer.paragraph(line, styleBody, x: writer.contentLeft, top: leftY, width: columnWidth)
         }
         if let ids = identifiers(customer) {
             leftY += 2
-            leftY += writer.text(ids, styleBody, x: writer.contentLeft, top: leftY, width: columnWidth)
+            leftY += writer.paragraph(ids, styleBody, x: writer.contentLeft, top: leftY, width: columnWidth)
         }
 
         var rows: [(String, String)] = [(label(.issueDate), PDFFormat.day(document.issueDate))]
@@ -311,8 +326,14 @@ final class DocumentPDFRenderer {
         for (caption, value) in rows {
             let captionHeight = writer.height(of: caption, styleLabel, width: labelWidth)
             writer.paragraph(caption, styleLabel, x: rightX, top: rightY, width: labelWidth)
-            writer.text(value, styleBodyBold, x: valueX, top: rightY, width: valueWidth, alignment: .right)
-            rightY += max(captionHeight, styleBodyBold.font.lineHeight) + 3
+            let valueHeight: CGFloat
+            if writer.width(of: value, styleBodyBold) <= valueWidth {
+                valueHeight = writer.text(value, styleBodyBold, x: valueX, top: rightY, width: valueWidth, alignment: .right)
+            } else {
+                // A long value (the customer's order reference) wraps in its column instead of losing its tail.
+                valueHeight = writer.paragraph(value, styleBodyBold, x: valueX, top: rightY, width: valueWidth)
+            }
+            rightY += max(captionHeight, valueHeight, styleBodyBold.font.lineHeight) + 3
         }
 
         writer.moveTo(max(leftY, rightY) + 14)
@@ -320,34 +341,47 @@ final class DocumentPDFRenderer {
 
     // MARK: Lines
 
-    private enum ColumnKey {
-        case description, quantity, unit, unitPrice, discount, rate, base, vat, total
+    enum ColumnKey {
+        case description, quantity, unitPrice, discount, rate, base, vat, total
     }
 
-    private struct Column {
+    struct Column {
         let key: ColumnKey
         let title: String
         let width: CGFloat
         let alignment: PDFAlignment
     }
 
-    private func tableColumns(_ writer: PDFPageWriter) -> [Column] {
+    /// The columns of the lines table, description first, laid out from `contentWidth` on with a `gap` after
+    /// each. Every column fits the content width: the unit is printed in the quantity cell ("10 h"), and
+    /// when the description would get less than `minimumDescriptionWidth` the per-line VAT column is
+    /// dropped; the VAT per rate stays in the VAT summary (§ 29 odst. 1 písm. k) and l) ZDPH). Gross
+    /// prices on a document with Czech VAT (a payment tax document) are captioned as including VAT.
+    static func tableColumns(for document: Document, contentWidth: CGFloat) -> [Column] {
+        let language = document.language
         let lines = document.lines
         let hasUnits = lines.contains { !($0.unit ?? "").isEmpty }
         let hasDiscount = lines.contains { $0.discountPercent != 0 }
         let chargesVAT = lines.contains { $0.treatment.chargesVAT }
-        var fixed: [Column] = [Column(key: .quantity, title: label(.quantity), width: 50, alignment: .right)]
-        if hasUnits { fixed.append(Column(key: .unit, title: label(.unit), width: 34, alignment: .left)) }
-        fixed.append(Column(key: .unitPrice, title: label(.unitPrice), width: 72, alignment: .right))
-        if hasDiscount { fixed.append(Column(key: .discount, title: label(.discount), width: 44, alignment: .right)) }
+        let grossPrices = chargesVAT && document.pricing == .gross
+        var fixed: [Column] = [Column(key: .quantity, title: PDFStrings.label(.quantity, language), width: hasUnits ? 60 : 50, alignment: .right)]
+        fixed.append(Column(key: .unitPrice,
+                            title: grossPrices ? PDFStrings.unitPriceIncludingVAT(language) : PDFStrings.label(.unitPrice, language),
+                            width: grossPrices ? 76 : 72, alignment: .right))
+        if hasDiscount { fixed.append(Column(key: .discount, title: PDFStrings.label(.discount, language), width: 44, alignment: .right)) }
         if chargesVAT {
-            fixed.append(Column(key: .rate, title: label(.vatRate), width: 42, alignment: .right))
-            fixed.append(Column(key: .base, title: label(.base), width: 74, alignment: .right))
-            fixed.append(Column(key: .vat, title: label(.vat), width: 66, alignment: .right))
+            fixed.append(Column(key: .rate, title: PDFStrings.label(.vatRate, language), width: 42, alignment: .right))
+            fixed.append(Column(key: .base, title: PDFStrings.label(.base, language), width: 74, alignment: .right))
+            fixed.append(Column(key: .vat, title: PDFStrings.label(.vat, language), width: 66, alignment: .right))
         }
-        fixed.append(Column(key: .total, title: label(.total), width: 78, alignment: .right))
-        let used = fixed.reduce(CGFloat(0)) { $0 + $1.width + columnGap }
-        let description = Column(key: .description, title: label(.description), width: max(80, writer.contentWidth - used), alignment: .left)
+        fixed.append(Column(key: .total, title: PDFStrings.label(.total, language), width: 78, alignment: .right))
+        func used(_ columns: [Column]) -> CGFloat { columns.reduce(CGFloat(0)) { $0 + $1.width + gap } }
+        if contentWidth - used(fixed) < minimumDescriptionWidth {
+            fixed.removeAll { $0.key == .vat }
+        }
+        assert(contentWidth - used(fixed) >= minimumDescriptionWidth, "the lines table does not fit the page")
+        let description = Column(key: .description, title: PDFStrings.label(.description, language),
+                                 width: max(minimumDescriptionWidth, contentWidth - used(fixed)), alignment: .left)
         return [description] + fixed
     }
 
@@ -377,8 +411,10 @@ final class DocumentPDFRenderer {
     private func cell(_ key: ColumnKey, line: DocumentLine, amounts: LineAmounts?) -> String {
         switch key {
         case .description: return line.text
-        case .quantity: return PDFFormat.number(line.quantity)
-        case .unit: return line.unit ?? ""
+        case .quantity:
+            let quantity = PDFFormat.number(line.quantity)
+            guard let unit = line.unit, !unit.isEmpty else { return quantity }
+            return quantity + "\u{00A0}" + unit
         case .unitPrice: return money(line.unitPrice)
         case .discount: return line.discountPercent == 0 ? "" : PDFFormat.percent(line.discountPercent)
         case .rate:
@@ -393,7 +429,7 @@ final class DocumentPDFRenderer {
     }
 
     private func drawLines(_ writer: PDFPageWriter) {
-        let columns = tableColumns(writer)
+        let columns = Self.tableColumns(for: document, contentWidth: writer.contentWidth)
         guard let descriptionWidth = columns.first?.width else { return }
         writer.ensure(60)
         drawTableHeader(writer, columns: columns)
@@ -411,7 +447,7 @@ final class DocumentPDFRenderer {
                 if column.key == .description {
                     writer.paragraph(value, styleBody, x: x, top: top, width: column.width)
                 } else {
-                    writer.text(value, styleBody, x: x, top: top, width: column.width, alignment: column.alignment)
+                    fittedNumber(writer, value, styleBody, x: x, top: top, width: column.width, alignment: column.alignment)
                 }
                 x += column.width + columnGap
             }
@@ -425,9 +461,10 @@ final class DocumentPDFRenderer {
 
     // MARK: VAT summary and totals
 
-    private struct SummaryRow {
+    struct SummaryRow {
         let caption: String
-        let values: [Decimal]
+        /// Base, VAT and total, or the total alone; nil prints "—" (no tax under reverse charge or exemption).
+        let values: [Decimal?]
         let currency: Currency
         let emphasised: Bool
         let small: Bool
@@ -435,35 +472,43 @@ final class DocumentPDFRenderer {
 
     private var showsVAT: Bool { totals.rows.contains { $0.treatment.chargesVAT } }
 
-    private func summaryRows() -> [SummaryRow] {
+    func summaryRows() -> [SummaryRow] {
         var rows: [SummaryRow] = []
         for row in totals.rows {
-            let percent = row.appliedRatePercent ?? row.rate?.percent
-            let caption = PDFStrings.treatment(row.treatment, percent: percent, language)
             let deducted = row.deductedBase != 0 || row.deductedVAT != 0
+            let charges = row.treatment.chargesVAT
             if deducted {
-                rows.append(SummaryRow(caption: "\(caption) – \(PDFStrings.supplyRow(language))", values: values(row.base, row.vat, row.gross),
+                // The supply keeps the rate of its lines; the difference carries the rate it was taxed at,
+                // which for a negative difference is the advances' rate (§ 37a odst. 2 ZDPH).
+                let supplyCaption = PDFStrings.treatment(row.treatment, percent: row.rate?.percent, language)
+                let differenceCaption = PDFStrings.treatment(row.treatment, percent: row.appliedRatePercent ?? row.rate?.percent, language)
+                rows.append(SummaryRow(caption: "\(supplyCaption) – \(PDFStrings.supplyRow(language))",
+                                       values: values(row.base, row.vat, row.gross, chargesVAT: charges),
                                        currency: currency, emphasised: false, small: false))
                 rows.append(SummaryRow(caption: label(.advanceDeductions),
-                                       values: values(-row.deductedBase, -row.deductedVAT, -(row.deductedBase + row.deductedVAT)),
+                                       values: values(-row.deductedBase, -row.deductedVAT, -(row.deductedBase + row.deductedVAT), chargesVAT: charges),
                                        currency: currency, emphasised: false, small: false))
-                rows.append(SummaryRow(caption: PDFStrings.afterDeduction(language), values: values(row.taxableBase, row.taxableVAT, row.taxableGross),
+                rows.append(SummaryRow(caption: "\(differenceCaption) – \(PDFStrings.afterDeduction(language))",
+                                       values: values(row.taxableBase, row.taxableVAT, row.taxableGross, chargesVAT: charges),
                                        currency: currency, emphasised: true, small: false))
             } else {
-                rows.append(SummaryRow(caption: caption, values: values(row.base, row.vat, row.gross), currency: currency, emphasised: false, small: false))
+                let caption = PDFStrings.treatment(row.treatment, percent: row.appliedRatePercent ?? row.rate?.percent, language)
+                rows.append(SummaryRow(caption: caption, values: values(row.base, row.vat, row.gross, chargesVAT: charges),
+                                       currency: currency, emphasised: false, small: false))
             }
             // § 29 odst. 1 písm. l) ZDPH: the tax in CZK on a foreign-currency document; the base goes with it.
             if row.treatment.chargesVAT, currency != .czk, let baseCZK = row.taxableBaseCZK, let vatCZK = row.taxableVATCZK, let rate = row.exchangeRate {
-                rows.append(SummaryRow(caption: PDFStrings.inCZKAtRate(rate, language), values: values(baseCZK, vatCZK, baseCZK + vatCZK),
+                rows.append(SummaryRow(caption: PDFStrings.inCZKAtRate(rate, language), values: values(baseCZK, vatCZK, baseCZK + vatCZK, chargesVAT: true),
                                        currency: .czk, emphasised: false, small: true))
             }
         }
         return rows
     }
 
-    /// Base, VAT and total when the document charges VAT; the total alone otherwise (§ 29 odst. 3 písm. e) ZDPH).
-    private func values(_ base: Decimal, _ vat: Decimal, _ gross: Decimal) -> [Decimal] {
-        showsVAT ? [base, vat, gross] : [gross]
+    /// Base, VAT and total when the document charges VAT; the total alone otherwise. A row without Czech VAT
+    /// on a document that charges it prints no tax, a dash (§ 29 odst. 3 písm. e) ZDPH), as the lines do.
+    private func values(_ base: Decimal, _ vat: Decimal, _ gross: Decimal, chargesVAT: Bool) -> [Decimal?] {
+        showsVAT ? [base, chargesVAT ? vat : nil, gross] : [gross]
     }
 
     private func totalRows() -> [(caption: String, value: String, emphasised: Bool)] {
@@ -512,30 +557,36 @@ final class DocumentPDFRenderer {
                 writer.paragraph(row.caption, style, x: writer.contentLeft, top: leftY, width: captionWidth - 4)
                 for (index, value) in row.values.enumerated() {
                     let x = writer.contentLeft + captionWidth + CGFloat(index) * (numberWidth + columnGap)
-                    writer.text(money(value, row.currency), style, x: x, top: leftY, width: numberWidth, alignment: .right)
+                    fittedNumber(writer, value.map { money($0, row.currency) } ?? "—", style, x: x, top: leftY, width: numberWidth)
                 }
             }
             leftY += max(captionHeight, style.font.lineHeight) + 3
         }
 
         // Right: the totals and the amount due.
+        // Each caption takes the width its amount leaves free and wraps there, so the English gloss of a
+        // bilingual caption is never cut.
         var rightY = top
-        let captionRight = rightWidth * 0.5
         for row in totalRows() {
             let style = row.emphasised ? styleBodyBold : styleBody
+            let captionWidth = max(40, rightWidth - writer.width(of: row.value, style) - 8)
+            let captionHeight = writer.height(of: row.caption, styleLabel, width: captionWidth)
             if draw {
-                writer.text(row.caption, styleLabel, x: rightX, top: rightY + 1, width: captionRight)
-                writer.text(row.value, style, x: rightX + captionRight, top: rightY, width: rightWidth - captionRight, alignment: .right)
+                writer.paragraph(row.caption, styleLabel, x: rightX, top: rightY + 1, width: captionWidth)
+                writer.text(row.value, style, x: rightX, top: rightY, width: rightWidth, alignment: .right)
             }
-            rightY += style.font.lineHeight + 4
+            rightY += max(captionHeight + 1, style.font.lineHeight) + 4
         }
         rightY += 4
-        let dueHeight = styleBig.font.lineHeight + 10
+        let dueCaption = document.kind == .paymentTaxDocument ? label(.alreadyPaid) : label(.amountDue)
+        let dueAmount = money(totals.amountDue)
+        let dueCaptionWidth = max(40, rightWidth - writer.width(of: dueAmount, styleBig) - 8)
+        let dueCaptionHeight = writer.height(of: dueCaption, styleBodyBold, width: dueCaptionWidth)
+        let dueHeight = max(styleBig.font.lineHeight, dueCaptionHeight + 2) + 10
         if draw {
             writer.fill(CGRect(x: rightX - 6, y: rightY, width: rightWidth + 12, height: dueHeight), color: band)
-            let caption = document.kind == .paymentTaxDocument ? label(.alreadyPaid) : label(.amountDue)
-            writer.text(caption, styleBodyBold, x: rightX, top: rightY + 6, width: captionRight)
-            writer.text(money(totals.amountDue), styleBig, x: rightX + captionRight, top: rightY + 4, width: rightWidth - captionRight, alignment: .right)
+            writer.paragraph(dueCaption, styleBodyBold, x: rightX, top: rightY + 6, width: dueCaptionWidth)
+            writer.text(dueAmount, styleBig, x: rightX, top: rightY + 4, width: rightWidth, alignment: .right)
         }
         rightY += dueHeight
 
@@ -544,7 +595,8 @@ final class DocumentPDFRenderer {
         if document.kind.deductsAdvances, !document.advanceDeductions.isEmpty {
             y += 2
             for deduction in document.advanceDeductions {
-                let text = PDFStrings.deductionLine(number: deduction.documentNumber, paymentDate: deduction.paymentDate, language)
+                let text = PDFStrings.deductionLine(number: deduction.documentNumber, paymentDate: deduction.paymentDate,
+                                                    ratePercent: deduction.treatment.chargesVAT ? deduction.ratePercent : nil, language)
                     + ": " + money(-deduction.gross, deduction.currency ?? currency)
                 let height = writer.height(of: text, styleSmall, width: writer.contentWidth)
                 if draw { writer.paragraph(text, styleSmall, x: writer.contentLeft, top: y, width: writer.contentWidth) }
@@ -573,12 +625,57 @@ final class DocumentPDFRenderer {
         }
     }
 
-    private func qrPayload(_ kind: PaymentQRKind) -> String? {
+    private func qrPayload(_ kind: PaymentQRKind) throws -> String? {
         switch kind {
-        case .qrPlatba: return try? document.qrPlatba(totals: totals)?.encoded()
-        case .sepa: return try? document.sepaQRCode(totals: totals)?.encoded()
+        case .qrPlatba: return try document.qrPlatba(totals: totals)?.encoded()
+        case .sepa: return try document.sepaQRCode(totals: totals)?.encoded()
         case .none: return nil
         }
+    }
+
+    /// What stands in the code's place on the payment block.
+    private enum QRCodeState {
+        /// No code: the payment asks for none, or its format does not apply to the document (no payload).
+        case none
+        /// A draft: the dashed placeholder, because the code needs the number.
+        case placeholder
+        /// The code of an issued document.
+        case code(QRModules)
+        /// An issued document whose payload the core refused to encode (for example a supplier name over the
+        /// EPC's 70 characters): a visible notice, never a silent gap (ADR 0010).
+        case unavailable
+    }
+
+    private func qrCodeState(_ kind: PaymentQRKind) -> QRCodeState {
+        guard kind != .none else { return .none }
+        if isDraft { return .placeholder }
+        let payload: String?
+        do {
+            payload = try qrPayload(kind)
+        } catch {
+            return .unavailable
+        }
+        guard let payload else { return .none }
+        // QR platba travels as ISO-8859-1, as the core's QRPlatba documents; the EPC payload declares UTF-8.
+        guard let modules = QRModules.generate(payload, encoding: kind == .qrPlatba ? .isoLatin1 : .utf8) else { return .unavailable }
+        return .code(modules)
+    }
+
+    /// A one-line value that is never cut: at `style`, or at the largest smaller size down to 6 pt that fits
+    /// `width` (a deduction of a million CZK in the 68 pt summary column, a long unit in the quantity cell).
+    private func fittedNumber(_ writer: PDFPageWriter, _ text: String, _ style: PDFTextStyle,
+                              x: CGFloat, top: CGFloat, width: CGFloat, alignment: PDFAlignment = .right) {
+        var current = style
+        while writer.width(of: text, current) > width, current.font.size > 6 {
+            current = PDFTextStyle(font: PDFFont(name: style.font.name, size: current.font.size - 0.5), color: style.color)
+        }
+        writer.text(text, current, x: x, top: top, width: width, alignment: alignment)
+    }
+
+    /// A short label vertically centred in a box: the draft placeholder and the unavailable notice.
+    private func centred(_ writer: PDFPageWriter, _ text: String, in rect: CGRect) {
+        let height = writer.height(of: text, styleLabel, width: rect.width - 10)
+        writer.paragraph(text, styleLabel, x: rect.minX + 5, top: rect.minY + (rect.height - height) / 2, width: rect.width - 10)
     }
 
     private func drawPayment(_ writer: PDFPageWriter) {
@@ -603,34 +700,55 @@ final class DocumentPDFRenderer {
 
         let rowHeight: CGFloat = 13
         let qrSide = DocumentPDF.qrCodeSide
-        let showsQR = qrKind != .none
+        // The code is computed before anything is drawn, so the block is laid out for what it will show.
+        let qrState = qrCodeState(qrKind)
+        let showsQR: Bool
+        switch qrState {
+        case .none: showsQR = false
+        case .placeholder, .code, .unavailable: showsQR = true
+        }
         let qrBlockHeight = showsQR ? qrSide + styleLabel.font.lineHeight + 4 : 0
-        let textHeight = styleLabel.font.lineHeight + 4 + CGFloat(rows.count) * rowHeight
+        let textWidth = writer.contentWidth - (showsQR ? qrSide + 24 : 0)
+        let captionWidth: CGFloat = min(170, textWidth * 0.45)
+        let valueWidth = textWidth - captionWidth - columnGap
+        // A value wider than its column (a long bank name) wraps, and its row grows with it.
+        let wraps = rows.map { writer.width(of: $0.1, styleBody) > valueWidth }
+        let heights = rows.indices.map { index in
+            wraps[index] ? max(rowHeight, writer.height(of: rows[index].1, styleBody, width: valueWidth) + 2) : rowHeight
+        }
+        let textHeight = styleLabel.font.lineHeight + 4 + heights.reduce(CGFloat(0), +)
         writer.move(10)
         writer.ensure(max(textHeight, qrBlockHeight) + 4)
         let top = writer.y
-        let textWidth = writer.contentWidth - (showsQR ? qrSide + 24 : 0)
         var y = top
         y += writer.text(label(.paymentDetails), styleLabel, x: writer.contentLeft, top: y, width: textWidth)
         y += 4
-        let captionWidth: CGFloat = min(170, textWidth * 0.45)
-        for (caption, value) in rows {
-            writer.text(caption, styleLabel, x: writer.contentLeft, top: y + 1, width: captionWidth)
-            writer.text(value, styleBody, x: writer.contentLeft + captionWidth + columnGap, top: y, width: textWidth - captionWidth - columnGap)
-            y += rowHeight
+        for (index, row) in rows.enumerated() {
+            writer.text(row.0, styleLabel, x: writer.contentLeft, top: y + 1, width: captionWidth)
+            let valueX = writer.contentLeft + captionWidth + columnGap
+            if wraps[index] {
+                writer.paragraph(row.1, styleBody, x: valueX, top: y, width: valueWidth)
+            } else {
+                writer.text(row.1, styleBody, x: valueX, top: y, width: valueWidth)
+            }
+            y += heights[index]
         }
 
         if showsQR {
             let rect = CGRect(x: writer.contentRight - qrSide, y: top, width: qrSide, height: qrSide)
-            if isDraft {
+            switch qrState {
+            case .placeholder:
                 // A draft has no variable symbol yet, so its code could not be matched to a payment (design-system.md §8.8).
                 writer.dashedBox(rect, color: grey)
-                let placeholder = PDFStrings.qrPlaceholder(language)
-                let height = writer.height(of: placeholder, styleLabel, width: rect.width - 10)
-                writer.paragraph(placeholder, styleLabel, x: rect.minX + 5, top: rect.minY + (rect.height - height) / 2, width: rect.width - 10)
-            } else if let payload = qrPayload(qrKind), let modules = QRModules.generate(payload) {
+                centred(writer, PDFStrings.qrPlaceholder(language), in: rect)
+            case .code(let modules):
                 writer.qrCode(modules, in: rect, color: ink)
                 writer.text(PDFStrings.qrCaption(qrKind), styleLabel, x: rect.minX - 10, top: rect.maxY + 3, width: rect.width + 20, alignment: .center)
+            case .unavailable:
+                writer.dashedBox(rect, color: grey)
+                centred(writer, PDFStrings.qrUnavailable(language), in: rect)
+            case .none:
+                break
             }
         }
         writer.moveTo(max(y, top + qrBlockHeight) + 6)

@@ -6,10 +6,12 @@ import Foundation
 /// the PDF has its own sizes and does not follow the HIG text styles (design-system.md §3).
 struct PDFFont {
     let ctFont: CTFont
+    let name: String
     let size: CGFloat
 
     init(name: String, size: CGFloat) {
         ctFont = CTFontCreateWithName(name as CFString, size, nil)
+        self.name = name
         self.size = size
     }
 

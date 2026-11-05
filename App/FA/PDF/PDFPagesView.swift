@@ -15,14 +15,14 @@ struct PDFPagesView: View {
             if failed {
                 Text(L.pdfPreviewUnavailable).textRole(.rowSecondary)
             }
-            ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+            ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                 Image(nsImage: page)
                     .resizable()
                     .aspectRatio(page.size.width / max(page.size.height, 1), contentMode: .fit)
                     .background(Color.white)
                     .frame(maxWidth: .infinity)
                     .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
-                    .accessibilityLabel(Text(L.pdfPageImage))
+                    .accessibilityLabel(Text(L.pdfPageOfPages(index + 1, pages.count)))
             }
         }
         .padding(Spacing.l)

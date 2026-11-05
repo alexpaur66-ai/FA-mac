@@ -175,7 +175,7 @@ struct MainSplitView: View {
                 recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft,
                 createFinalInvoice: { createFinalInvoice(from: $0) },
                 createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft,
-                pdfVersion: pdfVersion, pdfSaveFailure: $pdfSaveFailure)
+                pdfVersion: $pdfVersion, pdfSaveFailure: $pdfSaveFailure)
         }
     }
 

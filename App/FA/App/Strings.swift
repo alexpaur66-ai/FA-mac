@@ -288,7 +288,7 @@ enum L {
     static let showPreview = r("pdf.showPreview", "Show Preview")
     static let hidePreview = r("pdf.hidePreview", "Hide Preview")
     static let pdfPreviewUnavailable = r("pdf.previewUnavailable", "Preview unavailable.")
-    static let pdfPageImage = r("pdf.pageImage", "Page of the document")
+    static func pdfPageOfPages(_ page: Int, _ count: Int) -> LocalizedStringResource { r("pdf.pageOfPages", "Page \(page) of \(count)") }
     static let pdfRow = r("pdf.row", "PDF")
     static let pdfNotSavedYet = r("pdf.notSavedYet", "Kept in the app, not saved as a file yet.")
     static let pdfFileMoved = r("pdf.fileMoved", "File moved – use Save PDF…")
@@ -296,6 +296,7 @@ enum L {
     static func pdfSaveFailed(_ folder: String) -> LocalizedStringResource { r("pdf.saveFailed", "PDF couldn't be saved to \(folder).") }
     static func pdfWillBeSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.willBeSavedTo", "Will be saved to \(path)") }
     static let pdfNoFolder = r("pdf.noFolder", "No PDF folder chosen: the PDF stays in the app until you use Save PDF….")
+    static let pdfAutoSaveOff = r("pdf.autoSaveOff", "Automatic saving is off: the PDF stays in the app until you use Save PDF….")
     static let pdfSection = r("pdf.section", "PDF")
     static let pdfFolder = r("pdf.folder", "PDF folder")
     static let pdfFolderPrompt = r("pdf.folderPrompt", "Choose the folder where issued documents are saved as PDF files.")
