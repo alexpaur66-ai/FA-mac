@@ -327,7 +327,7 @@ public struct DocumentStore: Sendable {
                                             relatedPaymentID: relatedPaymentID, note: note, createdAt: stamp)
         try payment.insert(db)
         try AuditLog.append(db, entity: "document", id: documentID, action: "payment",
-                            details: ["kind": kind.rawValue, "amount": amount.description, "on": day.isoString], at: stamp)
+                            details: ["payment": id, "kind": kind.rawValue, "amount": amount.description, "on": day.isoString], at: stamp)
         return try payment.payment(receiptIssued: false)
     }
 

@@ -123,6 +123,10 @@ struct MainSplitView: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
             documents.restart()
         }
+        // A Settings save (company, accounts, series, document defaults) reaches the open editor at once.
+        .onReceive(NotificationCenter.default.publisher(for: .settingsDidSave).receive(on: RunLoop.main)) { _ in
+            editor?.refreshReferenceData()
+        }
         // Quit writes the open draft at once: autosave's delay must not lose the last edits. AppKit posts
         // the notification on the main thread, synchronously, just before the process exits.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in

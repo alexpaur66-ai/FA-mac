@@ -33,6 +33,10 @@ jobs:
     name: Package tests and app build (macOS)
     runs-on: macos-15
     timeout-minutes: 40
+    env:
+      # Xcode 26 (Swift 6.2, macOS 26 SDK): the toolchain the app is built with on the Mac, so the
+      # `#if compiler(>=6.2)` / macOS 26 branches compile here too. The deployment target stays macOS 14.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Tool versions

@@ -1088,6 +1088,9 @@ import InvoicingCore
         _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
         #expect(try store.payment(ofReceipt: "dd1")?.id == payment.id)
         #expect(try store.payments(for: advance.id).first?.receiptDocumentID == "dd1")
+        // Both records name the one payment, so the trail reads payment · paymentDeleted · payment for one id.
+        let recorded = try AuditLog(database).events(entity: "document", id: advance.id).filter { $0.action == "payment" }
+        #expect(recorded.map { $0.details?["payment"] } == [payment.id, payment.id])
 
         // One id, one row: a second payment under it is refused by the database.
         #expect(throws: DatabaseError.self) {

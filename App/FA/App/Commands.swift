@@ -91,7 +91,7 @@ struct AppCommands: Commands {
                 .disabled(actions == nil)
             Divider()
             Button { actions?.document.duplicate?() } label: {
-                Text(actions?.document.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicate)
+                Text(actions?.document.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicateAsDraft)
             }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(actions?.document.duplicate == nil)
@@ -278,7 +278,11 @@ struct AppCommands: Commands {
             Text(L.menuVATTreatment)
         }
         .disabled(editor == nil)
-        Button { editor?.requestRateFocus() } label: { Text(L.menuEnterRate) }
+        Button {
+            // The preview hides the rate form: the editor comes back first and takes the request (recheck N06).
+            if actions?.previewShown == true { actions?.togglePreview?() }
+            editor?.requestRateFocus()
+        } label: { Text(L.menuEnterRate) }
             .disabled(editor?.needsExchangeRate != true)
     }
 

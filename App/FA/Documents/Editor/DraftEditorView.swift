@@ -55,6 +55,7 @@ struct DraftEditorView: View {
     let duplicate: @MainActor (String) -> Void
 
     @Environment(\.locale) private var locale
+    @Environment(\.textScale) private var textScale
     @Binding var issueSheetPresented: Bool
     /// View ▸ Show Preview: the live PDF preview takes the editor's place; the toolbar and Issue stay.
     @Binding var previewShown: Bool
@@ -62,13 +63,16 @@ struct DraftEditorView: View {
     @State private var changingRate = false
 
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
-    private static let qtyWidth: CGFloat = 72
-    private static let unitWidth: CGFloat = 84
-    private static let priceWidth: CGFloat = 110
-    private static let discountWidth: CGFloat = 72
-    private static let rateWidth: CGFloat = 90
-    private static let totalWidth: CGFloat = 120
     private static let markerWidth: CGFloat = 20
+
+    // The fixed columns at the system text size; View ▸ Bigger scales them with the text, so the cells keep
+    // holding their numbers and the grid scrolls sideways instead (ADR 0009).
+    private var qtyWidth: CGFloat { 72 * textScale }
+    private var unitWidth: CGFloat { 84 * textScale }
+    private var priceWidth: CGFloat { 110 * textScale }
+    private var discountWidth: CGFloat { 72 * textScale }
+    private var rateWidth: CGFloat { 90 * textScale }
+    private var totalWidth: CGFloat { 120 * textScale }
 
     var body: some View {
         Group {
@@ -99,16 +103,16 @@ struct DraftEditorView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 // The totals bar stays visible while the content scrolls (design-system.md §8.6).
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        totalsBar(document)
-                        Divider()
-                    }
-                    .background(.background)
+                .modifier(TotalsBarAttachment(bar: totalsBar(document)))
+                .onAppear {
+                    applyFocusRequest()
+                    // Enter Rate… chosen while the preview was shown: the editor is back and takes it.
+                    if model.takeRateFocusRequest() { focusRate() }
                 }
-                .onAppear { applyFocusRequest() }
                 .onChange(of: model.focusRequestVersion) { _, _ in applyFocusRequest() }
-                .onChange(of: model.rateFocusRequest) { _, _ in focusRate() }
+                .onChange(of: model.rateFocusRequest) { _, _ in
+                    if model.takeRateFocusRequest() { focusRate() }
+                }
                 .onChange(of: focus) { _, newValue in model.focusedLineID = newValue?.lineID }
             } else if let error = model.loadError {
                 ContentUnavailableView {
@@ -447,7 +451,7 @@ struct DraftEditorView: View {
                 // "30 days" and the date, linked: each updates the other (screens-flows.md §2c).
                 HStack(spacing: Spacing.m) {
                     DueDaysField(model: model)
-                        .frame(width: 56)
+                        .frame(width: 56 * textScale)
                     Text(model.dueDays == 1 ? L.dueDaysOne : L.dueDays(model.dueDays)).textRole(.body)
                     DatePicker(selection: dayBinding(document.dueDate) { model.setDueDate($0) }, displayedComponents: .date) {
                         Text(L.fieldDue)
@@ -603,12 +607,12 @@ struct DraftEditorView: View {
     private var lineHeader: some View {
         HStack(spacing: Spacing.s) {
             Text(L.colDescription).frame(minWidth: 200, maxWidth: .infinity, alignment: .leading)
-            Text(L.colQty).frame(width: Self.qtyWidth, alignment: .trailing)
-            Text(L.colUnit).frame(width: Self.unitWidth, alignment: .leading)
-            Text(L.colUnitPrice).frame(width: Self.priceWidth, alignment: .trailing)
-            Text(L.colDiscount).frame(width: Self.discountWidth, alignment: .trailing)
-            Text(L.colVATRate).frame(width: Self.rateWidth, alignment: .leading)
-            Text(L.colLineTotal).frame(width: Self.totalWidth, alignment: .trailing)
+            Text(L.colQty).frame(width: qtyWidth, alignment: .trailing)
+            Text(L.colUnit).frame(width: unitWidth, alignment: .leading)
+            Text(L.colUnitPrice).frame(width: priceWidth, alignment: .trailing)
+            Text(L.colDiscount).frame(width: discountWidth, alignment: .trailing)
+            Text(L.colVATRate).frame(width: rateWidth, alignment: .leading)
+            Text(L.colLineTotal).frame(width: totalWidth, alignment: .trailing)
             Color.clear.frame(width: Self.markerWidth, height: 1)
         }
         .textRole(.caption)
@@ -624,7 +628,7 @@ struct DraftEditorView: View {
                         model: model, focus: $focus, focusValue: .quantity(line.id),
                         commit: { value in model.setLine(line.id) { $0.quantity = value } },
                         onSubmit: { moveDown(from: .quantity(line.id)) })
-                .frame(width: Self.qtyWidth)
+                .frame(width: qtyWidth)
             HStack(spacing: 0) {
                 LineTextCell(label: L.colUnit, value: line.unit ?? "", focus: $focus, focusValue: .unit(line.id),
                              commit: { value in model.setLine(line.id) { $0.unit = value.isEmpty ? nil : value } },
@@ -642,7 +646,7 @@ struct DraftEditorView: View {
                 .frame(width: 20)
                 .accessibilityLabel(Text(L.colUnit))
             }
-            .frame(width: Self.unitWidth)
+            .frame(width: unitWidth)
             AmountField(cell: NumberCell(lineID: line.id, column: .unitPrice), label: L.colUnitPrice, value: line.unitPrice, fractionLength: 2...2,
                         model: model, focus: $focus, focusValue: .price(line.id),
                         // Stored as shown and printed: the price is rounded to the currency's minor units, so
@@ -652,14 +656,14 @@ struct DraftEditorView: View {
                             model.setLine(line.id) { $0.unitPrice = value.rounded(scale: scale) }
                         },
                         onSubmit: { moveDown(from: .price(line.id)) })
-                .frame(width: Self.priceWidth)
+                .frame(width: priceWidth)
             AmountField(cell: NumberCell(lineID: line.id, column: .discount), label: L.colDiscount, value: line.discountPercent, fractionLength: 0...2,
                         model: model, focus: $focus, focusValue: .discount(line.id),
                         commit: { value in model.setLine(line.id) { $0.discountPercent = value } },
                         onSubmit: { moveDown(from: .discount(line.id)) })
-                .frame(width: Self.discountWidth)
+                .frame(width: discountWidth)
             rateCell(line, document: document)
-                .frame(width: Self.rateWidth, alignment: .leading)
+                .frame(width: rateWidth, alignment: .leading)
             Group {
                 if let amounts = model.lineAmounts(at: index) {
                     MoneyText(amount: amounts.gross, currency: document.currency.code, locale: locale)
@@ -667,7 +671,7 @@ struct DraftEditorView: View {
                     Text(verbatim: "—").textRole(.amountSecondary)
                 }
             }
-            .frame(width: Self.totalWidth, alignment: .trailing)
+            .frame(width: totalWidth, alignment: .trailing)
             // The row's problem from the validator (design-system.md §8.5 "row invalid").
             Group {
                 if let problem = model.lineProblem(line.id, locale: locale) {
@@ -716,28 +720,27 @@ struct DraftEditorView: View {
     private func deductions(_ document: Document) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.deductionsTitle).textRole(.sectionTitle)
-            let numbers = Self.orderedNumbers(document.advanceDeductions)
-            ForEach(numbers, id: \.self) { number in
-                let rows = document.advanceDeductions.filter { $0.documentNumber == number }
+            // One row per advance (design check E068): its number with the tax documents deducted, the days
+            // the payments were received, the VAT taxed in CZK and the summed gross; the button drops them all.
+            ForEach(deductionGroups(document)) { group in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.l) {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        if let advance = model.advanceNumber(ofReceipt: number, in: documents.states) {
-                            Text(L.deductionRow(number, advance)).textRole(.documentNumber)
+                        let receipts = group.receiptNumbers.joined(separator: ", ")
+                        if let advance = group.advanceNumber {
+                            Text(L.deductionAdvanceRow(advance, receipts)).textRole(.documentNumber)
                         } else {
-                            Text(verbatim: number).textRole(.documentNumber)
+                            Text(verbatim: receipts).textRole(.documentNumber)
                         }
                         HStack(spacing: Spacing.s) {
-                            if let day = rows.first?.paymentDate {
-                                DayText(day).textRole(.rowSecondary)
-                            }
-                            if let vatCZK = Self.vatTaxedCZK(rows) {
-                                Text(L.vatTaxedCZK(MoneyText.format(vatCZK, currency: "CZK", locale: locale))).textRole(.rowSecondary)
+                            Text(verbatim: group.paymentDays.map { $0.formatted(locale) }.joined(separator: ", ")).textRole(.rowSecondary)
+                            if let vatCZK = Self.vatTaxedCZK(group.rows) {
+                                Text(L.vatTaxedCZK(MoneyText.format(vatCZK, currency: "CZK", locale: locale))).textRole(.amountSecondary)
                             }
                         }
                     }
                     Spacer()
-                    MoneyText(amount: rows.reduce(Decimal(0)) { $0 + $1.gross }, currency: document.currency.code, locale: locale)
-                    Button(role: .destructive) { model.removeDeductions(ofDocumentNumber: number) } label: {
+                    MoneyText(amount: group.rows.reduce(Decimal(0)) { $0 + $1.gross }, currency: document.currency.code, locale: locale)
+                    Button(role: .destructive) { model.removeDeductions(ofDocumentNumbers: group.receiptNumbers) } label: {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
@@ -776,6 +779,39 @@ struct DraftEditorView: View {
         return deductions.compactMap { seen.insert($0.documentNumber).inserted ? $0.documentNumber : nil }
     }
 
+    /// The deductions of one advance: its number (when the lists know the receipts' advance), the tax
+    /// documents deducted and their rows.
+    private struct DeductionGroup: Identifiable {
+        let id: String
+        let advanceNumber: String?
+        var receiptNumbers: [String]
+        var rows: [AdvanceDeduction]
+
+        /// The days the payments were received, each once, in row order.
+        var paymentDays: [CalendarDay] {
+            var seen: Set<CalendarDay> = []
+            return rows.compactMap { seen.insert($0.paymentDate).inserted ? $0.paymentDate : nil }
+        }
+    }
+
+    /// Receipts grouped by their advance, in the order they were listed; a receipt whose advance the lists
+    /// do not know stands on its own.
+    private func deductionGroups(_ document: Document) -> [DeductionGroup] {
+        var groups: [DeductionGroup] = []
+        for number in Self.orderedNumbers(document.advanceDeductions) {
+            let rows = document.advanceDeductions.filter { $0.documentNumber == number }
+            let advance = model.advanceNumber(ofReceipt: number, in: documents.states)
+            let key = advance ?? number
+            if let index = groups.firstIndex(where: { $0.id == key }) {
+                groups[index].receiptNumbers.append(number)
+                groups[index].rows.append(contentsOf: rows)
+            } else {
+                groups.append(DeductionGroup(id: key, advanceNumber: advance, receiptNumbers: [number], rows: rows))
+            }
+        }
+        return groups
+    }
+
     /// The VAT the advance was taxed with, in CZK: converted at the advance's rate for a foreign currency
     /// (§ 37a odst. 2 písm. b) ZDPH); nil when a row has no rate.
     private static func vatTaxedCZK(_ rows: [AdvanceDeduction]) -> Decimal? {
@@ -809,6 +845,34 @@ struct DraftEditorView: View {
             .padding(.top, Spacing.s)
         } label: {
             Text(L.notesOnPDF).textRole(.sectionTitle)
+        }
+    }
+}
+
+/// The totals bar pinned above the scrolling content (design-system.md §8.6): on macOS 26 a safe-area bar
+/// with the system's scroll edge effect, before that an opaque inset with a divider (design check E035).
+private struct TotalsBarAttachment<Bar: View>: ViewModifier {
+    let bar: Bar
+
+    @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            content.safeAreaBar(edge: .top, spacing: 0) { bar }
+        } else {
+            inset(content)
+        }
+        #else
+        inset(content)
+        #endif
+    }
+
+    private func inset(_ content: Content) -> some View {
+        content.safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                bar
+                Divider()
+            }
+            .background(.background)
         }
     }
 }
@@ -932,15 +996,13 @@ struct ClientField<Focus: Hashable>: View {
         .overlay(RoundedRectangle(cornerRadius: Radius.m).stroke(.separator))
     }
 
-    /// Name, then the defaults the client brings (currency · term · treatment) and the caution chips.
+    /// Name, then "IČO · country · default currency · document language · VAT treatment" (design-system.md
+    /// §8.4), so a client found by its IČO shows it, and the caution chips.
     private func suggestionRow(_ customer: Customer) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(verbatim: customer.party.name).textRole(.body)
             HStack(spacing: Spacing.s) {
-                let term = customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays)
-                Text(L.clientDefaults(customer.currency.code, String(localized: term),
-                                      String(localized: TreatmentChoice(customer.vatStatus.defaultServiceTreatment).title)))
-                    .textRole(.rowSecondary)
+                Text(Self.suggestionLine(customer)).textRole(.rowSecondary)
                 if customer.party.vatIdentifier == nil, customer.vatStatus.defaultServiceTreatment == .reverseChargeEU {
                     chip(L.vatIDMissing)
                 }
@@ -949,6 +1011,16 @@ struct ClientField<Focus: Hashable>: View {
                 }
             }
         }
+    }
+
+    static func suggestionLine(_ customer: Customer) -> LocalizedStringResource {
+        let country = customer.party.address.countryCode
+        let language = String(localized: customer.language == .czech ? L.languageCzech : L.languageEnglish)
+        let treatment = String(localized: TreatmentChoice(customer.vatStatus.defaultServiceTreatment).title)
+        if let ico = customer.party.identificationNumber?.digits {
+            return L.clientSuggestionLine(ico, country, customer.currency.code, language, treatment)
+        }
+        return L.clientSuggestionLineNoICO(country, customer.currency.code, language, treatment)
     }
 
     private func chip(_ text: LocalizedStringResource) -> some View {
@@ -1081,25 +1153,29 @@ struct AmountField<Focus: Hashable>: View {
                     RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
                 }
                 .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
-                // A rebuilt cell (after the preview, a relayout) shows the stored valid value, and the
-                // invalid text of a cell that goes away dies with it: the model must not keep counting it.
+                // A rebuilt cell (after the preview, a relayout) shows the invalid text it held, still ⛔,
+                // or the stored value (screens-flows.md §2c: never lose input).
                 .onAppear {
-                    text = formatted(value)
-                    setInvalid(false)
+                    if let kept = model.invalidText(of: cell) {
+                        text = kept
+                        invalid = true
+                    } else {
+                        text = formatted(value)
+                        setInvalid(nil)
+                    }
                 }
-                .onDisappear { model.setCell(cell, invalid: false) }
                 .onChange(of: value) { _, newValue in
                     guard !isFocused else { return }
                     text = formatted(newValue)
-                    setInvalid(false)
+                    setInvalid(nil)
                 }
                 .onChange(of: text) { _, newText in
                     guard isFocused else { return }
                     if let parsed = parse(newText) {
-                        setInvalid(false)
+                        setInvalid(nil)
                         if parsed != value { commit(parsed) }
                     } else {
-                        setInvalid(true)
+                        setInvalid(newText)
                         if let original, original != value { commit(original) }
                     }
                 }
@@ -1135,25 +1211,26 @@ struct AmountField<Focus: Hashable>: View {
     /// Shows the canonical form of a valid number; invalid text stays until it is fixed or reverted.
     private func finish() {
         if let parsed = parse(text) {
-            setInvalid(false)
+            setInvalid(nil)
             if parsed != value { commit(parsed) }
             text = formatted(parsed)
         } else {
-            setInvalid(true)
+            setInvalid(text)
         }
     }
 
     private func revert() {
         let restored = original ?? value
-        setInvalid(false)
+        setInvalid(nil)
         if restored != value { commit(restored) }
         text = formatted(restored)
     }
 
-    /// Always tells the model (its `setCell` ignores a repeat), so a rebuilt field cannot leave a stale ⛔.
-    private func setInvalid(_ flag: Bool) {
+    /// Always tells the model (its `setCell` ignores a repeat), which keeps the text for a rebuilt cell.
+    private func setInvalid(_ invalidText: String?) {
+        let flag = invalidText != nil
         if invalid != flag { invalid = flag }
-        model.setCell(cell, invalid: flag)
+        model.setCell(cell, invalidText: invalidText)
     }
 
     private func formatted(_ amount: Decimal) -> String {
@@ -1207,19 +1284,24 @@ struct VATRateField<Focus: Hashable>: View {
                 RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
             }
             .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
+            // A rebuilt cell shows the invalid text it held, still ⛔, or the rate (screens-flows.md §2c); a
+            // treatment without a rate drops the entry in the model (`dropRateCellsOfUntaxedLines`).
             .onAppear {
-                text = display(kind)
-                setInvalid(false)
+                if let kept = model.invalidText(of: cell) {
+                    text = kept
+                    invalid = true
+                } else {
+                    text = display(kind)
+                    setInvalid(nil)
+                }
             }
-            // Gone with the preview, a relayout or a treatment without a rate: its text no longer blocks Issue.
-            .onDisappear { model.setCell(cell, invalid: false) }
             .onChange(of: kind) { _, newKind in
                 guard !isFocused else { return }
                 text = display(newKind)
-                setInvalid(false)
+                setInvalid(nil)
             }
             .onChange(of: day) { _, _ in
-                if !isFocused { text = display(kind) }
+                if !isFocused, !invalid { text = display(kind) }
             }
             .onChange(of: text) { _, newText in
                 guard isFocused else { return }
@@ -1234,7 +1316,7 @@ struct VATRateField<Focus: Hashable>: View {
             }
             .onKeyPress(.escape) {
                 if let original, original != kind { commit(original) }
-                setInvalid(false)
+                setInvalid(nil)
                 text = display(original ?? kind)
                 return .handled
             }
@@ -1261,23 +1343,24 @@ struct VATRateField<Focus: Hashable>: View {
     private func apply(_ text: String, finishing: Bool) {
         let trimmed = text.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
         if let value = DecimalInput.parsePercent(trimmed), let rate = rates.first(where: { $0.percent == value }) {
-            setInvalid(false)
+            setInvalid(nil)
             if rate.kind != kind { commit(rate.kind) }
             if finishing { self.text = display(rate.kind) }
         } else if trimmed.isEmpty || text == display(kind) {
             // Empty, or the cell's own display left untouched ("Not in force"): the validator reports a
             // rate that is not in force; tabbing through is not a typing error.
-            setInvalid(false)
+            setInvalid(nil)
             if finishing { self.text = display(kind) }
         } else {
-            setInvalid(true)
+            setInvalid(text)
         }
     }
 
-    /// Always tells the model (its `setCell` ignores a repeat), so a rebuilt field cannot leave a stale ⛔.
-    private func setInvalid(_ flag: Bool) {
+    /// Always tells the model (its `setCell` ignores a repeat), which keeps the text for a rebuilt cell.
+    private func setInvalid(_ invalidText: String?) {
+        let flag = invalidText != nil
         if invalid != flag { invalid = flag }
-        model.setCell(cell, invalid: flag)
+        model.setCell(cell, invalidText: invalidText)
     }
 
     private func display(_ kind: VATRateKind) -> String {
@@ -1304,6 +1387,7 @@ struct RateEntryForm<Focus: Hashable>: View {
     let focusValue: Focus
 
     @Environment(\.locale) private var locale
+    @Environment(\.textScale) private var textScale
     @State private var text = ""
     @State private var day = Date()
     @State private var importing = false
@@ -1327,7 +1411,7 @@ struct RateEntryForm<Focus: Hashable>: View {
                         Text(L.rateFieldLabel(document.currency.code))
                     }
                     .textRole(.amount)
-                    .frame(width: 120)
+                    .frame(width: 120 * textScale)
                     .focused(focus, equals: focusValue)
                     .overlay {
                         RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
@@ -1373,6 +1457,7 @@ struct RateChangePopover: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
+    @Environment(\.textScale) private var textScale
     @State private var text: String
     @State private var day: Date
     @FocusState private var focused: Bool
@@ -1392,7 +1477,7 @@ struct RateChangePopover: View {
             HStack(spacing: Spacing.m) {
                 TextField(text: $text) { Text(L.rateFieldLabel(rate.currency.code)) }
                     .textRole(.amount)
-                    .frame(width: 120)
+                    .frame(width: 120 * textScale)
                     .focused($focused)
                     .onSubmit { save() }
                 DatePicker(selection: $day, displayedComponents: .date) { Text(L.rateDateLabel) }
@@ -1414,7 +1499,7 @@ struct RateChangePopover: View {
             }
         }
         .padding(Spacing.l)
-        .frame(width: 380)
+        .frame(width: 380 * textScale)
         .onAppear { focused = true }
     }
 

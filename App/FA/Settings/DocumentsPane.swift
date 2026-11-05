@@ -113,6 +113,7 @@ struct DocumentsPane: View {
         do {
             try stores.profile.save(updated)
             profile = updated
+            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             defaultsError = false
             defaultsMessage = L.saved
         } catch {
