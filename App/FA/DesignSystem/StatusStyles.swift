@@ -37,6 +37,7 @@ struct StatusStyle {
 ///
 /// Two independent axes: `settlement` and `isOverdue`. The model keeps both. On the badge, Overdue takes
 /// the word, tone and symbol, and the detail keeps the days and the open balance ("+12 dní · zbývá 1 000,00 €").
+/// The exception is an advance with a received payment that lacks its tax document, which wins (see `label`).
 struct DocumentStateInputs: Hashable, Sendable {
     /// The document type. The raw values match `InvoicingCore.DocumentKind`, so the data layer can map
     /// one to the other with `Kind(rawValue:)`.
@@ -61,8 +62,11 @@ struct DocumentStateInputs: Hashable, Sendable {
     var settlement: Settlement
     /// Axis 2: past the due date and not settled.
     var isOverdue = false
+    /// Advance requests: the client's advances need a payment tax document for each payment received.
+    /// False when they go straight to the final invoice (question 5 in screens-flows.md §6, ACCT).
+    var taxDocumentRequired = true
     /// Advance requests: every payment received so far has its own payment tax document (one per payment,
-    /// screens-flows.md §2d). The data layer also sets it when the client's documents need none (question 5, ACCT).
+    /// screens-flows.md §2d).
     var taxDocumentIssued = false
     /// Advance requests: an issued final invoice deducted it.
     var deductedInFinal = false
@@ -79,7 +83,7 @@ struct DocumentStateInputs: Hashable, Sendable {
         if kind == .paymentTaxDocument { return .issuedPaid }
         // Money received on an advance needs its tax document within the § 28 ZDPH deadline. That step is
         // the supplier's to take, so it wins over Overdue; an overpaid advance with its tax documents shows Overpaid.
-        if kind == .advanceRequest && !taxDocumentIssued {
+        if kind == .advanceRequest && taxDocumentRequired && !taxDocumentIssued {
             switch settlement {
             case .partlyPaid: return .partlyPaidTaxDocumentMissing
             case .paid, .overpaid: return .paidTaxDocumentMissing
@@ -92,7 +96,8 @@ struct DocumentStateInputs: Hashable, Sendable {
         case (.advanceRequest, .open):
             return .awaitingPayment
         case (.advanceRequest, .paid):
-            return .taxDocumentIssued
+            // Only claim a tax document when one was needed and issued.
+            return taxDocumentRequired ? .taxDocumentIssued : .paid
         case (_, .open):
             return .issued
         case (_, .partlyPaid):
