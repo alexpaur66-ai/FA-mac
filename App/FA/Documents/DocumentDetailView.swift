@@ -1,5 +1,5 @@
-// The detail column for one document: the issued view (read-only header, lock line, payments, the
-// prominent Record Payment), or the draft placeholder until the editor arrives (screens-flows.md §2b).
+// The detail column for one issued document: read-only header, lock line, payments, the prominent
+// Record Payment and the next step of the chain (screens-flows.md §2b). Drafts open in DraftEditorView.
 
 import InvoicingCore
 import InvoicingData
@@ -11,6 +11,8 @@ struct DocumentDetailView: View {
     let documentID: String
     let recordPayment: @MainActor (String) -> Void
     let deleteDraft: @MainActor (String) -> Void
+    /// Step 4 of the advance flow (screens-flows.md §2d): a final invoice draft that deducts this advance.
+    var createFinalInvoice: (@MainActor (String) -> Void)? = nil
 
     @State private var payments: [DocumentPayment] = []
     /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
@@ -204,6 +206,11 @@ struct DocumentDetailView: View {
                     Label { Text(L.recordPayment) } icon: { Image(systemName: "banknote") }
                 }
                 .buttonStyle(.borderedProminent)
+                if state.summary.kind == .advanceRequest, !state.deductedInFinal, let createFinalInvoice {
+                    Button { createFinalInvoice(documentID) } label: {
+                        Label { Text(L.createFinalInvoice) } icon: { Image(systemName: Symbols.finalInvoice) }
+                    }
+                }
             }
         }
     }

@@ -22,6 +22,9 @@ struct MainSplitView: View {
     @State private var resultLine: String?
     /// Bumped after every rate import, so the coverage column reloads beside the rates table.
     @State private var ratesVersion = 0
+    /// The editor of the selected draft; replaced when another draft is selected (ADR 0009).
+    @State private var editor: DraftEditorModel?
+    @State private var issueSheetPresented = false
 
     init(stores: Stores) {
         self.stores = stores
@@ -72,6 +75,9 @@ struct MainSplitView: View {
         }
         .frame(minWidth: LayoutMetrics.windowMin.width, minHeight: LayoutMetrics.windowMin.height)
         .focusedSceneValue(\.mainActions, mainActions)
+        .onChange(of: selectedDraftID, initial: true) { _, id in
+            syncEditor(id)
+        }
         .sheet(item: $sheet) { sheet in
             sheetView(sheet)
         }
@@ -145,10 +151,21 @@ struct MainSplitView: View {
         }
     }
 
-    private func documentDetail(_ id: String) -> some View {
-        DocumentDetailView(
-            stores: stores, documents: documents, documentID: id,
-            recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft)
+    @ViewBuilder private func documentDetail(_ id: String) -> some View {
+        if documents.state(id: id)?.summary.status == .draft {
+            if let editor, editor.documentID == id {
+                DraftEditorView(
+                    stores: stores, documents: documents, model: editor, onIssued: issued,
+                    newClient: { sheet = .client(nil) }, deleteDraft: deleteDraft, issueSheetPresented: $issueSheetPresented)
+            } else {
+                ProgressView()
+            }
+        } else {
+            DocumentDetailView(
+                stores: stores, documents: documents, documentID: id,
+                recordPayment: { sheet = .recordPayment($0) }, deleteDraft: deleteDraft,
+                createFinalInvoice: { createFinalInvoice(from: $0) })
+        }
     }
 
     private func placeholder(_ title: LocalizedStringResource, symbol: String) -> some View {
@@ -169,6 +186,20 @@ struct MainSplitView: View {
         }
     }
 
+    /// The selected document while it is a draft: the detail column shows its editor.
+    private var selectedDraftID: String? {
+        guard let id = selectedDocumentID, documents.state(id: id)?.summary.status == .draft else { return nil }
+        return id
+    }
+
+    /// One editor per selected draft; the old one writes its draft before it goes.
+    private func syncEditor(_ id: String?) {
+        guard editor?.documentID != id else { return }
+        editor?.saveNow()
+        issueSheetPresented = false
+        editor = id.map { DraftEditorModel(stores: stores, documentID: $0) }
+    }
+
     private var mainActions: MainActions {
         var actions = MainActions(
             show: show,
@@ -179,7 +210,15 @@ struct MainSplitView: View {
         let summary = state.summary
         if summary.status == .draft {
             actions.deleteDraft = { deleteDraft(id) }
+            actions.issue = { requestIssue(id) }
+            actions.duplicate = { duplicate(id) }
             return actions
+        }
+        if summary.kind != .paymentTaxDocument {
+            actions.duplicate = { duplicate(id) }
+        }
+        if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal {
+            actions.createFinalInvoice = { createFinalInvoice(from: id) }
         }
         if state.acceptsPayment {
             actions.recordPayment = { sheet = .recordPayment(id) }
@@ -205,8 +244,8 @@ struct MainSplitView: View {
         resultLine = nil
     }
 
-    /// New Invoice / New Advance Invoice: a draft with the company's and the selected client's defaults.
-    /// The draft editor arrives in the next step; until then the draft is shown read-only.
+    /// New Invoice / New Advance Invoice: a draft with the company's and the selected client's defaults,
+    /// opened in the editor.
     private func newDraft(_ kind: DocumentKind) {
         do {
             guard let profile = try stores.profile.load() else {
@@ -226,10 +265,93 @@ struct MainSplitView: View {
                 issueDate: today, dueDate: today.adding(days: customer?.paymentTermDays ?? profile.defaultPaymentTermDays),
                 footer: profile.footer)
             try stores.documents.saveDraft(document)
-            sidebar = .filter(.drafts)
-            documentSelection = [document.id]
+            openDraft(document.id)
         } catch {
             resultLine = ErrorText.message(error)
+        }
+    }
+
+    /// Shows a draft in Documents ▸ Drafts, where its editor opens.
+    private func openDraft(_ id: String) {
+        sidebar = .filter(.drafts)
+        documentSelection = [id]
+        resultLine = nil
+    }
+
+    /// Document ▸ Issue… (⌘↩): writes the draft and opens the review sheet over its editor.
+    private func requestIssue(_ id: String) {
+        guard let editor, editor.documentID == id else { return }
+        editor.saveNow()
+        issueSheetPresented = true
+    }
+
+    /// After Issue: the document leaves Drafts, so the list switches to All and keeps it selected; the
+    /// detail column shows the issued view (screens-flows.md §2c, "Afterwards").
+    private func issued(_ document: Document) {
+        issueSheetPresented = false
+        if sidebar == .filter(.drafts) { sidebar = .filter(.all) }
+        if sidebar.section == .documents { documentSelection = [document.id] }
+        resultLine = String(localized: L.issuedResult(document.number ?? ""))
+    }
+
+    /// Duplicate as Draft (⌘D): the lines, client, currency, language and notes of any invoice, advance or
+    /// final invoice, with today's dates, the client's current term and address, and no number, rate,
+    /// payment or deductions; those belong to the new document.
+    private func duplicate(_ id: String) {
+        do {
+            guard let source = try stores.documents.document(id: id), source.kind != .paymentTaxDocument else { return }
+            let profile = try stores.profile.load()
+            let customer = try source.customerID.flatMap { try stores.customers.customer(id: $0) }
+            let today = CalendarDay(Date(), in: .current)
+            let term = customer?.paymentTermDays ?? max(source.dueDate.days(since: source.issueDate), 0)
+            let copy = Document(
+                kind: source.kind, supplier: profile?.supplier ?? source.supplier, customer: customer?.party ?? source.customer,
+                customerID: source.customerID, language: source.language, currency: source.currency, pricing: source.pricing,
+                issueDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(source.lines),
+                orderReference: source.orderReference, note: source.note, footer: source.footer)
+            try stores.documents.saveDraft(copy)
+            openDraft(copy.id)
+        } catch {
+            resultLine = ErrorText.message(error)
+        }
+    }
+
+    /// Create Final Invoice… on an issued advance (screens-flows.md §2d, step 4): a final invoice draft
+    /// with the advance's lines and client, deducting every issued tax document of its payments that no
+    /// other final invoice deducts (§ 37a ZDPH; the deductions carry the advance's rate and exchange rate).
+    private func createFinalInvoice(from advanceID: String) {
+        do {
+            guard let advance = try stores.documents.document(id: advanceID),
+                  advance.kind == .advanceRequest, advance.status != .draft else { return }
+            let profile = try stores.profile.load()
+            let customer = try advance.customerID.flatMap { try stores.customers.customer(id: $0) }
+            let today = CalendarDay(Date(), in: .current)
+            let term = customer?.paymentTermDays ?? profile?.defaultPaymentTermDays ?? 14
+            var deductions: [AdvanceDeduction] = []
+            for payment in try stores.documents.payments(for: advanceID) where payment.isIncoming && payment.receiptIssued {
+                guard let receiptID = payment.receiptDocumentID,
+                      try stores.documents.deduction(ofReceipt: receiptID) == nil,
+                      let receipt = try stores.documents.document(id: receiptID) else { continue }
+                let totals = try DocumentTotals.compute(for: receipt)
+                deductions += receipt.advanceDeductions(totals: totals)
+            }
+            let final = Document(
+                kind: .finalInvoice, supplier: profile?.supplier ?? advance.supplier, customer: customer?.party ?? advance.customer,
+                customerID: advance.customerID, language: advance.language, currency: advance.currency, pricing: advance.pricing,
+                issueDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(advance.lines),
+                advanceDeductions: deductions, relatedDocumentNumber: advance.number,
+                orderReference: advance.orderReference, note: advance.note, footer: advance.footer)
+            try stores.documents.saveDraft(final)
+            openDraft(final.id)
+        } catch {
+            resultLine = ErrorText.message(error)
+        }
+    }
+
+    private static func copiedLines(_ lines: [DocumentLine]) -> [DocumentLine] {
+        lines.map { line in
+            DocumentLine(text: line.text, quantity: line.quantity, unit: line.unit, unitPrice: line.unitPrice,
+                         discountPercent: line.discountPercent, treatment: line.treatment)
         }
     }
 
@@ -255,7 +377,7 @@ struct MainSplitView: View {
         switch sheet {
         case .recordPayment(let id):
             if let state = documents.state(id: id) {
-                RecordPaymentSheet(stores: stores, state: state)
+                RecordPaymentSheet(stores: stores, state: state, openDraft: openDraft)
             }
         case .closure(let id, let kind):
             if let state = documents.state(id: id) {

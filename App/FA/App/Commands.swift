@@ -15,6 +15,9 @@ struct MainActions {
     var closeAdvanceUnpaid: (@MainActor () -> Void)?
     var markForCreditNote: (@MainActor () -> Void)?
     var reopen: (@MainActor () -> Void)?
+    var issue: (@MainActor () -> Void)?
+    var duplicate: (@MainActor () -> Void)?
+    var createFinalInvoice: (@MainActor () -> Void)?
 }
 
 private struct MainActionsKey: FocusedValueKey {
@@ -72,13 +75,18 @@ struct AppCommands: Commands {
         }
 
         CommandMenu(Text(L.menuDocument)) {
-            // Issue arrives with the draft editor and its review sheet.
-            Button {} label: { Text(L.issue) }
+            Button { actions?.issue?() } label: { Text(L.issue) }
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(true)
+                .disabled(actions?.issue == nil)
             Button { actions?.recordPayment?() } label: { Text(L.recordPayment) }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(actions?.recordPayment == nil)
+            Divider()
+            Button { actions?.duplicate?() } label: { Text(L.duplicate) }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(actions?.duplicate == nil)
+            Button { actions?.createFinalInvoice?() } label: { Text(L.createFinalInvoice) }
+                .disabled(actions?.createFinalInvoice == nil)
             Divider()
             Button { actions?.closeAdvanceUnpaid?() } label: { Text(L.closeAdvanceUnpaid) }
                 .disabled(actions?.closeAdvanceUnpaid == nil)

@@ -1,4 +1,5 @@
-// The small sheets of the document flow: Record Payment, and the two closing events (ADR 0007).
+// The small sheets of the document flow: Record Payment (with the tax-document step for advances), and
+// the two closing events (ADR 0007).
 
 import InvoicingCore
 import InvoicingData
@@ -7,6 +8,8 @@ import SwiftUI
 struct RecordPaymentSheet: View {
     let stores: Stores
     let state: DocumentState
+    /// Opens the draft payment tax document created for a payment on an advance (screens-flows.md §2d, step 2).
+    let openDraft: @MainActor (String) -> Void
 
     private enum Entry: Hashable {
         case received, refund
@@ -19,10 +22,13 @@ struct RecordPaymentSheet: View {
     @State private var entry: Entry = .received
     @State private var note = ""
     @State private var error: String?
+    /// The payment just recorded on an advance request; it needs its own tax document.
+    @State private var recorded: DocumentPayment?
 
-    init(stores: Stores, state: DocumentState) {
+    init(stores: Stores, state: DocumentState, openDraft: @escaping @MainActor (String) -> Void) {
         self.stores = stores
         self.state = state
+        self.openDraft = openDraft
         _amount = State(initialValue: state.outstanding.amount > 0 ? state.outstanding.amount : 0)
     }
 
@@ -31,6 +37,18 @@ struct RecordPaymentSheet: View {
             Text(L.rpTitle).textRole(.screenTitle)
             Text(verbatim: (state.summary.number ?? String(localized: L.draftTitle)) + " · " + state.summary.customerName)
                 .textRole(.rowSecondary)
+            if let recorded {
+                recordedStep(recorded)
+            } else {
+                form
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(minWidth: 440)
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: Spacing.l) {
             Form {
                 if state.settlement == .overpaid {
                     Picker(selection: $entry) {
@@ -61,8 +79,29 @@ struct RecordPaymentSheet: View {
                     .disabled(amount <= 0)
             }
         }
-        .padding(Spacing.xl)
-        .frame(minWidth: 440)
+    }
+
+    /// Step 2 of the advance flow: the money is in, and the tax document for it is due within 15 days of
+    /// the payment (§ 28 odst. 8 ZDPH). Create its draft now, or later from the Overview queue.
+    private func recordedStep(_ payment: DocumentPayment) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.l) {
+            Label {
+                Text(L.paymentRecordedAdvance).textRole(.body).fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            if let error {
+                Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button { dismiss() } label: { Text(L.later) }
+                    .keyboardShortcut(.cancelAction)
+                Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     private func record() {
@@ -72,11 +111,33 @@ struct RecordPaymentSheet: View {
         do {
             switch entry {
             case .received:
-                try stores.documents.recordPayment(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+                let payment = try stores.documents.recordPayment(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
+                if state.summary.kind == .advanceRequest {
+                    error = nil
+                    recorded = payment
+                    return
+                }
             case .refund:
                 try stores.documents.recordRefund(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
             }
             dismiss()
+        } catch {
+            self.error = ErrorText.message(error, locale: locale)
+        }
+    }
+
+    /// The draft tax document for the payment, linked to it at once (`attachReceipt`), so the editor and
+    /// the lists know which payment it records; the link is checked again when the draft is issued.
+    private func createTaxDocument(_ payment: DocumentPayment) {
+        do {
+            guard let advance = try stores.documents.document(id: state.id) else { return }
+            let today = CalendarDay(Date(), in: .current)
+            let receipt = Document.paymentTaxDocument(forAdvanceRequest: advance, received: payment.amount.amount,
+                                                      on: payment.paidOn, issueDate: today)
+            try stores.documents.saveDraft(receipt)
+            try stores.documents.attachReceipt(paymentID: payment.id, documentID: receipt.id)
+            dismiss()
+            openDraft(receipt.id)
         } catch {
             self.error = ErrorText.message(error, locale: locale)
         }
