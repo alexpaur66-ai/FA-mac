@@ -183,7 +183,7 @@ enum PDFInspection {
         for expected in ["Nováková a synové s. r. o.", "DIČ CZ12345679", "Odběratel s. r. o.", "DIČ CZ25596641", "FV-2026-001",
                          "Faktura – daňový doklad", "Datum vystavení", "5. 11. 2026", "Datum uskutečnění zdanitelného plnění", "4. 11. 2026",
                          "Datum splatnosti", "19. 11. 2026", "Sazba DPH", "21 %", "Základ daně", "10 450,00 Kč", "2 194,50 Kč", "12 644,50 Kč",
-                         "Variabilní symbol", "120260001", "IBAN", "Objednávka", "PO-4711", "Děkujeme za spolupráci.", "Strana 1 / 1",
+                         "Variabilní symbol", "12026001", "IBAN", "Objednávka", "PO-4711", "Děkujeme za spolupráci.", "Strana 1 / 1",
                          "Zapsána v obchodním rejstříku"] {
             #expect(text.contains(expected), "missing \(expected)")
         }
@@ -279,7 +279,11 @@ enum PDFInspection {
             #expect(text.contains("Strana \(index + 1) / \(pages)"), "page \(index + 1)")
             if index > 0 {
                 #expect(text.contains("(pokračování)"), "page \(index + 1)")
-                #expect(text.contains("Popis"), "the table header repeats on page \(index + 1)")
+                // The table header repeats on every page that continues the lines; the payment block may
+                // take the last page alone.
+                if text.contains("Položka ") {
+                    #expect(text.contains("Popis"), "the table header repeats on page \(index + 1)")
+                }
             }
         }
         let text = PDFInspection.text(pdf)

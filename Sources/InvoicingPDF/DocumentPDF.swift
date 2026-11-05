@@ -180,6 +180,39 @@ final class DocumentPDFRenderer {
 
     // MARK: Header: supplier and title
 
+    /// A right-aligned heading that is never cut: on one line at `size`, or at the largest smaller size down
+    /// to `minimum` that fits `width`; otherwise word-wrapped at `minimum`. Returns the height used.
+    private func fittedHeading(_ writer: PDFPageWriter, _ text: String, bold: Bool, size: CGFloat, minimum: CGFloat,
+                               color: CGColor, x: CGFloat, top: CGFloat, width: CGFloat) -> CGFloat {
+        var size = size
+        while true {
+            let style = PDFTextStyle(font: bold ? .bold(size) : .regular(size), color: color)
+            if writer.width(of: text, style) <= width {
+                return writer.text(text, style, x: x, top: top, width: width, alignment: .right)
+            }
+            if size <= minimum { break }
+            size -= 1
+        }
+        let style = PDFTextStyle(font: bold ? .bold(minimum) : .regular(minimum), color: color)
+        var lines: [String] = []
+        var current = ""
+        for word in text.split(separator: " ") {
+            let next = current.isEmpty ? String(word) : current + " " + String(word)
+            if current.isEmpty || writer.width(of: next, style) <= width {
+                current = next
+            } else {
+                lines.append(current)
+                current = String(word)
+            }
+        }
+        if !current.isEmpty { lines.append(current) }
+        var y = top
+        for line in lines {
+            y += writer.text(line, style, x: x, top: y, width: width, alignment: .right)
+        }
+        return y - top
+    }
+
     private func drawHeader(_ writer: PDFPageWriter) {
         let leftWidth = writer.contentWidth * 0.55
         let rightX = writer.contentLeft + leftWidth + 12
@@ -209,9 +242,14 @@ final class DocumentPDFRenderer {
         }
 
         var rightY = writer.y
-        rightY += writer.text(document.kind.title(language: .czech), styleTitle, x: rightX, top: rightY, width: rightWidth, alignment: .right)
+        // The title is the document's legal name (§ 29 ZDPH), so it is never truncated: it shrinks a little
+        // or wraps.
+        rightY += fittedHeading(writer, document.kind.title(language: .czech), bold: true, size: styleTitle.font.size, minimum: 12,
+                                color: styleTitle.color, x: rightX, top: rightY, width: rightWidth)
         if language == .english {
-            rightY += writer.text(document.kind.title(language: .english), styleSubtitle, x: rightX, top: rightY, width: rightWidth, alignment: .right)
+            rightY += 1
+            rightY += fittedHeading(writer, document.kind.title(language: .english), bold: false, size: styleSubtitle.font.size,
+                                    minimum: styleSubtitle.font.size, color: styleSubtitle.color, x: rightX, top: rightY, width: rightWidth)
         }
         rightY += 8
         rightY += writer.text(label(.documentNumber), styleLabel, x: rightX, top: rightY, width: rightWidth, alignment: .right)
