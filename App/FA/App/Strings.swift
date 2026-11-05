@@ -445,6 +445,7 @@ enum L {
     static func enterNumber(_ example: String) -> LocalizedStringResource { r("editor.enterNumber", "Enter a number, such as \(example)") }
     static func enterRateNumber(_ example: String) -> LocalizedStringResource { r("editor.enterRateNumber", "Enter the rate as a number, such as \(example)") }
     static func invalidCellRow(_ line: Int, _ column: String) -> LocalizedStringResource { r("editor.invalidCell", "Line \(line): \(column) is not a number") }
+    static func invalidRateRow(_ line: Int) -> LocalizedStringResource { r("editor.invalidRate", "Line \(line): VAT rate must be one of the rates in force") }
 
     static let base = r("editor.base", "Base")
     static let vat = r("editor.vat", "VAT")
@@ -472,6 +473,9 @@ enum L {
     static let rateAfterTaxPoint = r("editor.rateAfterTaxPoint", "The rate date cannot be after the date of taxable supply.")
     static func rateSavedForOtherDay(_ saved: String, _ needed: String) -> LocalizedStringResource {
         r("editor.rateSavedForOtherDay", "The rate was saved for \(saved); this document needs the rate for \(needed).")
+    }
+    static func rateAlreadyStored(_ day: String) -> LocalizedStringResource {
+        r("editor.rateAlreadyStored", "A rate for \(day) is already stored and was kept; use Change… on it to replace it.")
     }
 
     static let deductionsTitle = r("editor.deductions", "Advances deducted")

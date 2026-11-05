@@ -257,7 +257,8 @@ struct IssueSheet: View {
                 Text(L.rateDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
             }
         } else {
-            Text(L.rateMissing(document.currency.code, document.taxPoint.formatted(locale))).textRole(.body)
+            // The day whose rate is needed (the last working day on a weekend or holiday), as the form prefills it.
+            Text(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale))).textRole(.body)
         }
     }
 

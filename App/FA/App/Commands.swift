@@ -154,11 +154,10 @@ struct AppCommands: Commands {
             .disabled(editor == nil)
         Button { editor?.deleteFocusedLine() } label: { Text(L.deleteLine) }
             .disabled(editor?.focusedLineID == nil)
+        // No shortcuts for Delete Line and Move Line: screens-flows.md §1.4 keeps custom shortcuts few.
         Button { editor?.moveFocusedLine(by: -1) } label: { Text(L.moveLineUp) }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             .disabled(editor?.focusedLineID == nil)
         Button { editor?.moveFocusedLine(by: 1) } label: { Text(L.moveLineDown) }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(editor?.focusedLineID == nil)
         Divider()
         Picker(selection: Binding(get: { document?.kind ?? .invoice }, set: { kind in editor?.setKind(kind) })) {

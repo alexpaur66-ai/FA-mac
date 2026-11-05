@@ -126,7 +126,7 @@ ADR stands.
   and has no such row; the VAT-rate cell uses it where available.
 - **Rates**: Change… on a resolved rate replaces the stored rate of its day, so a mistyped manual rate is
   not frozen at issue and reused by the next document with that date.
-- **Keyboard**: Document ▸ Add Line Item (⌘L), Delete Line, Move Line Up/Down (⌥⌘↑/↓), Change Type,
+- **Keyboard**: Document ▸ Add Line Item (⌘L), Delete Line, Move Line Up/Down (no shortcuts, §1.4), Change Type,
   Currency, Document Language, VAT Treatment and Enter Rate… act on the editor of the selected draft.
   Duplicate moved to File ▸ New (⌘D) and names the document it copies.
 - **Numbers**: a numeric cell accepts either decimal separator (`DecimalInput`): with both kinds present

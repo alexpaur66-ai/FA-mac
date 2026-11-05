@@ -348,9 +348,11 @@ struct NumberCell: Hashable {
     }
 
     /// A new client brings its defaults: currency, language, due days, VAT treatment (screens-flows.md §2c).
-    /// A payment tax document keeps the client of its advance.
+    /// A payment tax document keeps the client of its advance. Picking the client already set changes
+    /// nothing, so the currency, due date, account and treatment the user chose stay.
     func setCustomer(_ id: String?) {
         guard document?.kind != .paymentTaxDocument else { return }
+        if id != nil, id == document?.customerID { return }
         let chosen = customers.first { $0.id == id }
         update { doc in
             // Deductions belong to the previous client's receipts; the store would refuse them at issue.
@@ -369,6 +371,7 @@ struct NumberCell: Hashable {
                 doc.lines[index].treatment = treatmentChoice.apply(to: doc.lines[index].treatment, exemptReference: exemptReference)
             }
         }
+        dropRateCellsOfUntaxedLines()
         refreshDeductionConflicts()
         refreshRate()
     }
@@ -388,17 +391,23 @@ struct NumberCell: Hashable {
     }
 
     /// The supplier and the client are copied onto the draft and frozen at issue. Until then the copies
-    /// follow the company profile and the client card.
+    /// follow the company profile and the client card. An account picked explicitly that Settings no
+    /// longer lists (removed, or replaced with another IBAN or BIC) falls back to the default account for
+    /// the currency, so the issued document never prints an account the company no longer has.
     func refreshSnapshots() {
         guard !discarded, let document else { return }
         let supplier = profile?.supplier
         let party = customer?.party
         let supplierChanged = supplier.map { $0 != document.supplier } ?? false
         let customerChanged = party.map { $0 != document.customer } ?? false
-        guard supplierChanged || customerChanged else { return }
+        let accountGone = profile.map { profile in
+            document.payment.map { !profile.bankConnections.contains($0.bankConnection) } ?? false
+        } ?? false
+        guard supplierChanged || customerChanged || accountGone else { return }
         update { doc in
             if let supplier { doc.supplier = supplier }
             if let party { doc.customer = party }
+            if accountGone { doc.payment = nil }
         }
     }
 
@@ -480,7 +489,20 @@ struct NumberCell: Hashable {
                 doc.lines[index].treatment = choice.apply(to: doc.lines[index].treatment, exemptReference: exemptReference)
             }
         }
+        dropRateCellsOfUntaxedLines()
         refreshRate()
+    }
+
+    /// A line under reverse charge, outside EU or exempt has no VAT rate cell, so typed text that was not
+    /// a rate in force no longer blocks Issue.
+    private func dropRateCellsOfUntaxedLines() {
+        guard let document else { return }
+        let taxable = Set(document.lines.compactMap { line -> String? in
+            if case .taxable = line.treatment { return line.id }
+            return nil
+        })
+        let kept = invalidCells.filter { $0.column != .vatRate || taxable.contains($0.lineID) }
+        if kept != invalidCells { invalidCells = kept }
     }
 
     func setExemptReference(_ text: String) {
@@ -637,6 +659,7 @@ struct NumberCell: Hashable {
 
     /// A cell holds text that is not a number (or has been fixed). Each invalid cell is a ⛔ row.
     func setCell(_ cell: NumberCell, invalid: Bool) {
+        guard invalidCells.contains(cell) != invalid else { return }
         if invalid {
             invalidCells.insert(cell)
         } else {
@@ -651,7 +674,11 @@ struct NumberCell: Hashable {
         return invalidCells
             .compactMap { cell in order[cell.lineID].map { (index: $0, cell: cell) } }
             .sorted { ($0.index, $0.cell.column.rawValue) < ($1.index, $1.cell.column.rawValue) }
-            .map { String(localized: L.invalidCellRow($0.index + 1, String(localized: $0.cell.column.title))) }
+            .map { entry in
+                entry.cell.column == .vatRate
+                    ? String(localized: L.invalidRateRow(entry.index + 1))
+                    : String(localized: L.invalidCellRow(entry.index + 1, String(localized: entry.cell.column.title)))
+            }
     }
 
     // MARK: Exchange rate
@@ -708,12 +735,15 @@ struct NumberCell: Hashable {
         }
         do {
             let existing = try stores.rates.rate(for: document.currency, on: day, lookup: .exactDay)
-            if replace || existing == nil {
+            let saved = replace || existing == nil
+            if saved {
                 try stores.rates.save(ExchangeRate(currency: document.currency, amount: 1, czkPerAmount: czkPerUnit, validFor: day, source: .manual))
             }
             refreshRate()
             if rateIsMissing, rateError == nil {
-                rateError = String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
+                rateError = saved
+                    ? String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
+                    : String(localized: L.rateAlreadyStored(day.formatted(.current)))
             }
         } catch {
             rateError = ErrorText.message(error)

@@ -397,6 +397,11 @@ struct MainSplitView: View {
     /// final invoice, with today's dates, the client's current term and address, and no number, rate,
     /// payment or deductions; those belong to the new document.
     private func duplicate(_ id: String) {
+        // The open draft's last edits are still waiting for autosave: the copy is made of what the editor shows.
+        if let editor, editor.documentID == id, !editor.saveNow() {
+            resultLine = String(localized: L.draftChangesNotSaved(editor.saveError ?? ""))
+            return
+        }
         do {
             guard let source = try stores.documents.document(id: id), source.kind != .paymentTaxDocument else { return }
             let profile = try stores.profile.load()

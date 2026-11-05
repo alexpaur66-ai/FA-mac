@@ -443,13 +443,8 @@ struct DraftEditorView: View {
                 Text(L.fieldDue).textRole(.label)
                 // "30 days" and the date, linked: each updates the other (screens-flows.md §2c).
                 HStack(spacing: Spacing.m) {
-                    TextField(value: Binding(get: { model.dueDays }, set: { model.setDueDays($0) }), format: .number) {
-                        Text(L.fieldDue)
-                    }
-                    .labelsHidden()
-                    .textRole(.amount)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 56)
+                    DueDaysField(model: model)
+                        .frame(width: 56)
                     Text(model.dueDays == 1 ? L.dueDaysOne : L.dueDays(model.dueDays)).textRole(.body)
                     DatePicker(selection: dayBinding(document.dueDate) { model.setDueDate($0) }, displayedComponents: .date) {
                         Text(L.fieldDue)
@@ -647,7 +642,12 @@ struct DraftEditorView: View {
             .frame(width: Self.unitWidth)
             AmountField(cell: NumberCell(lineID: line.id, column: .unitPrice), label: L.colUnitPrice, value: line.unitPrice, fractionLength: 2...2,
                         model: model, focus: $focus, focusValue: .price(line.id),
-                        commit: { value in model.setLine(line.id) { $0.unitPrice = value } },
+                        // Stored as shown and printed: the price is rounded to the currency's minor units, so
+                        // the grid, the PDF and the line total use the same number.
+                        commit: { value in
+                            let scale = document.currency.minorUnits
+                            model.setLine(line.id) { $0.unitPrice = value.rounded(scale: scale) }
+                        },
                         onSubmit: { moveDown(from: .price(line.id)) })
                 .frame(width: Self.priceWidth)
             AmountField(cell: NumberCell(lineID: line.id, column: .discount), label: L.colDiscount, value: line.discountPercent, fractionLength: 0...2,
@@ -835,9 +835,23 @@ struct ClientField<Focus: Hashable>: View {
     private var matches: [Customer] { model.matchingCustomers(text) }
     private var currentName: String { model.customer?.party.name ?? "" }
 
+    /// The field's text; a change written by the field editor (the user typing) opens the suggestions.
+    private var typedText: Binding<String> {
+        Binding(get: { text }, set: { newText in
+            guard newText != text else { return }
+            text = newText
+            if isFocused {
+                editing = true
+                highlighted = 0
+            }
+        })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            TextField(text: $text, prompt: Text(L.clientPrompt)) { Text(L.fieldClient) }
+            // Only typing opens the list: the text set by Esc, a pick or focus never re-arms it, so Esc
+            // then ↩ moves on instead of picking the first suggestion.
+            TextField(text: typedText, prompt: Text(L.clientPrompt)) { Text(L.fieldClient) }
                 .labelsHidden()
                 .textRole(.body)
                 .frame(maxWidth: 360)
@@ -856,11 +870,6 @@ struct ClientField<Focus: Hashable>: View {
                 .onKeyPress(.upArrow) {
                     move(-1)
                     return .handled
-                }
-                .onChange(of: text) { _, _ in
-                    guard isFocused else { return }
-                    editing = true
-                    highlighted = 0
                 }
                 .onChange(of: isFocused) { _, focusedNow in
                     if focusedNow {
@@ -974,6 +983,36 @@ struct ClientField<Focus: Hashable>: View {
 
 // MARK: - Cells
 
+/// The due days ("30") of the header, written to the draft as they are typed like every other field,
+/// so ⌘↩ Issue or ⌘Q right after typing take the new term. Text that is not a whole number is ignored
+/// while typing; leaving the field shows the draft's days again.
+struct DueDaysField: View {
+    let model: DraftEditorModel
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(text: $text) { Text(L.fieldDue) }
+            .labelsHidden()
+            .textRole(.amount)
+            .multilineTextAlignment(.trailing)
+            .focused($focused)
+            .onChange(of: text) { _, newText in
+                guard focused, let days = Int(newText.trimmingCharacters(in: .whitespaces)), days >= 0,
+                      days != model.dueDays else { return }
+                model.setDueDays(days)
+            }
+            .onChange(of: model.dueDays, initial: true) { _, days in
+                if !focused { text = String(days) }
+            }
+            .onChange(of: focused) { _, focusedNow in
+                if !focusedNow { text = String(model.dueDays) }
+            }
+            .onSubmit { text = String(model.dueDays) }
+    }
+}
+
 /// A text cell of the lines grid: writes as it is typed, ↩ moves down, Esc restores the value the cell
 /// had when it gained focus.
 struct LineTextCell<Focus: Hashable>: View {
@@ -1039,7 +1078,13 @@ struct AmountField<Focus: Hashable>: View {
                     RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
                 }
                 .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
-                .onAppear { text = formatted(value) }
+                // A rebuilt cell (after the preview, a relayout) shows the stored valid value, and the
+                // invalid text of a cell that goes away dies with it: the model must not keep counting it.
+                .onAppear {
+                    text = formatted(value)
+                    setInvalid(false)
+                }
+                .onDisappear { model.setCell(cell, invalid: false) }
                 .onChange(of: value) { _, newValue in
                     guard !isFocused else { return }
                     text = formatted(newValue)
@@ -1102,9 +1147,9 @@ struct AmountField<Focus: Hashable>: View {
         text = formatted(restored)
     }
 
+    /// Always tells the model (its `setCell` ignores a repeat), so a rebuilt field cannot leave a stale ⛔.
     private func setInvalid(_ flag: Bool) {
-        guard flag != invalid else { return }
-        invalid = flag
+        if invalid != flag { invalid = flag }
         model.setCell(cell, invalid: flag)
     }
 
@@ -1159,7 +1204,12 @@ struct VATRateField<Focus: Hashable>: View {
                 RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
             }
             .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
-            .onAppear { text = display(kind) }
+            .onAppear {
+                text = display(kind)
+                setInvalid(false)
+            }
+            // Gone with the preview, a relayout or a treatment without a rate: its text no longer blocks Issue.
+            .onDisappear { model.setCell(cell, invalid: false) }
             .onChange(of: kind) { _, newKind in
                 guard !isFocused else { return }
                 text = display(newKind)
@@ -1211,7 +1261,9 @@ struct VATRateField<Focus: Hashable>: View {
             setInvalid(false)
             if rate.kind != kind { commit(rate.kind) }
             if finishing { self.text = display(rate.kind) }
-        } else if trimmed.isEmpty {
+        } else if trimmed.isEmpty || text == display(kind) {
+            // Empty, or the cell's own display left untouched ("Not in force"): the validator reports a
+            // rate that is not in force; tabbing through is not a typing error.
             setInvalid(false)
             if finishing { self.text = display(kind) }
         } else {
@@ -1219,9 +1271,9 @@ struct VATRateField<Focus: Hashable>: View {
         }
     }
 
+    /// Always tells the model (its `setCell` ignores a repeat), so a rebuilt field cannot leave a stale ⛔.
     private func setInvalid(_ flag: Bool) {
-        guard flag != invalid else { return }
-        invalid = flag
+        if invalid != flag { invalid = flag }
         model.setCell(cell, invalid: flag)
     }
 
@@ -1261,7 +1313,7 @@ struct RateEntryForm<Focus: Hashable>: View {
         if let document = model.document {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Label {
-                    Text(L.rateMissing(document.currency.code, document.taxPoint.formatted(locale))).textRole(.body)
+                    Text(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale))).textRole(.body)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
