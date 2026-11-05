@@ -11,6 +11,8 @@ import SwiftUI
 final class ClientsModel {
     private(set) var customers: [Customer] = []
     private(set) var error: String?
+    /// False until a load succeeded, so a failed first load is not shown as "no clients yet".
+    private(set) var loaded = false
     let stores: Stores
 
     init(stores: Stores) {
@@ -22,6 +24,7 @@ final class ClientsModel {
         do {
             customers = try stores.customers.all()
             error = nil
+            loaded = true
         } catch {
             self.error = ErrorText.message(error)
         }
@@ -89,13 +92,18 @@ struct ClientsView: View {
                 Divider()
             }
             if rows.isEmpty && search.isEmpty {
-                ContentUnavailableView {
-                    Label { Text(L.noClients) } icon: { Image(systemName: "person.2") }
-                } description: {
-                    Text(L.noClientsDescription)
-                } actions: {
-                    Button { editClient(nil) } label: { Text(L.newClient) }
-                        .buttonStyle(.borderedProminent)
+                // After a failed first load the error line and Retry are the content: no "no clients" claim.
+                if clients.loaded {
+                    ContentUnavailableView {
+                        Label { Text(L.noClients) } icon: { Image(systemName: "person.2") }
+                    } description: {
+                        Text(L.noClientsDescription)
+                    } actions: {
+                        Button { editClient(nil) } label: { Text(L.newClient) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    Spacer()
                 }
             } else if rows.isEmpty {
                 ContentUnavailableView.search(text: search)

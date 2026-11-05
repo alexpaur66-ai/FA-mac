@@ -695,4 +695,16 @@ enum L {
     }
     static let documentDefaultsTitle = r("settings.documentDefaults", "Document defaults")
     static let deductedByLabel = r("document.deductedByLabel", "Deducted in")
+    static let activityDraftCreated = r("activity.draftCreated", "Draft created")
+    static let draftRestoredUnlinked = r(
+        "result.draftRestoredUnlinked",
+        "Draft restored without its payment link: the payment was deleted or already has another tax document.")
+    static let paymentRestoredUnlinked = r(
+        "result.paymentRestoredUnlinked",
+        "Payment restored without its draft tax document: the draft was issued, changed or linked to another payment.")
+    static let seriesNumbersCollide = r(
+        "series.numbersCollide", "Two series would issue the same document numbers; issuing from the second one would fail. Change a pattern.")
+    static func seriesNumberCollisionWith(_ name: String) -> LocalizedStringResource {
+        r("series.numberCollisionWith", "Would give the same document numbers as the series \(name). Change the pattern.")
+    }
 }

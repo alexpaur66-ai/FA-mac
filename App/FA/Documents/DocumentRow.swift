@@ -6,6 +6,15 @@ import InvoicingCore
 import InvoicingData
 import SwiftUI
 
+extension DocumentState {
+    /// The final invoices that deducted this advance, each once: the store lists a final invoice once per
+    /// deducted payment tax document, so an advance paid in two parts names it twice.
+    var deductingFinalInvoices: [String] {
+        var seen: Set<String> = []
+        return deductedBy.filter { seen.insert($0).inserted }
+    }
+}
+
 struct DocumentRow: Identifiable, Hashable {
     let state: DocumentState
     /// The day the badge details count from ("due in 5 days").
@@ -45,7 +54,7 @@ struct DocumentRow: Identifiable, Hashable {
             return closure.reason
         }
         if state.deductedInFinal, !state.deductedBy.isEmpty {
-            return state.deductedBy.joined(separator: ", ")
+            return state.deductingFinalInvoices.joined(separator: ", ")
         }
         guard isIssued, kind != .paymentTaxDocument else { return nil }
         let left = MoneyText.format(state.outstanding.amount, currency: currencyCode, locale: locale)

@@ -24,6 +24,9 @@ struct OverviewView: View {
     /// The highlighted queue row, by item: a document in two groups (overdue, and its tax document
     /// missing) highlights the row that was clicked, not both.
     @State private var selectedQueueItem: String?
+    /// Per advance in the queue's "tax document missing" group: the received money without an issued tax
+    /// document. The states carry only the paid total, which also counts the payments already documented.
+    @State private var untaxedReceived: [String: Money] = [:]
     @AppStorage(SettingsPane.storageKey) private var settingsPane: SettingsPane = .general
     @Environment(\.openSettings) private var openSettings
     @Environment(\.locale) private var locale
@@ -67,6 +70,7 @@ struct OverviewView: View {
         .navigationTitle(Text(L.overview))
         .task(id: documents.states) {
             reloadSetup()
+            reloadUntaxedReceived()
         }
         // Saving the company, a bank account or a series in the Settings window changes no document
         // state, so the steps reload when the main window becomes key again.
@@ -97,6 +101,21 @@ struct OverviewView: View {
 
     private func reloadSetup() {
         setup = SetupStatus.load(stores)
+    }
+
+    /// The payments of each queued advance whose tax document is not issued yet (the store's
+    /// `missingReceipts` rule: money received or credited without an issued receipt), summed.
+    private func reloadUntaxedReceived() {
+        var amounts: [String: Money] = [:]
+        for state in documents.states where state.summary.kind == .advanceRequest && state.summary.status == .issued
+            && !state.taxDocumentIssued {
+            guard let payments = try? stores.documents.payments(for: state.id) else { continue }
+            let untaxed = payments.filter { $0.isIncoming && !$0.receiptIssued }.map(\.amount)
+            if let sum = MoneyList.sums(untaxed).first {
+                amounts[state.id] = sum
+            }
+        }
+        untaxedReceived = amounts
     }
 
     // MARK: Getting started (screens-flows.md §2j)
@@ -248,12 +267,20 @@ struct OverviewView: View {
                     selectedQueueItem = item.id
                     selection = item.state.id
                 } label: {
-                    QueueRow(item: item, selected: selected)
+                    QueueRow(item: item, amount: amount(of: item), selected: selected)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? AccessibilityTraits.isSelected : AccessibilityTraits())
             }
         }
+    }
+
+    /// The row's amount; for a missing tax document the received money without one, once loaded.
+    private func amount(of item: OverviewFigures.QueueItem) -> Money? {
+        if item.kind == .taxDocumentMissing, let untaxed = untaxedReceived[item.state.id] {
+            return untaxed
+        }
+        return item.amount
     }
 
     // MARK: States
@@ -359,6 +386,7 @@ private struct KPIMoney: View {
 
 private struct QueueRow: View {
     let item: OverviewFigures.QueueItem
+    let amount: Money?
     let selected: Bool
     @Environment(\.locale) private var locale
 
@@ -375,7 +403,7 @@ private struct QueueRow: View {
                 Text(verbatim: item.detail).textRole(.rowSecondary)
             }
             Spacer()
-            if let amount = item.amount {
+            if let amount {
                 MoneyText(amount: amount.amount, currency: amount.currency.code, locale: locale)
             }
         }
@@ -399,8 +427,9 @@ struct OverviewFigures {
 
         var id: String { state.id + "/" + String(describing: kind) }
 
-        /// The amount the row shows: the open balance of an overdue document, the received money that has
-        /// no tax document yet, or a draft's total. Nil for a draft whose totals cannot be computed yet.
+        /// The amount the row shows: the open balance of an overdue document, the received money (the
+        /// Overview replaces it by the part without a tax document once the payments are loaded), or a
+        /// draft's total. Nil for a draft whose totals cannot be computed yet.
         var amount: Money? {
             switch kind {
             case .overdue: state.outstanding

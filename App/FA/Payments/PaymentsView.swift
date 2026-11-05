@@ -25,8 +25,9 @@ struct PaymentsView: View {
     let documents: DocumentListModel
     /// The document of the selected payment, for the detail column and the inspector.
     @Binding var selectedDocumentID: String?
-    /// Deletes a payment (a draft tax document never goes with it from here); the window registers the undo.
-    let deletePayment: @MainActor (DocumentPayment) -> Void
+    /// Deletes a payment, and with it its draft tax document when the dialog says so; the window
+    /// registers the undo.
+    let deletePayment: @MainActor (DocumentPayment, Bool) -> Void
 
     @State private var rows: [PaymentRow] = []
     @State private var loaded = false
@@ -67,9 +68,7 @@ struct PaymentsView: View {
         .onChange(of: selection, initial: true) { _, newValue in
             sync(newValue)
         }
-        .paymentDeletionDialog(pending: $paymentPendingDeletion) { payment, _ in
-            deletePayment(payment)
-        }
+        .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
     // Date · Client · Document · Amount · Source · Note (screens-flows.md §2f); Account and the CZK
@@ -123,7 +122,7 @@ struct PaymentsView: View {
         if payment.deletionNeedsConfirmation {
             paymentPendingDeletion = payment
         } else {
-            deletePayment(payment)
+            deletePayment(payment, false)
         }
     }
 

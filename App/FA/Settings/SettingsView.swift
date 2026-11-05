@@ -450,6 +450,9 @@ struct NumberingPane: View {
                         }
                     }
                 }
+                if numbersCollide {
+                    InlineMessage(L.seriesNumbersCollide, kind: .warning)
+                }
                 if collides {
                     InlineMessage(L.seriesPrefixCollision, kind: .warning)
                 }
@@ -505,6 +508,17 @@ struct NumberingPane: View {
             guard let symbol = SeriesFormSheet.sampleVariableSymbol(template: stored.series.pattern.template,
                                                                      prefix: stored.series.variableSymbolPrefix) else { continue }
             if !seen.insert(symbol).inserted { return true }
+        }
+        return false
+    }
+
+    /// Two series that issue the same document numbers ("FV {YYYY}-{NNNN}" twice, with other VS prefixes):
+    /// the second one's first number already exists, so issuing from it would fail.
+    private var numbersCollide: Bool {
+        var seen: Set<String> = []
+        for stored in series {
+            guard let number = SeriesFormSheet.sampleNumber(template: stored.series.pattern.template) else { continue }
+            if !seen.insert(number).inserted { return true }
         }
         return false
     }
@@ -617,6 +631,19 @@ struct SeriesFormSheet: View {
         return PaymentSymbol.variable(fromDocumentNumber: number, prefix: prefix)?.digits
     }
 
+    /// The sample number of 2026 with counter 42; two series with the same one issue the same document
+    /// numbers. Nil while the template is not valid.
+    static func sampleNumber(template: String) -> String? {
+        guard let pattern = try? DocumentNumberPattern(template: template) else { return nil }
+        return pattern.format(year: 2026, counter: 42)
+    }
+
+    /// The stored series whose document numbers this draft would repeat, if any.
+    private var numberCollidingSeries: StoredNumberSeries? {
+        guard let mine = Self.sampleNumber(template: draft.template) else { return nil }
+        return others.first { other in Self.sampleNumber(template: other.series.pattern.template) == mine }
+    }
+
     /// The stored series this draft would collide with, if any.
     private var collidingSeries: StoredNumberSeries? {
         let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
@@ -675,7 +702,9 @@ struct SeriesFormSheet: View {
                         InlineMessage(text)
                     }
                 }
-                if let other = collidingSeries {
+                if let other = numberCollidingSeries {
+                    InlineMessage(L.seriesNumberCollisionWith(other.name), kind: .warning)
+                } else if let other = collidingSeries {
                     InlineMessage(L.seriesCollisionWith(other.name), kind: .warning)
                 }
                 if let error {

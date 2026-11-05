@@ -82,7 +82,11 @@ existing data to import.
 
 - The result line sits at the top of the content column; Delete Draft and Delete Payment have no
   confirmation and register an undo instead (the line offers Undo; ⌘Z works too). Undo of a deleted
-  draft writes it back under its id and relinks a payment tax document to its payment.
+  draft writes it back under its id and relinks a payment tax document to its payment (as the payment is
+  now: recorded again by an earlier Undo, or left alone when it has another tax document by then). Undo of
+  Delete Payment Only relinks the draft tax document that was kept. The line's Undo carries out its own
+  registration, not the top of the window's stack, and takes it off the stack; after ⌘Z it is cleared.
+  Delete Payment and Draft in Payments & Bank deletes the draft too, as in the detail.
 - Record Payment… applies only to an issued document with an open balance; an overpaid document offers
   Record Refund… as its own command. The Document menu, the context menu and the detail's toolbar share
   one `DocumentActions` value, so they never disagree.
@@ -93,6 +97,9 @@ existing data to import.
 - Payments & Bank keeps its selection per window and lists Date · Client · Document · Amount · Source · Note.
 - The client form has a country pop-up and a VAT treatment pop-up; new clients default to EUR, 14 days
   and EU reverse charge (decision of 5 Nov 2026). The company's term and footer live in Documents & PDF.
-- The Numbering pane and the series sheet compare the variable symbols of a sample number across series,
+- The Numbering pane and the series sheet compare the variable symbols and the document numbers of a
+  sample number across series (two series issuing the same numbers get a warning),
   preview the next number as the store assigns it today, and lock year and counter once the app issued a
   number from the series.
+- The inspector's Activity maps the audit actions to sentences. The store also records `create` and
+  `update` for every draft save: the first `create` shows as "Draft created", autosaves are not listed.

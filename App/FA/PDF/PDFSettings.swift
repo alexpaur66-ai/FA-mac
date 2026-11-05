@@ -36,10 +36,18 @@ enum PDFSettings {
         return isInTrash(url) ? nil : url
     }
 
-    /// True when `url` lies in a Trash folder (the user deleted the PDF folder after choosing it).
+    /// True when `url` lies in a Trash folder (the user deleted the PDF folder after choosing it): the home
+    /// Trash (`.Trash`) or the Trash of another volume (`/Volumes/X/.Trashes/501/…`).
     static func isInTrash(_ url: URL) -> Bool {
         let path = url.standardizedFileURL.path
-        if url.pathComponents.contains(".Trash") { return true }
+        if url.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" || $0.hasPrefix(".Trash-") }) {
+            return true
+        }
+        var relationship = FileManager.URLRelationship.other
+        if (try? FileManager.default.getRelationship(&relationship, of: .trashDirectory, in: .userDomainMask, toItemAt: url)) != nil,
+           relationship == .contains {
+            return true
+        }
         return FileManager.default.urls(for: .trashDirectory, in: .allDomainsMask).contains { trash in
             path.hasPrefix(trash.standardizedFileURL.path + "/")
         }

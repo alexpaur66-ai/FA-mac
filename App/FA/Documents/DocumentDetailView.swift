@@ -273,7 +273,7 @@ struct DocumentDetailView: View {
             if !state.deductedBy.isEmpty {
                 GridRow {
                     Text(L.deductedByLabel).textRole(.label)
-                    chainLinks(state.deductedBy)
+                    chainLinks(state.deductingFinalInvoices)
                 }
             }
         }
@@ -559,16 +559,38 @@ struct DocumentInspectorView: View {
             document = try? stores.documents.document(id: documentID)
             payments = (try? stores.documents.payments(for: documentID)) ?? []
             deductions = (try? Self.deductions(stores, state: documents.state(id: documentID))) ?? []
-            events = (try? stores.audit.events(entity: "document", id: documentID)) ?? []
+            events = Self.shownEvents((try? stores.audit.events(entity: "document", id: documentID)) ?? [])
         }
     }
 
+    /// Each number once: an advance deducted through two receipts names its final invoice twice.
     private func chainNumbers(_ state: DocumentState?) -> [String] {
         var numbers: [String] = []
         if let related = state?.summary.relatedDocumentNumber { numbers.append(related) }
-        numbers += state?.deductedBy ?? []
+        numbers += state?.deductingFinalInvoices ?? []
         numbers += deductions.map(\.receiptNumber)
-        return numbers
+        return Self.unique(numbers)
+    }
+
+    /// The numbers in their order, without repeats (they are the ids of the chain's ForEach).
+    static func unique(_ numbers: [String]) -> [String] {
+        var seen: Set<String> = []
+        return numbers.filter { seen.insert($0).inserted }
+    }
+
+    /// The events the Activity list shows. The store records "create" and "update" for every draft save:
+    /// the autosaves are noise, and a draft written back by Undo records a second "create", so only the
+    /// first one stays ("Draft created").
+    static func shownEvents(_ events: [AuditEvent]) -> [AuditEvent] {
+        var sawCreate = false
+        return events.filter { event in
+            if event.action == "update" { return false }
+            if event.action == "create" {
+                if sawCreate { return false }
+                sawCreate = true
+            }
+            return true
+        }
     }
 
     /// The deduction links of an issued final invoice; empty for every other document.
@@ -611,6 +633,8 @@ struct DocumentInspectorView: View {
             return ("folder", String(localized: L.activityPDFSaved(details["path"] ?? "")))
         case "delete":
             return ("trash", String(localized: L.activityDeleted))
+        case "create":
+            return ("square.and.pencil", String(localized: L.activityDraftCreated))
         default:
             return ("circle", event.action)
         }

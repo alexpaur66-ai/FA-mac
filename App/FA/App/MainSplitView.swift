@@ -106,7 +106,13 @@ struct MainSplitView: View {
             guard let outcome else { return }
             if let error = outcome.error {
                 report(error, kind: .error)
-            } else if let id = outcome.draftID, sidebar.section == .documents {
+            } else if let note = outcome.note {
+                report(note, kind: .info)
+            } else if result?.undo != nil {
+                // Undone from Edit ▸ Undo (only the latest deletion can be): the line's Undo is spent.
+                result = nil
+            }
+            if let id = outcome.draftID, sidebar.section == .documents {
                 documentSelection = [id]
             }
         }
@@ -141,7 +147,7 @@ struct MainSplitView: View {
             ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) })
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
-                         deletePayment: { deletePayment($0, deletingDraftReceipt: false) })
+                         deletePayment: deletePayment)
         case .rates:
             RatesView(stores: stores, version: $ratesVersion, importing: $ratesImporting, report: { text, isError in
                 report(text, kind: isError ? .error : .success)
@@ -605,17 +611,10 @@ struct MainSplitView: View {
         for id in ids {
             do {
                 guard let document = try stores.documents.document(id: id), document.status == .draft else { continue }
-                let paymentID = try stores.documents.payment(ofReceipt: id)?.id
+                let receiptOf = try stores.documents.payment(ofReceipt: id)
                 try stores.documents.deleteDraft(id: id)
-                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOfPaymentID: paymentID))
-                if let open = editor, open.documentID == id {
-                    open.discard()
-                    editor = nil
-                    issueSheetPresented = false
-                }
-                documentSelection.remove(id)
-                if overviewSelection == id { overviewSelection = nil }
-                if paymentDocumentSelection == id { paymentDocumentSelection = nil }
+                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOf: receiptOf))
+                forgetDeletedDraft(id)
             } catch {
                 failure = error
             }
@@ -627,11 +626,18 @@ struct MainSplitView: View {
         var undo: (@MainActor () -> Void)?
         if let undoManager {
             let restore = deleted
-            undoManager.registerUndo(withTarget: documents) { target in
-                MainActor.assumeIsolated { target.restoreDrafts(restore) }
+            let model = documents
+            let ticket = model.makeUndoTicket()
+            undoManager.registerUndo(withTarget: ticket) { registered in
+                MainActor.assumeIsolated { model.restoreDrafts(restore, ticket: registered) }
             }
             undoManager.setActionName(String(localized: L.deleteDraft))
-            undo = { undoManager.undo() }
+            // The line restores what it announced, not whatever is on top of the window's stack, and takes
+            // its registration off the stack; after Edit ▸ Undo the shared ticket makes it do nothing.
+            undo = {
+                model.restoreDrafts(restore, ticket: ticket)
+                undoManager.removeAllActions(withTarget: ticket)
+            }
         }
         if failure == nil {
             let text = deleted.count == 1 ? String(localized: L.draftDeleted) : String(localized: L.draftsDeleted(deleted.count))
@@ -640,24 +646,47 @@ struct MainSplitView: View {
     }
 
     /// Delete Payment (the payment rows of the detail, ⌫ in Payments & Bank): Undo records the payment
-    /// again, except for credit legs and a payment deleted together with its draft tax document.
+    /// again and relinks a draft tax document that was kept, except for credit legs and a payment deleted
+    /// together with its draft tax document.
     private func deletePayment(_ payment: DocumentPayment, deletingDraftReceipt: Bool) {
         do {
             try stores.documents.deletePayment(id: payment.id, deletingDraftReceipt: deletingDraftReceipt)
+            if deletingDraftReceipt, let receiptID = payment.receiptDocumentID {
+                forgetDeletedDraft(receiptID)
+            }
             var undo: (@MainActor () -> Void)?
             let restorable = (payment.kind == .received || payment.kind == .refund)
                 && !(deletingDraftReceipt && payment.receiptDocumentID != nil)
             if restorable, let undoManager {
-                undoManager.registerUndo(withTarget: documents) { target in
-                    MainActor.assumeIsolated { target.restorePayment(payment) }
+                let model = documents
+                let ticket = model.makeUndoTicket()
+                undoManager.registerUndo(withTarget: ticket) { registered in
+                    MainActor.assumeIsolated { model.restorePayment(payment, ticket: registered) }
                 }
                 undoManager.setActionName(String(localized: L.deletePayment))
-                undo = { undoManager.undo() }
+                // As for Delete Draft: the line undoes this deletion only.
+                undo = {
+                    model.restorePayment(payment, ticket: ticket)
+                    undoManager.removeAllActions(withTarget: ticket)
+                }
             }
             report(L.paymentDeleted, undo: undo)
         } catch {
             report(error)
         }
+    }
+
+    /// A deleted draft leaves the window: its editor is discarded first (a pending autosave must not write
+    /// it back; `saveDraft` inserts a missing id), then it leaves every selection.
+    private func forgetDeletedDraft(_ id: String) {
+        if let open = editor, open.documentID == id {
+            open.discard()
+            editor = nil
+            issueSheetPresented = false
+        }
+        documentSelection.remove(id)
+        if overviewSelection == id { overviewSelection = nil }
+        if paymentDocumentSelection == id { paymentDocumentSelection = nil }
     }
 
     /// Create Tax Document for a received payment on an advance that has none (screens-flows.md §2d,
