@@ -136,11 +136,11 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
             return ("Kurz je pro měnu {detail}, doklad je v jiné měně.",
                     "The exchange rate is for {detail}, not the document's currency.")
         case .exchangeRateAfterTaxPoint:
-            return ("Kurz ze dne {detail} je pozdější než datum plnění (§ 4 odst. 8 ZDPH).",
-                    "The exchange rate of {detail} is later than the date of supply (§ 4(8) of the VAT Act).")
+            return ("Kurz ze dne {detail} je pozdější než den vzniku povinnosti přiznat daň nebo uskutečnění plnění (§ 4 odst. 8 ZDPH): datum plnění nebo přijetí platby, u dokladu za dodání zboží osvobozené podle § 64 den podle § 22 odst. 1.",
+                    "The exchange rate of {detail} is later than the day the obligation to declare the tax or the supply arose (§ 4(8) of the VAT Act): the date of supply or of the payment, or on a document of goods exempt under § 64 the day under § 22(1).")
         case .exchangeRateStale:
-            return ("Kurz je ze dne {detail}, více než týden před datem plnění; zkontrolujte, zda je kurzovní lístek úplný.",
-                    "The exchange rate is from {detail}, more than a week before the date of supply; check that the rate table is complete.")
+            return ("Kurz je ze dne {detail}, více než týden před dnem, pro který doklad kurz potřebuje; zkontrolujte, zda je kurzovní lístek úplný.",
+                    "The exchange rate is from {detail}, more than a week before the day the document needs the rate for; check that the rate table is complete.")
         case .advanceDeductionsOnWrongKind:
             return ("Zálohy lze odečíst jen na konečné faktuře.",
                     "Advances can only be deducted on a final invoice.")
@@ -207,8 +207,9 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
 
 /// Checks a document against § 29 and § 28 ZDPH, § 435 of the Civil Code and its own consistency.
 public enum DocumentValidator {
-    /// Days between the exchange rate's day and the tax point beyond which the rate most likely comes from
-    /// an incomplete rate table rather than from a weekend or holiday (the ČNB publishes every working day).
+    /// Days between the exchange rate's day and the day the document needs the rate for
+    /// (`Document.exchangeRateDay`) beyond which the rate most likely comes from an incomplete rate table
+    /// rather than from a weekend or holiday (the ČNB publishes every working day).
     public static let exchangeRateStaleAfterDays = 7
 
     /// All issues of `document`. `forIssue` adds the checks that only matter when the document is issued,
@@ -335,14 +336,16 @@ public enum DocumentValidator {
             add(entry.code, entry.code == .paidAdvanceTreatmentDiffers ? .warning : .error, detail: entry.numbers.joined(separator: ", "))
         }
 
-        // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH.
+        // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH. The rate is the one
+        // valid on the day the obligation to declare arose: the tax point, for § 64 goods the § 22 odst. 1 day.
         do {
             let totals = try DocumentTotals.compute(for: document)
             if isTaxDocument && document.currency != .czk {
                 if let rate = document.exchangeRate {
-                    if rate.validFor > document.taxPoint {
+                    let rateDay = document.exchangeRateDay
+                    if rate.validFor > rateDay {
                         add(.exchangeRateAfterTaxPoint, .error, detail: rate.validFor.isoString)
-                    } else if document.taxPoint.days(since: rate.validFor) > exchangeRateStaleAfterDays {
+                    } else if rateDay.days(since: rate.validFor) > exchangeRateStaleAfterDays {
                         add(.exchangeRateStale, .warning, detail: rate.validFor.isoString)
                     }
                 } else {

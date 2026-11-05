@@ -150,7 +150,8 @@ struct NumberCell: Hashable {
     private(set) var treatmentChoice: TreatmentChoice = .czechVAT
     /// The exemption reference typed in the header, kept while another treatment is selected.
     private(set) var exemptReference = ""
-    /// How the rate for the tax point was found (§ 4 odst. 8 ZDPH); nil while no rate is needed.
+    /// How the rate for the document's rate day was found (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`);
+    /// nil while no rate is needed.
     private(set) var rateResolution: ExchangeRateTable.Resolution?
     /// The payment a draft payment tax document is the receipt of; nil when no payment names it.
     private(set) var receiptPayment: DocumentPayment?
@@ -709,6 +710,8 @@ struct NumberCell: Hashable {
         invalidCells = invalidCells.filter { $0.key.lineID != id }
         if focusedLineID == id { focusedLineID = nil }
         if document?.lines.isEmpty == true { appendBlankLine() }
+        // Deleting the other treatment's lines can leave § 64 goods alone, which need another day's rate.
+        refreshRate()
     }
 
     func moveLine(_ id: String, by offset: Int) {
@@ -777,8 +780,9 @@ struct NumberCell: Hashable {
 
     // MARK: Exchange rate
 
-    /// A tax document in a foreign currency needs the rate of its tax point (§ 4 odst. 8 ZDPH):
-    /// `ExchangeRateTable.resolve` gives the day's rate, or on a weekend or holiday the last working
+    /// A tax document in a foreign currency needs the rate of the day the obligation to declare arose
+    /// (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`): the tax point, or for § 64 goods the § 22 odst. 1
+    /// day. `ExchangeRateTable.resolve` gives the day's rate, or on a weekend or holiday the last working
     /// day's, and nothing otherwise; then the user types the rate or imports the ČNB file.
     var needsExchangeRate: Bool {
         guard let document else { return false }
@@ -789,13 +793,14 @@ struct NumberCell: Hashable {
         needsExchangeRate && document?.exchangeRate == nil
     }
 
-    /// The day whose rate stands in for the tax point, when it is not the tax point itself.
+    /// The day whose rate stands in for the rate day, when it is not the rate day itself.
     var rateFallbackFrom: CalendarDay? { rateResolution?.fallbackFrom }
 
-    /// The day whose published rate the document needs: the tax point, or the last working day before it.
+    /// The day whose published rate the document needs: the rate day (`Document.exchangeRateDay`), or the
+    /// last working day before it.
     var neededRateDay: CalendarDay {
         if let rateResolution { return rateResolution.publicationDay }
-        if let document { return CzechHolidays.lastWorkingDay(onOrBefore: document.taxPoint) }
+        if let document { return CzechHolidays.lastWorkingDay(onOrBefore: document.exchangeRateDay) }
         return CalendarDay(Date(), in: .current)
     }
 
@@ -808,7 +813,7 @@ struct NumberCell: Hashable {
             return
         }
         do {
-            let resolution = try stores.rates.table(for: document.currency).resolve(document.currency, on: document.taxPoint)
+            let resolution = try stores.rates.table(for: document.currency).resolve(document.currency, on: document.exchangeRateDay)
             rateResolution = resolution
             if resolution.rate != document.exchangeRate { update { $0.exchangeRate = resolution.rate } }
         } catch {
@@ -817,14 +822,15 @@ struct NumberCell: Hashable {
     }
 
     /// Saves a typed rate for `day` (the needed publication day when nil) with the source "Typed", and
-    /// applies whatever the tax point then resolves to. Without `replace`, a rate already stored for that
+    /// applies whatever the rate day then resolves to. Without `replace`, a rate already stored for that
     /// day (an import meanwhile) is kept and taken; Change… replaces it, which is how a typo is fixed.
     func saveManualRate(_ czkPerUnit: Decimal, validFor day: CalendarDay? = nil, replace: Bool = false) {
         guard let document, czkPerUnit > 0 else { return }
         rateError = nil
         let day = day ?? neededRateDay
-        guard day <= document.taxPoint else {
-            rateError = String(localized: L.rateAfterTaxPoint)
+        let rateDay = document.exchangeRateDay
+        guard day <= rateDay else {
+            rateError = String(localized: L.rateAfterRateDay(rateDay.formatted(.current)))
             return
         }
         do {
@@ -840,7 +846,7 @@ struct NumberCell: Hashable {
                     ? String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
                     : String(localized: L.rateAlreadyStored(day.formatted(.current)))
             } else if saved, let applied = self.document?.exchangeRate, applied.validFor != day || applied.czkPerUnit != czkPerUnit {
-                // Saved for a day the tax point does not resolve to: the document keeps the rate it had, and
+                // Saved for a day the rate day does not resolve to: the document keeps the rate it had, and
                 // the popover stays open to say so instead of closing as if the rate had changed.
                 rateError = String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
             }
@@ -1052,7 +1058,8 @@ struct NumberCell: Hashable {
     /// Writes the draft, then issues it in the data layer's one transaction (ADR 0005): number, symbol,
     /// validation, totals, hash, audit. The clients, the company profile and the series are read again
     /// first, so the supplier and client copies follow a Settings save made meanwhile, and so is the rate
-    /// of the tax point (§ 4 odst. 8 ZDPH: a day's file may have been imported since the editor opened).
+    /// of the rate day (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`: a day's file may have been imported
+    /// since the editor opened).
     /// The returned document carries its number.
     func issue(seriesID: String) throws -> Document {
         refreshReferenceData()

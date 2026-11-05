@@ -24,6 +24,8 @@ EUR-Lex (consolidated version of 1 Jan 2025):
 - § 28 odst. 9 písm. a): the document is issued within 15 days after the end of the month of the supply.
 - § 22 odst. 1: the supply is declared on the 15th day of the month after the supply, or on the issue
   date when the document was issued before that day.
+- § 4 odst. 8: a foreign currency is converted at the rate valid on the day the obligation to declare
+  the tax, or to declare the supply, arose.
 - § 102 odst. 1 písm. a): the supply goes into the souhrnné hlášení.
 
 The names and the order in the app are the design thread's (5 Nov 2026).
@@ -48,8 +50,17 @@ The names and the order in the app are the design thread's (5 Nov 2026).
   invoiced before they leave, so a document whose lines are all § 64 goods does not get it.
 - **Deadline** (`IssueDeadline`): 15 days after the end of the month of the supply.
 - **Reporting day** (`ReportingDay.day(treatment:taxPoint:issueDate:)`): the § 22 day for § 64 goods,
-  the tax point for every other treatment. It is there for the accountant export, which is not built
-  yet. The Overview VAT figure counts Czech VAT only and does not change.
+  the tax point for every other treatment. It gives the exchange-rate day of a goods document (next
+  point) and is there for the accountant export, which is not built yet. The Overview VAT figure counts
+  Czech VAT only and does not change.
+- **Exchange rate** (§ 4 odst. 8): a document whose lines are all § 64 goods is converted at the rate of
+  the § 22 odst. 1 day (`Document.exchangeRateDay`), not of the date of supply. Goods dispatched on
+  4 Nov and invoiced on 5 Nov take the rate of 5 Nov; goods invoiced on 30 Nov before they leave on
+  2 Dec take the rate of 30 Nov, which is published by the issue date. The editor resolves and asks for
+  that day's rate and refuses a rate typed for a later day, and the validator treats a rate dated after
+  it as an error and one more than seven days before it as stale, as it does with the tax point of every
+  other document. A document that mixes goods with other treatments and a payment tax document keep the
+  tax point (ACCT).
 - **Client VAT status**: `euBusiness` splits into `euBusinessGoods` (the status an EU VAT ID now
   implies) and `euBusinessServices`, which keeps the stored value "euBusiness", so a client saved before
   keeps the reverse charge. `defaultServiceTreatment` is renamed `defaultTreatment`. There is no new
@@ -99,5 +110,9 @@ The names and the order in the app are the design thread's (5 Nov 2026).
 
 - A client saved as an EU business before this change reads "EU business, services" and keeps the
   reverse charge until its status is switched to goods.
-- The clause, the PDF caption and the § 22 month are on the accountant's checklist before the first real
-  goods invoice.
+- A goods document in a foreign currency prints the rate of its § 22 day and stores its CZK values at
+  that rate; the day is not the date of supply when the document is issued on another day.
+  screens-flows.md (rule 6, §2c, §2g) and ADR 0009 describe the rate of the DUZP, as they were written
+  before goods; for § 64 goods the design thread updates them to the § 22 day.
+- The clause, the PDF caption, the § 22 month and the rate day of a mixed document are on the
+  accountant's checklist before the first real goods invoice.

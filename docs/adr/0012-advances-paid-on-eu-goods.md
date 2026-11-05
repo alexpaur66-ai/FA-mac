@@ -36,7 +36,9 @@ The names, the wording and the steps are the design thread's spec of 5 Nov 2026.
 - **Totals**: `DocumentTotals.paidInAdvance` is the sum of the rows in the document's currency, and
   `amountDue` is what the summary leaves due minus it. The § 64 value, the summary and every figure the
   souhrnné hlášení will read stay the full supply. `dueBeforePaidInAdvance` is the amount due before the
-  advances paid. The payment QR codes ask for the balance.
+  advances paid. The payment QR codes ask for the balance. The CZK values use the rate of the final
+  invoice's § 22 odst. 1 day, as on any § 64 document (`Document.exchangeRateDay`, ADR 0011); a row of
+  advances paid has no rate of its own, since nothing is converted or deducted for it.
 - **Validator**: errors when a document other than a final invoice lists advances paid
   (`paidAdvancesOnWrongKind`), a row has no advance number (`paidAdvanceNumberMissing`), a row is zero or
   negative (`paidAdvanceAmountNotPositive`), in another currency (`paidAdvanceCurrencyDiffers`), or names a

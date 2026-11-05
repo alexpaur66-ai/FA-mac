@@ -34,8 +34,8 @@ public enum CustomerVATStatus: String, Sendable, Codable, CaseIterable {
     case czechVATPayer
     /// Czech customer without VAT registration: Czech VAT is charged all the same.
     case czechNonPayer
-    /// Business in another EU member state with a VAT ID that buys goods sent there: the supply is exempt
-    /// under § 64 odst. 1 ZDPH. The status an EU VAT ID implies.
+    /// Business in another EU member state with a VAT ID that buys goods dispatched to another member
+    /// state: the supply is exempt under § 64 odst. 1 ZDPH. The status an EU VAT ID implies.
     case euBusinessGoods
     /// Business in another EU member state with a VAT ID that buys services: reverse charge, the customer
     /// accounts for VAT (§ 9 odst. 1 ZDPH). Stored as "euBusiness", the one EU business status before goods.

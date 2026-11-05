@@ -2,9 +2,9 @@
 
 Source note (2026-11-05): § 4 odst. 8 read from the zakonyprolidi.cz consolidation effective 1 Jan 2026;
 the other sections from pracepropravniky.cz per-paragraph pages, which show no version date.
-Cross-check against the official e-Sbírka before the first real document. § 2 odst. 2, § 20a, § 22,
-§ 28 odst. 1 and 9, § 64 and § 102 odst. 1 were read on 2026-11-05 from the full text in force from
-1 Jan 2026 downloaded from e-Sbírka.
+Cross-check against the official e-Sbírka before the first real document. § 2 odst. 2, § 4 odst. 8,
+§ 20a, § 22, § 28 odst. 1 and 9, § 64 and § 102 odst. 1 were read on 2026-11-05 from the full text in
+force from 1 Jan 2026 downloaded from e-Sbírka.
 
 ## Every tax document (§ 29 odst. 1)
 
@@ -42,4 +42,4 @@ Cross-check against the official e-Sbírka before the first real document. § 2 
 - Tax arithmetic: base × rate, or top-down with coefficient 1.21 / 1.12 (§ 37).
 - Retention: 10 years from the end of the tax period of the supply (§ 35 odst. 2); electronic storage must keep integrity and authenticity data (§ 35a odst. 3).
 - Souhrnné hlášení: goods supplied to a business registered for VAT in another member state (§ 102 odst. 1 písm. a)); EU-business services under § 9 odst. 1, including sufficiently known advances, values in CZK (§ 102 odst. 1 písm. d), odst. 4).
-- Goods to a business in another member state (§ 64 odst. 1): exempt with the right to deduct when the customer gave its VAT ID (písm. a)), the goods leave the Czech Republic for another member state (písm. b)) and the supply is in the souhrnné hlášení (písm. c)). The document cites the exemption (§ 29 odst. 2 písm. a)) and has no rate or VAT (§ 29 odst. 3 písm. e) bod 1). The supply is declared on the 15th day of the month after it, or on the earlier issue date (§ 22 odst. 1). A payment received before it needs no payment tax document: § 20a odst. 2 covers taxable supplies only (§ 2 odst. 2), so § 28 odst. 1 písm. d) does not apply (ACCT). The final invoice lists such payments as advances paid and lowers only the amount due; the exempt value stays the full supply, as nothing is deducted under § 37a (ACCT, ADR 0012).
+- Goods to a business in another member state (§ 64 odst. 1): exempt with the right to deduct when the customer gave its VAT ID (písm. a)), the goods leave the Czech Republic for another member state (písm. b)) and the supply is in the souhrnné hlášení (písm. c)). The document cites the exemption (§ 29 odst. 2 písm. a)) and has no rate or VAT (§ 29 odst. 3 písm. e) bod 1). The supply is declared on the 15th day of the month after it, or on the earlier issue date (§ 22 odst. 1), and a document of such goods alone converts its CZK values at the rate valid on that day (§ 4 odst. 8). A payment received before it needs no payment tax document: § 20a odst. 2 covers taxable supplies only (§ 2 odst. 2), so § 28 odst. 1 písm. d) does not apply (ACCT). The final invoice lists such payments as advances paid and lowers only the amount due; the exempt value stays the full supply, as nothing is deducted under § 37a (ACCT, ADR 0012).

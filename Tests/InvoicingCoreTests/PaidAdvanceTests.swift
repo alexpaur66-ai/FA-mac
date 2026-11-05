@@ -29,7 +29,8 @@ import Testing
         #expect(row.base == 1000)
         #expect(row.deductedBase == 0)
         #expect(row.taxableBase == 1000)
-        #expect(row.taxableBaseCZK == d("24310.00"))
+        // At the rate of the issue date, the § 22 odst. 1 day (§ 4 odst. 8 ZDPH, ADR 0011).
+        #expect(row.taxableBaseCZK == d("24300.00"))
         #expect(row.amountDue == 1000)
         #expect(totals.totalGross == 1000)
         #expect(totals.taxableBase == 1000)
@@ -38,7 +39,7 @@ import Testing
         #expect(totals.dueBeforePaidInAdvance == 1000)
         #expect(DocumentValidator.validate(document).isEmpty)
         // Nothing was deducted, so no § 37a clause.
-        #expect(DocumentClause.clauses(for: document) == [.intraCommunitySupply, .exchangeRate(DocumentFixtures.eurRate)])
+        #expect(DocumentClause.clauses(for: document) == [.intraCommunitySupply, .exchangeRate(DocumentFixtures.eurRateOfIssueDay)])
     }
 
     @Test func thePaymentCodesAskForTheBalance() throws {
