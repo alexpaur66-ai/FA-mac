@@ -265,7 +265,7 @@ enum L {
 
     // MARK: Rates (screens-flows.md §2g)
 
-    static let importRates = r("rates.import", "Import ČNB file…")
+    static let importRates = r("rates.import", "Import ČNB Rates…")
     static func importedRates(_ count: Int) -> LocalizedStringResource { r("rates.imported", "\(count) rates imported") }
     static func latestRate(_ day: String) -> LocalizedStringResource { r("rates.latest", "Latest rate: \(day)") }
     static let rateImportFailed = r("rates.importFailed", "The file could not be read as a ČNB daily or yearly file.")
@@ -275,9 +275,9 @@ enum L {
     static let rateImportBadHeader = r("rates.importBadHeader", "The first line is not the header of a ČNB daily or yearly file. Nothing was imported.")
     static let ratesCoverage = r("rates.coverage", "Coverage")
     static let ratesNote = r("rates.note", "The app makes no network calls. Download the ČNB daily or yearly text file and import it here; drag and drop arrives later.")
-    static let sourceCNB = r("rates.sourceCNB", "ČNB")
+    static let sourceCNB = r("rates.sourceCNB", "ČNB file")
     static let sourceECB = r("rates.sourceECB", "ECB")
-    static let sourceManual = r("rates.sourceManual", "Manual")
+    static let sourceManual = r("rates.sourceManual", "Typed")
     static let sourceFixed = r("rates.sourceFixed", "Fixed accounting rate")
 
     // MARK: PDF (screens-flows.md §1.4, §2b, §2c, §2i; ADR 0010)
