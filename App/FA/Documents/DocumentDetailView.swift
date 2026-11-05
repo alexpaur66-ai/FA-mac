@@ -273,7 +273,7 @@ struct DocumentDetailView: View {
             if !state.deductedBy.isEmpty {
                 GridRow {
                     Text(L.deductedByLabel).textRole(.label)
-                    chainLinks(state.deductingFinalInvoices)
+                    chainLinks(state.deductedBy)
                 }
             }
         }
@@ -563,11 +563,11 @@ struct DocumentInspectorView: View {
         }
     }
 
-    /// Each number once: an advance deducted through two receipts names its final invoice twice.
+    /// The related document, the deducting final invoices and the receipts, each number once.
     private func chainNumbers(_ state: DocumentState?) -> [String] {
         var numbers: [String] = []
         if let related = state?.summary.relatedDocumentNumber { numbers.append(related) }
-        numbers += state?.deductingFinalInvoices ?? []
+        numbers += state?.deductedBy ?? []
         numbers += deductions.map(\.receiptNumber)
         return Self.unique(numbers)
     }

@@ -168,4 +168,29 @@ import InvoicingCore
         #expect(payments.first?.kind == .refund)
         #expect(payments.first?.amount == Money(Fixtures.d("-0.01"), .czk))
     }
+
+    @Test func upgradingAV1DatabaseKeepsItsRows() throws {
+        // A database written by the first release (schema v1) is migrated in place; nothing is dropped.
+        let queue = try DatabaseQueue()
+        let migrator = Schema.migrator
+        try migrator.migrate(queue, upTo: "v1")
+        // Values are read inside the closures and checked outside: a closure whose only statements are
+        // `#expect(try …)` is inferred non-throwing and does not compile.
+        let hadPDFTable = try queue.write { db -> Bool in
+            try db.execute(sql: "INSERT INTO auditEvent (at, entity, entityID, action) VALUES (?, ?, ?, ?)",
+                           arguments: ["2026-11-05T10:00:00Z", "document", "doc-1", "create"])
+            return try db.tableExists("documentPDF")
+        }
+        #expect(!hadPDFTable)
+        try migrator.migrate(queue)
+        let (completed, hasPDFTable, keptRows) = try queue.read { db -> (Bool, Bool, Int?) in
+            let completed = try migrator.hasCompletedMigrations(db)
+            let hasPDFTable = try db.tableExists("documentPDF")
+            let keptRows = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM auditEvent WHERE entityID = 'doc-1'")
+            return (completed, hasPDFTable, keptRows)
+        }
+        #expect(completed)
+        #expect(hasPDFTable)
+        #expect(keptRows == 1)
+    }
 }

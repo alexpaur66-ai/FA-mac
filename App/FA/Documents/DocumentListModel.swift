@@ -34,9 +34,6 @@ final class DocumentListModel {
     @ObservationIgnored private var restoreToken = 0
     /// The tickets of the window's undo registrations; the UndoManager holds its targets unretained.
     @ObservationIgnored private var undoTickets: [UndoTicket] = []
-    /// A payment an Undo recorded again under a new id, by its old id, so a later Undo of its deleted tax
-    /// document relinks the draft to the payment as it is now.
-    @ObservationIgnored private var restoredPaymentIDs: [String: String] = [:]
 
     init(stores: Stores) {
         self.stores = stores
@@ -119,9 +116,9 @@ final class DocumentListModel {
     }
 
     /// Undo of Delete Draft: writes the drafts back under their ids (`saveDraft` inserts a missing id) and
-    /// relinks a payment tax document to its payment, as the payment is now: recorded again by an Undo
-    /// under a new id, or gone. A payment that has another tax document by now keeps it; the draft comes
-    /// back unlinked and the line says so. The last one restored is selected again.
+    /// relinks a payment tax document to its payment, as the payment is now: still there, recorded again by
+    /// an Undo under its id, or gone. A payment that has another tax document by now keeps it; the draft
+    /// comes back unlinked and the line says so. The last one restored is selected again.
     func restoreDrafts(_ deleted: [DeletedDraft], ticket: UndoTicket) {
         guard spend(ticket) else { return }
         var lastID: String?
@@ -148,7 +145,7 @@ final class DocumentListModel {
         }
     }
 
-    /// Undo of Delete Payment: records the payment again (a new row; the amount, day, note and bank line
+    /// Undo of Delete Payment: records the payment again under its id (the amount, day, note and bank line
     /// are the same) and relinks the draft tax document that "Delete Payment Only" kept. Credit legs are
     /// not restored, they are two rows on two documents.
     func restorePayment(_ payment: DocumentPayment, ticket: UndoTicket) {
@@ -158,17 +155,15 @@ final class DocumentListModel {
             switch payment.kind {
             case .received:
                 let restored = try stores.documents.recordPayment(
-                    documentID: payment.documentID, on: payment.paidOn, amount: payment.amount,
+                    documentID: payment.documentID, id: payment.id, on: payment.paidOn, amount: payment.amount,
                     bankTransactionID: payment.bankTransactionID, note: payment.note)
-                restoredPaymentIDs[payment.id] = restored.id
                 if let receiptID = payment.receiptDocumentID, !relinkReceipt(receiptID, to: restored) {
                     note = String(localized: L.paymentRestoredUnlinked)
                 }
             case .refund:
-                let restored = try stores.documents.recordRefund(
-                    documentID: payment.documentID, on: payment.paidOn, amount: -payment.amount,
+                try stores.documents.recordRefund(
+                    documentID: payment.documentID, id: payment.id, on: payment.paidOn, amount: -payment.amount,
                     bankTransactionID: payment.bankTransactionID, note: payment.note)
-                restoredPaymentIDs[payment.id] = restored.id
             case .creditIn, .creditOut:
                 break
             }
@@ -191,15 +186,10 @@ final class DocumentListModel {
         }
     }
 
-    /// The payment `original` is now: itself, or the row an Undo of its deletion recorded again; nil when
+    /// The payment `original` is now (an Undo of its deletion records it again under the same id); nil when
     /// it no longer exists.
     private func currentPayment(_ original: DocumentPayment) throws -> DocumentPayment? {
-        var id = original.id
-        var seen: Set<String> = []
-        while let next = restoredPaymentIDs[id], seen.insert(id).inserted {
-            id = next
-        }
-        return try stores.documents.payments(for: original.documentID).first { $0.id == id }
+        try stores.documents.payments(for: original.documentID).first { $0.id == original.id }
     }
 
     private func finishRestore(draftID: String?, error: String?, note: String? = nil) {

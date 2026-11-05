@@ -43,7 +43,7 @@ public struct DocumentState: Hashable, Sendable, Identifiable {
     public let taxDocumentIssued: Bool
     /// Advance requests: an issued final invoice deducted a payment tax document of this advance.
     public let deductedInFinal: Bool
-    /// Numbers of the final invoices that deducted this advance, usually one.
+    /// Numbers of the final invoices that deducted this advance, each once; usually one.
     public let deductedBy: [String]
     /// The closing event, if any (`closedUnpaid` or `markedForCreditNote`).
     public let closure: DocumentClosure?

@@ -56,7 +56,10 @@ extension DocumentStore {
         for closure in try DocumentClosureRecord.fetchAll(db) { closures[closure.documentID] = closure }
         var deductedBy: [String: [String]] = [:]
         for link in try AdvanceDeductionRecord.filter(Column("advanceRequestID") != nil).order(Column("finalInvoiceNumber")).fetchAll(db) {
-            if let advanceID = link.advanceRequestID { deductedBy[advanceID, default: []].append(link.finalInvoiceNumber) }
+            // A final invoice that deducts two receipts of one advance is named once.
+            if let advanceID = link.advanceRequestID, deductedBy[advanceID]?.contains(link.finalInvoiceNumber) != true {
+                deductedBy[advanceID, default: []].append(link.finalInvoiceNumber)
+            }
         }
 
         var states: [DocumentState] = []

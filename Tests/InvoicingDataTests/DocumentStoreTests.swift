@@ -1052,6 +1052,8 @@ import InvoicingCore
         let deletion = try AuditLog(database).events(entity: "document", id: "dd1").first { $0.action == "delete" }
         #expect(deletion?.details?["reason"] == "payment deleted")
         #expect(deletion?.details?["payment"] == payment.id)
+        let deleted = try AuditLog(database).events(entity: "document", id: advance.id).last(where: { $0.action == "paymentDeleted" })
+        #expect(deleted?.details?["receiptDeleted"] == "dd1")
 
         // An issued receipt still locks its payment, with or without the flag.
         let second = try Fixtures.issuedReceipt(database, advance: advance, id: "dd2", amount: Fixtures.d("100"), on: Fixtures.day("2026-11-11"))
@@ -1060,5 +1062,88 @@ import InvoicingCore
             try store.deletePayment(id: locked?.id ?? "", deletingDraftReceipt: true, now: Fixtures.now)
         }
         #expect(try store.document(id: "dd2")?.status == .issued)
+    }
+
+    @Test func aPaymentRecordedAgainUnderItsIDLinksItsKeptDraftReceipt() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let advance = try Fixtures.issuedAdvance(database)
+        let day = Fixtures.day("2026-11-10")
+        let payment = try store.recordPayment(documentID: advance.id, on: day, amount: Money(Fixtures.d("12100"), .czk), now: Fixtures.now)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("12100"), on: day), now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+
+        // "Delete Payment Only": the draft stays behind, and the event names it.
+        try store.deletePayment(id: payment.id, now: Fixtures.now)
+        #expect(try store.document(id: "dd1")?.status == .draft)
+        #expect(try store.payments(for: advance.id).isEmpty)
+        let deleted = try AuditLog(database).events(entity: "document", id: advance.id).last(where: { $0.action == "paymentDeleted" })
+        #expect(deleted?.details?["receiptKept"] == "dd1")
+        #expect(deleted?.details?["receiptDeleted"] == nil)
+
+        // Undo records the payment again under its id and links the draft back.
+        let restored = try store.recordPayment(documentID: advance.id, id: payment.id, on: day, amount: payment.amount, now: Fixtures.now)
+        #expect(restored.id == payment.id)
+        _ = try store.attachReceipt(paymentID: payment.id, documentID: "dd1", now: Fixtures.now)
+        #expect(try store.payment(ofReceipt: "dd1")?.id == payment.id)
+        #expect(try store.payments(for: advance.id).first?.receiptDocumentID == "dd1")
+
+        // One id, one row: a second payment under it is refused by the database.
+        #expect(throws: DatabaseError.self) {
+            try store.recordPayment(documentID: advance.id, id: payment.id, on: day, amount: payment.amount, now: Fixtures.now)
+        }
+        #expect(try store.payments(for: advance.id).count == 1)
+    }
+
+    @Test func deletingTheOtherLegOfACreditNamesItsKeptDraftReceipt() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        func czk(_ text: String) -> Money { Money(Fixtures.d(text), .czk) }
+        let day = Fixtures.day("2026-11-10")
+        let advance = try Fixtures.issuedAdvance(database)
+        // An overpaid invoice of the same customer pays 500 CZK of the advance request by credit.
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        try store.recordPayment(documentID: "doc-cz", on: day, amount: czk("12600"), now: Fixtures.now)
+        let creditIn = try store.applyCredit(from: "doc-cz", to: advance.id, amount: czk("500"), on: day, now: Fixtures.now)
+        #expect(creditIn.kind == .creditIn)
+        try store.saveDraft(Document.paymentTaxDocument(id: "dd1", forAdvanceRequest: advance, received: Fixtures.d("500"), on: day), now: Fixtures.now)
+        _ = try store.attachReceipt(paymentID: creditIn.id, documentID: "dd1", now: Fixtures.now)
+
+        // Deleting the creditOut leg on the invoice deletes the creditIn leg too; its draft receipt stays and is named.
+        let creditOutID = creditIn.relatedPaymentID ?? ""
+        #expect(try store.payments(for: "doc-cz").contains(where: { $0.id == creditOutID && $0.kind == .creditOut }))
+        try store.deletePayment(id: creditOutID, deletingDraftReceipt: true, now: Fixtures.now)
+        #expect(try store.payments(for: advance.id).isEmpty)
+        #expect(try store.document(id: "dd1")?.status == .draft)
+        let deleted = try AuditLog(database).events(entity: "document", id: advance.id).last(where: { $0.action == "paymentDeleted" })
+        #expect(deleted?.details?["payment"] == creditIn.id)
+        #expect(deleted?.details?["receiptKept"] == "dd1")
+        #expect(deleted?.details?["receiptDeleted"] == nil)
+        let source = try AuditLog(database).events(entity: "document", id: "doc-cz").last(where: { $0.action == "paymentDeleted" })
+        #expect(source?.details?["payment"] == creditOutID)
+        #expect(source?.details?["receiptKept"] == nil)
+    }
+
+    @Test func anAdvancePaidInTwoPartsNamesItsFinalInvoiceOnce() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = DocumentStore(database)
+        let advance = try Fixtures.issuedAdvance(database)
+        let first = try Fixtures.issuedReceipt(database, advance: advance, id: "dd1", amount: Fixtures.d("6050"), on: Fixtures.day("2026-11-10"))
+        let second = try Fixtures.issuedReceipt(database, advance: advance, id: "dd2", amount: Fixtures.d("6050"), on: Fixtures.day("2026-11-12"))
+
+        var draft = try Fixtures.finalInvoiceDraft(deducting: first)
+        draft.advanceDeductions += second.advanceDeductions(totals: try DocumentTotals.compute(for: second))
+        try store.saveDraft(draft, now: Fixtures.now)
+        try store.issue(id: "final", seriesID: "fv", now: Fixtures.now)
+        #expect(try store.deductions(ofFinalInvoice: "final").count == 2)
+        #expect(try store.deductions(ofAdvanceRequest: advance.id).count == 2)
+
+        let state = try store.state(for: advance.id, today: Fixtures.day("2026-12-01"))
+        #expect(state.deductedInFinal)
+        #expect(state.deductedBy == ["FV-2026-001"])
     }
 }
