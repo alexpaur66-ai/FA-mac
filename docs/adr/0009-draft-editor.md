@@ -174,3 +174,12 @@ taken in PR 20; the rest of this ADR stands.
   relayout shows it again, still ⛔.
 - **Change…** (N08): a rate saved for a day the tax point does not resolve to leaves the document's rate as
   it was, and the popover stays open to say so.
+
+## Amendments (PR 21, EU goods, November 2026)
+
+- **Rate day** (ADR 0011): the editor resolves, asks for and checks typed rates against
+  `Document.exchangeRateDay` instead of the tax point. It is the tax point on every document except one
+  whose lines are all goods exempt under § 64, where § 4 odst. 8 and § 22 odst. 1 ZDPH make it the issue
+  date or the 15th of the month after the supply, whichever comes first. A rate typed for a later day is
+  refused with "The rate date cannot be after <day>, the day this document needs the rate for." Where the
+  decisions above say "the tax point" for the rate, read the rate day.
