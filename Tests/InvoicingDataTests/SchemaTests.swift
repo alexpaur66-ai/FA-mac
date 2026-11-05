@@ -8,7 +8,7 @@ import InvoicingCore
     @Test func migrationCreatesEveryTable() throws {
         let database = try AppDatabase()
         let tables = ["companyProfile", "customer", "numberSeries", "document", "documentPayment", "exchangeRate",
-                      "bankStatement", "bankTransaction", "auditEvent"]
+                      "bankStatement", "bankTransaction", "advanceDeduction", "documentClosure", "auditEvent"]
         for table in tables {
             let exists = try database.queue.read { db in try db.tableExists(table) }
             #expect(exists, "missing table \(table)")
@@ -144,5 +144,28 @@ import InvoicingCore
         let after = try database.queue.read { db in try Int64.fetchOne(db, sql: "SELECT COUNT(*) FROM auditEvent WHERE action = 'nothing'") }
         #expect(after == 0)
         #expect(try database.queue.read { db in try Int64.fetchOne(db, sql: "SELECT COUNT(*) FROM auditEvent") } == count)
+    }
+
+    @Test func aPaymentRowCarriesTheSignOfItsKind() throws {
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        let columns = "(id, documentID, paidOn, amount, currency, kind, createdAt)"
+        // Incoming kinds must be positive, outgoing kinds negative, and the kind must be one of the four.
+        for (kind, amount) in [("received", -1), ("creditIn", 0), ("refund", 1), ("creditOut", 5), ("gift", 1)] {
+            #expect(throws: DatabaseError.self) {
+                try database.queue.write { db in
+                    try db.execute(sql: "INSERT INTO documentPayment \(columns) VALUES ('p-\(kind)', 'doc-cz', '2026-11-10', \(amount), 'CZK', '\(kind)', 't')")
+                }
+            }
+        }
+        try database.queue.write { db in
+            try db.execute(sql: "INSERT INTO documentPayment \(columns) VALUES ('p-ok', 'doc-cz', '2026-11-10', -1, 'CZK', 'refund', 't')")
+        }
+        let payments = try store.payments(for: "doc-cz")
+        #expect(payments.count == 1)
+        #expect(payments.first?.kind == .refund)
+        #expect(payments.first?.amount == Money(Fixtures.d("-0.01"), .czk))
     }
 }

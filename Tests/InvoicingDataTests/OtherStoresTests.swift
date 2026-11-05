@@ -117,6 +117,18 @@ import GRDB
     }
 }
 
+@Suite struct NumberSeriesPrefixTests {
+    @Test func keepsTheVariableSymbolPrefix() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        try store.save(try Fixtures.invoiceSeries(variableSymbolPrefix: "1"), now: Fixtures.now)
+        #expect(try store.series(id: "fv")?.series.variableSymbolPrefix == "1")
+        // The prefix is a setting like the name: saving the series without one removes it.
+        try store.save(try Fixtures.invoiceSeries(), now: Fixtures.now)
+        #expect(try store.series(id: "fv")?.series.variableSymbolPrefix == nil)
+    }
+}
+
 @Suite struct RateStoreTests {
     @Test func importsDailyFileAndLooksUpTheRateTheCNBWay() throws {
         let database = try AppDatabase()
@@ -253,10 +265,24 @@ import GRDB
         #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12100"), .czk))
 
         // A debit is no payment received, and an unknown line is reported as such.
-        #expect(throws: DataError.transactionOverallocated(id: "tx-2", available: Money(0, .czk), requested: Money(Fixtures.d("100"), .czk))) {
+        #expect(throws: DataError.transactionDirectionMismatch(id: "tx-2")) {
             try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
                                         bankTransactionID: "tx-2", now: Fixtures.now)
         }
+        // A refund comes from a debit line, allocated like a credit line; a credit line is no refund.
+        #expect(throws: DataError.transactionDirectionMismatch(id: "tx-1")) {
+            try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("1"), .czk),
+                                       bankTransactionID: "tx-1", now: Fixtures.now)
+        }
+        let refund = try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("60"), .czk),
+                                                bankTransactionID: "tx-2", now: Fixtures.now)
+        #expect(refund.amount == Money(Fixtures.d("-60"), .czk))
+        #expect(throws: DataError.transactionOverallocated(id: "tx-2", available: Money(Fixtures.d("40"), .czk), requested: Money(Fixtures.d("50"), .czk))) {
+            try documents.recordRefund(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("50"), .czk),
+                                       bankTransactionID: "tx-2", now: Fixtures.now)
+        }
+        #expect(try documents.paymentState(for: "doc-cz").paid == Money(Fixtures.d("12040"), .czk))
+        try documents.deletePayment(id: refund.id, now: Fixtures.now)
         #expect(throws: DataError.transactionNotFound("nope")) {
             try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-12"), amount: Money(Fixtures.d("100"), .czk),
                                         bankTransactionID: "nope", now: Fixtures.now)

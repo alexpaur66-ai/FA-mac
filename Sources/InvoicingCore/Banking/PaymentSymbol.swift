@@ -21,9 +21,21 @@ public struct PaymentSymbol: Hashable, Sendable, CustomStringConvertible {
     /// The variable symbol Czech payers expect for a document: its number with everything but
     /// digits removed, the last 10 digits at most. "FV-2026-001" → "2026001".
     public static func variable(fromDocumentNumber number: String) -> PaymentSymbol? {
+        variable(fromDocumentNumber: number, prefix: nil)
+    }
+
+    /// The variable symbol of a document whose numbering series carries a prefix (ADR 0003 addendum):
+    /// the prefix digits, then as many trailing digits of the number as still fit into 10.
+    /// "FV-2026-001" with prefix "1" → "12026001". Two series with the same template (invoices and
+    /// advance requests, say) would otherwise give their n-th documents of a year the same symbol.
+    /// A nil or empty prefix gives the plain symbol; a prefix that is not digits only, or leaves no room
+    /// for the number, gives nil.
+    public static func variable(fromDocumentNumber number: String, prefix: String?) -> PaymentSymbol? {
         let digits = number.filter(\.isASCIIDigit)
         guard !digits.isEmpty else { return nil }
-        return PaymentSymbol(.variable, String(digits.suffix(10)))
+        let prefixDigits = prefix?.trimmingWhitespace() ?? ""
+        guard prefixDigits.count < 10, prefixDigits.allSatisfy(\.isASCIIDigit) else { return nil }
+        return PaymentSymbol(.variable, prefixDigits + String(digits.suffix(10 - prefixDigits.count)))
     }
 
     /// Digits without leading zeros, which banks treat as insignificant; "0" when all zeros.

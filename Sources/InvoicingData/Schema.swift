@@ -40,6 +40,7 @@ enum Schema {
                 t.column("year", .integer).notNull()
                 t.column("lastCounter", .integer).notNull()
                 t.column("lastIssuedYear", .integer)
+                t.column("variableSymbolPrefix", .text)
             }
 
             try db.create(table: "document") { t in
@@ -147,13 +148,19 @@ enum Schema {
                 t.column("id", .text).primaryKey()
                 t.column("documentID", .text).notNull().references("document", onDelete: .restrict)
                 t.column("paidOn", .text).notNull()
+                // Signed: money received is positive, a refund or credit moved to another document negative.
                 t.column("amount", .integer).notNull()
                 t.column("currency", .text).notNull()
+                // received | refund | creditIn | creditOut (ADR 0007); the sign follows the kind.
+                t.column("kind", .text).notNull().defaults(to: "received")
                 t.column("bankTransactionID", .text).references("bankTransaction", onDelete: .setNull)
                 // The payment tax document issued for this payment; a deleted draft receipt unlinks itself.
                 t.column("receiptDocumentID", .text).references("document", onDelete: .setNull)
+                // The other leg of an applied credit: creditOut on the overpaid document, creditIn on the paid one.
+                t.column("relatedPaymentID", .text)
                 t.column("note", .text)
                 t.column("createdAt", .text).notNull()
+                t.check(sql: "(kind IN ('received', 'creditIn') AND amount > 0) OR (kind IN ('refund', 'creditOut') AND amount < 0)")
             }
             try db.execute(sql: "CREATE INDEX documentPayment_documentID ON documentPayment(documentID)")
             // A payment tax document is the receipt of one payment only.
@@ -179,6 +186,38 @@ enum Schema {
                              AND (p.id = NEW.id OR (NEW.receiptDocumentID IS NOT NULL AND p.receiptDocumentID = NEW.receiptDocumentID)))
                 BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
                 """)
+
+            // Which payment tax documents an issued final invoice deducted (§ 37a ZDPH). Written when the final
+            // invoice is issued, frozen with it; a receipt is deducted by one final invoice only.
+            try db.create(table: "advanceDeduction") { t in
+                t.column("id", .text).primaryKey()
+                t.column("finalInvoiceID", .text).notNull().references("document", onDelete: .restrict)
+                t.column("finalInvoiceNumber", .text).notNull()
+                t.column("receiptDocumentID", .text).notNull().unique().references("document", onDelete: .restrict)
+                t.column("receiptNumber", .text).notNull()
+                // The advance request the receipt's payment was received on; nil when the receipt has no payment.
+                t.column("advanceRequestID", .text).references("document", onDelete: .restrict)
+                t.column("createdAt", .text).notNull()
+            }
+            try db.execute(sql: "CREATE INDEX advanceDeduction_finalInvoiceID ON advanceDeduction(finalInvoiceID)")
+            try db.execute(sql: "CREATE INDEX advanceDeduction_advanceRequestID ON advanceDeduction(advanceRequestID)")
+            try db.execute(sql: """
+                CREATE TRIGGER advanceDeduction_frozen_update BEFORE UPDATE ON advanceDeduction
+                BEGIN SELECT RAISE(ABORT, 'deductions of an issued final invoice are frozen'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER advanceDeduction_frozen_delete BEFORE DELETE ON advanceDeduction
+                BEGIN SELECT RAISE(ABORT, 'deductions of an issued final invoice are frozen'); END
+                """)
+
+            // A dated closing event beside an issued document (screens-flows.md §2d): an advance closed as
+            // unpaid, or a tax document marked for a credit note. One per document; reopening removes it.
+            try db.create(table: "documentClosure") { t in
+                t.column("documentID", .text).primaryKey().references("document", onDelete: .restrict)
+                t.column("kind", .text).notNull()
+                t.column("reason", .text).notNull()
+                t.column("closedAt", .text).notNull()
+            }
 
             try db.create(table: "auditEvent") { t in
                 t.autoIncrementedPrimaryKey("id")

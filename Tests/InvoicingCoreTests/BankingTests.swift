@@ -141,6 +141,19 @@ import Testing
         #expect(PaymentSymbol.variable(fromDocumentNumber: "2026001")?.kind == .variable)
     }
 
+    @Test func fromDocumentNumberWithSeriesPrefix() {
+        // Invoices and advance requests with the same template get different symbols (ADR 0003 addendum).
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "FV-2026-003", prefix: "1")?.digits == "12026003")
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "ZF-2026-003", prefix: "2")?.digits == "22026003")
+        // The prefix stays, the number loses its leading digits when the symbol would exceed 10 digits.
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "20260000001234", prefix: "12")?.digits == "1200001234")
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "FV-2026-003", prefix: nil)?.digits == "2026003")
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "FV-2026-003", prefix: " ")?.digits == "2026003")
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "FV-2026-003", prefix: "A") == nil)
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "FV-2026-003", prefix: "1234567890") == nil)
+        #expect(PaymentSymbol.variable(fromDocumentNumber: "ABC", prefix: "1") == nil)
+    }
+
     @Test func codable() throws {
         let symbol = try #require(PaymentSymbol.variable("2026001"))
         let data = try JSONEncoder().encode(symbol)

@@ -160,5 +160,25 @@ import Testing
         let back = try JSONDecoder().decode(DocumentNumberSeries.self, from: data)
         #expect(back == series)
         #expect(back.lastNumber == "20260005")
+        #expect(back.variableSymbolPrefix == nil)
+    }
+
+    @Test func variableSymbolPrefix() throws {
+        let pattern = try DocumentNumberPattern(template: "FV-{YYYY}-{NNN}")
+        let prefixed = try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, variableSymbolPrefix: "1")
+        #expect(prefixed.variableSymbolPrefix == "1")
+        #expect(try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, variableSymbolPrefix: " ").variableSymbolPrefix == nil)
+        #expect(try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, variableSymbolPrefix: " 12 ").variableSymbolPrefix == "12")
+        for bad in ["0", "01", "1234", "1a", "x"] {
+            #expect(throws: DocumentNumberSeries.NumberingError.invalidVariableSymbolPrefix(bad)) {
+                try DocumentNumberSeries(id: "invoice", pattern: pattern, year: 2026, variableSymbolPrefix: bad)
+            }
+        }
+        let data = try JSONEncoder().encode(prefixed)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""variableSymbolPrefix":"1""#))
+        #expect(try JSONDecoder().decode(DocumentNumberSeries.self, from: data) == prefixed)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DocumentNumberSeries.self, from: Data(#"{"id":"invoice","pattern":"FV-{YYYY}-{NNN}","resetsYearly":true,"year":2026,"lastCounter":0,"variableSymbolPrefix":"0"}"#.utf8))
+        }
     }
 }
