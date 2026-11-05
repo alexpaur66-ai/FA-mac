@@ -517,6 +517,13 @@ TableColumn("Status") { row in StatusBadge(row.stateInputs, detail: row.statusDe
   - `TextField(_:value:format:prompt:)` (macOS 12.0). "If the format style can't parse the input, the bound value remains unchanged" [S57].
   - Whether the value commits on every keystroke or on submit or focus loss is UNVERIFIED; test it.
   - RECOMMENDATION: a tolerant parser in the core module that accepts "1 234,50", "1234,5" and "1234.50", plus regular and non-breaking spaces. The field shows the canonical form after commit.
+  - **Separator rule** (RECOMMENDATION, one unit-tested function):
+    - Spaces (regular, U+00A0 no-break, U+202F narrow no-break) are always grouping.
+    - When both "," and "." occur, the last one is the decimal mark and the other is grouping.
+    - When only one of them occurs, once, it is the decimal mark, unless it is the UI locale's grouping separator and exactly three digits follow it. So in an English locale that groups with commas, "1,234" is 1234 and "36,5" is 36.5.
+    - A mark that occurs more than once is grouping only when every group after it has exactly three digits. Anything else, such as "1.5." or two decimal marks, is invalid and shows the error state.
+    - **Rate fields** (every field that takes an exchange rate: the inline rate form and Change…, §8.9, and the rate sheet behind Add Rate… and Enter Rate…, screens-flows §2g) always read a single "," or "." as the decimal mark. A ČNB rate for EUR or USD is quoted with three decimals and is far below 1 000, so "24,315" is always 24.315.
+    - Build note: the first editor's `DecimalInput.parse` (DraftEditorView.swift), used by the line cells and the inline rate form alike, doesn't follow this rule yet. It reads a single mark equal to the locale's grouping separator, and any repeated mark, as grouping, so in a comma-grouping locale "36,5" reads 365 and the rate "24,315" reads 24 315 (editor design check, E077).
 - **Locale:** typing follows the **UI locale**, Sasa's habit (the §8.2 rule). The PDF locale applies only to the preview and PDF.
 - **Format:** the field binds with a plain **number** format, `Decimal.FormatStyle(locale:)` (macOS 12.0 [S107]) with two fraction digits via `precision(_:)` (macOS 12.0 [S107]). It does **not** use `Decimal.FormatStyle.Currency`: a currency style puts the symbol or code into the field text, so the currency would show twice next to the suffix label, and parsing could require the symbol. `Currency` is for read-only display (`MoneyText`).
 - **States:**
@@ -586,8 +593,9 @@ TextField("Client", text: $query)
   - a `Grid` (macOS 13.0) [S78] with a header row
   - columns: # · Description · Qty · Unit · Unit price · Discount · VAT rate · Total
   - **Total** is computed, read-only and trailing (`gridColumnAlignment(.trailing)`)
+  - **No currency suffix in the grid cells** (RECOMMENDATION). The document's currency is set once in the header and shows in the totals bar, so the Unit price and Total cells are plain numbers with tabular digits and two decimals ("85,00" in a Czech-format locale). The MoneyField suffix (§8.3) is for standalone amount fields.
   - **VAT rate follows the document's VAT treatment** (document-level rule, RECOMMENDATION; the same rule as screens-flows §2c):
-    - *Czech 21 %* (the screens-flows §5 label; printed "Tuzemsko 21 %", §9 table): a text field with suggestions "21", "12", "0", "exempt" (keyboard-only, no pop-up to Tab past); reverse charge is not offered per line.
+    - *Czech 21 %* (the screens-flows §5 label; printed "Tuzemsko 21 %", §9 table): a text field with suggestions "21", "12" and "0" (keyboard-only, no pop-up to Tab past). Neither reverse charge nor exempt is offered per line: both are document-level treatments (ADR 0009).
     - *EU reverse charge* (printed "EU – přenesená daňová povinnost", §9 table; the default for a new client, §8.12): every line is locked to "RC" (tooltip "EU reverse charge"; RECOMMENDATION, screens-flows §2c); VAT amounts are hidden.
     - *Outside EU* and *Exempt*: ACCT.
     - Mixed documents (some lines reverse charge, some not) only if the accountant confirms them; then TotalsPanel gains a reverse-charge base row.
@@ -599,7 +607,7 @@ TextField("Client", text: $query)
   - issued: read-only text, selectable
   - row invalid: a trailing `exclamationmark.triangle` with a tooltip explaining the fix, and the Issue sheet lists it
   - empty: one blank row with placeholder text
-  - **fully empty trailing line** (e.g. after ↩ on the last row): exists on screen only. It is dropped on save and at issue, never counted as invalid and never printed.
+  - **fully empty trailing lines** (e.g. after ↩ on the last row): exist on screen only. All of them are dropped on save and at issue, never counted as invalid and never printed. The first editor drops only the last one (editor design check, E021).
 - **Keyboard** (RECOMMENDATION; the authoritative map is screens-flows §3.1):
   - **Tab / ⇧Tab** move to the next or previous cell. Tab on the last cell of the last row appends a row. Whether the system Tab order follows `Grid` row order is UNVERIFIED; drive it with `@FocusState` and `focused(_:equals:)` (macOS 12.0) [S65] if not.
   - **Return** moves down one row in the same column. On the last row it appends a new row and focuses its description (`onSubmit`).
@@ -619,7 +627,8 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
                       format: Decimal.FormatStyle(locale: uiLocale).precision(.fractionLength(2)))  // number style, §8.3
                 .multilineTextAlignment(.trailing).monospacedDigit()
                 .focused($focus, equals: .price(line.id))
-            MoneyText(amount: line.total, currency: draft.currency, locale: uiLocale)
+            Text(line.total, format: Decimal.FormatStyle(locale: uiLocale).precision(.fractionLength(2)))  // plain number, no currency suffix (above)
+                .monospacedDigit()
                 .gridColumnAlignment(.trailing)
         }
         .contextMenu { lineMenu(line.id) }                 // Delete Line, Move Up, Move Down
@@ -687,17 +696,17 @@ Grid(horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
   - an outline capsule in `separatorColor`
   - **No tint**: a type is not a status (P4).
 - **States:**
-  - draft: a `Menu` that can switch type. Switching is undoable and keeps the lines.
+  - draft: a `Menu` that switches between Invoice, Advance and Final (screens-flows §1.4). Switching is undoable and keeps the lines. A tax document for a received payment is never offered, and on its own draft the chip is static, as when issued (ADR 0009).
   - issued: static, because the type is immutable after issue
   - in the table: symbol only, with a tooltip
 - **Keyboard:** in a draft the menu is focusable, and Space opens it. Whether Tab reaches it with Full Keyboard Access off is UNVERIFIED, so Document ▸ Change Type ▸ (with a checkmark on the current type) and the palette offer the same choice without Tab.
 
 ```swift
 Menu {
-    ForEach(DocumentKind.allCases) { k in Button { kind = k } label: { Label { Text(k.title) } icon: { Image(systemName: k.symbol) } } }
+    ForEach(DocumentKind.allCases.filter { $0 != .paymentTaxDocument }) { k in Button { kind = k } label: { Label { Text(k.title) } icon: { Image(systemName: k.symbol) } } }
 } label: { Label { Text(kind.shortTitle) } icon: { Image(systemName: kind.symbol) } }
-.menuIndicator(isDraft ? .visible : .hidden)               // menuIndicator macOS 12.0
-.disabled(!isDraft)
+.menuIndicator(isDraft && kind != .paymentTaxDocument ? .visible : .hidden)   // menuIndicator macOS 12.0
+.disabled(!isDraft || kind == .paymentTaxDocument)
 ```
 
 ### 8.8 QRPreview
@@ -708,18 +717,19 @@ Menu {
   - a square QR image, black on white in both appearances, because it is content
   - a caption with the standard's name: "QR Platba" or "EPC QR (SEPA)"
   - the data block: IBAN, BIC, amount, currency, VS or reference, due date, all selectable
-  - a type pop-up, defaulting from the client: QR Platba / EPC QR (SEPA) / None
+  - a type pop-up, defaulting from the client: QR Platba / EPC QR (SEPA) / None. Build note (v0.1): the client model has no QR-type field and the editor no type pop-up yet; the QR type follows the currency (`PaymentInstructions.standard`) until they exist (screens-flows §2c)
 - **Defaults and sizing:**
   - Czech client paying in CZK gets QR Platba; EU client paying in EUR gets EPC (RECOMMENDATION).
   - USD (the third v0.1 currency): which QR standard, if any, fits a USD payment is UNVERIFIED. Until it is checked, a USD document defaults to None (RECOMMENDATION).
   - Error correction M and about 30 mm at print size [S94][S95].
-  - The caption wording is not required by either standard (HEURISTIC).
+  - The caption wording is not required by either standard (HEURISTIC). Use one name everywhere, in the UI and printed under the code: **"QR Platba"** and **"EPC QR (SEPA)"**. Build note: the PDF on main still prints "SEPA QR (EPC)" (`PDFStrings.qrCaption`); the build aligns it.
 - **States:**
   - valid (issued documents only)
-  - **draft:** no scannable QR, in the app **and in print or Quick Look**. A placeholder box of the same size takes its place, because a draft has no number and no VS yet, so a payment made from its QR could never be matched. In the app's QRPreview (inspector) the placeholder reads "QR after issue" (UI label, screens-flows §5). On the draft PDF (the PDF preview, print and Quick Look) it is document text: "QR po vystavení / QR after issue" (screens-flows §2c, §5).
+  - **draft:** no scannable QR, in the app **and in print or Quick Look**. A placeholder box of the same size takes its place, because a draft has no number and no VS yet, so a payment made from its QR could never be matched. In the app's QRPreview (inspector) the placeholder reads "QR after issue" (UI label, screens-flows §5). On the draft PDF (the PDF preview, print and Quick Look) it is document text: "QR po vystavení / QR after issue", or "QR po vystavení" alone on a Czech document (screens-flows §2c, §5).
   - not payable (balance 0, or a DDPP): "No QR – nothing to pay"
   - missing data (no IBAN, BIC or VS): a reason plus "Add Account…", which opens Settings ▸ Bank accounts
   - payload too long: EPC allows at most 331 bytes, and unstructured remittance at most 140 characters [S95]
+  - code unavailable on an issued document (the core refuses the payload, or the code can't be generated from it): the PDF prints "QR kód není k dispozici" (with " / QR code unavailable" on a bilingual document) in the code's place, never a silent gap, and the payment details beside it still let the customer pay (ADR 0010)
 - **Keyboard:** the type pop-up is focusable. ⌘C on the data block copies the IBAN.
 - **VoiceOver:** "QR code for a payment of 1 234,50 euros to account CZ65 …, variable symbol 120260042" (the series-prefixed VS, screens-flows §2i).
 - **SwiftUI:** a Core Image QR rendered into an `Image`. The bridging initialiser and `interpolation(.none)` are not in the research, so they're marked `// verify`.
@@ -782,7 +792,7 @@ Each screen has at most three groups and at most one prominent item, on the trai
 |---|---|---|---|
 | Overview | sidebar toggle, "Overview" | New ▾ | search |
 | Documents list | toggle, "Documents", subtitle such as "12 unpaid" (`navigationSubtitle`, macOS 13.0) | New ▾ · Duplicate · Record Payment · Print | search · inspector |
-| Draft editor (main-window detail or its own window) | toggle, "Draft" + client | Preview toggle · Duplicate | inspector · **Issue…** (prominent) |
+| Draft editor (main-window detail or its own window) | toggle; title: the client name, or "New Invoice" before a client is chosen; subtitle "Draft · Saved" (screens-flows §2c) | Preview toggle · Duplicate | inspector · **Issue…** (prominent) |
 | Issued, unpaid | toggle, number | Print · Save PDF · Duplicate | inspector · **Record Payment…** (prominent) |
 | Issued, paid | toggle, number | Print · Save PDF · Duplicate | inspector |
 | Clients | toggle, "Clients" | New Client · New Document for Client | search · inspector |
@@ -1111,7 +1121,7 @@ English comes first, because the UI is English. The Czech column is filled only 
 | Tax document for received payment (DDPP) | Daňový doklad k přijaté platbě |
 | Final invoice | Faktura – daňový doklad (vyúčtování záloh), the printed title (InvoicingCore `DocumentKind.title`); the Czech type name "Konečná faktura" is ACCT |
 | Issue / Issued | — |
-| Draft | KONCEPT (the watermark on a draft PDF, §4.1) |
+| Draft | KONCEPT (the watermark "KONCEPT / DRAFT" on every draft PDF, §4.1) |
 | Overdue | — |
 | Partly paid / Paid / Overpaid | — |
 | Awaiting payment / Partly paid – tax document missing / Paid – tax document missing / Tax document issued / Settled in final invoice (cs wording ACCT) / Closed unpaid | — |
@@ -1126,7 +1136,7 @@ English comes first, because the UI is English. The Czech column is filled only 
 
 ### Legal and tax strings: one reviewed table (P7)
 
-Every string printed on a document, or shown in the app with legal or tax meaning, comes from this table and from nowhere else; code references a constant, never a literal. **Brief** = the exact wording from the project brief (approved). **ACCT** = "confirm with accountant" until the accountant approves the wording; ACCT strings may be used in drafts and previews, and the app ships v0.1 only once the column says approved. In the English UI a legal or tax string shows its English gloss from this table, or quotes the printed Czech exactly (P7).
+Every string printed on a document, or shown in the app with legal or tax meaning, comes from this table and from nowhere else; code references a constant, never a literal. **Brief** = the exact wording from the project brief (approved). **Design** = a printed marker or caption with no legal or tax meaning, worded by the design specs; it needs no accountant check. **ACCT** = "confirm with accountant" until the accountant approves the wording; ACCT strings may be used in drafts and previews, and the app ships v0.1 only once the column says approved. In the English UI a legal or tax string shows its English gloss from this table, or quotes the printed Czech exactly (P7).
 
 | String | Used for | Status |
 |---|---|---|
@@ -1137,9 +1147,19 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 | Daňový doklad k přijaté platbě | title of a tax document for a received advance | Brief |
 | daň odvede zákazník (lowercase, with diacritics) | reverse-charge clause; capitalising it at the start of a printed line is ACCT | Brief |
 | IČO · DIČ · spisová značka · VS | identifiers | Brief |
-| English gloss of every string above | bilingual PDF | ACCT |
 | Konečná faktura | Czech type name of the final invoice; the UI name is "Final invoice" (its PDF title in InvoicingCore `DocumentKind.title` is "Faktura – daňový doklad (vyúčtování záloh)", screens-flows §2d) | ACCT |
-| Odečet zálohy … / Odečtené zálohy | deduction lines on a final invoice (core prints `DocumentClause.advancesDeducted`) | ACCT |
+| Odečet záloh · Odečteny zálohy zdaněné daňovými doklady č. … (§ 37a zákona o DPH). | caption of the deductions on a final invoice (InvoicingCore `DocumentLabel.advanceDeductions`) and the clause under them (`DocumentClause.advancesDeducted`); each deduction line is the next row | ACCT |
+| Odečet zálohy – daňový doklad č. …, platba ze dne …, sazba DPH … % | one deduction line per tax document and VAT rate on a final invoice (InvoicingPDF `PDFStrings.deductionLine`); the rate part is left out when there is none | ACCT |
+| Plnění · Základ daně a daň dokladu | VAT summary sub-rows on a final invoice: the supply, then the tax base and VAT of this document after the deducted advances (`PDFStrings`) | ACCT |
+| v Kč, kurz … | the VAT summary in CZK with its rate (`PDFStrings.inCZKAtRate`) | ACCT |
+| Celkem bez DPH | total before VAT (`PDFStrings.totalExcludingVAT`) | ACCT |
+| Cena za MJ s DPH | unit-price caption on a document priced with VAT, a tax document for a received payment, so quantity × price is not read as the tax base (`PDFStrings.unitPriceIncludingVAT`) | ACCT |
+| KONCEPT / DRAFT | watermark across every page of a draft PDF; always both languages, a Czech-only draft included (screens-flows §2c) | Design |
+| Číslo bude přiděleno při vystavení / number assigned at issue · QR po vystavení / QR after issue | in place of the number and of the QR on a draft PDF (screens-flows §2c; §8.8) | Design |
+| QR kód není k dispozici / QR code unavailable | in the QR's place on an issued document whose payment data can't be encoded (§8.8, ADR 0010) | Design |
+| QR Platba · EPC QR (SEPA) | caption under the printed QR code (§8.8) | Design |
+| pokračování / continued · Banka / Bank | page-continuation marker; bank-name label | Design |
+| English gloss of every Brief and ACCT string in this table | bilingual PDF | ACCT |
 | DUZP · Datum uskutečnění zdanitelného plnění | date-of-supply label | ACCT |
 | Tuzemsko 21 % · EU – přenesená daňová povinnost (PDP) · Mimo EU · Osvobozeno | VAT treatments and per-line rate labels | ACCT |
 | Kurzový rozdíl | CZK difference on a payment | ACCT |
@@ -1152,7 +1172,7 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 
 The advance note: the brief's short form "Není daňovým dokladem" and the clause InvoicingCore prints (`DocumentClause.notATaxDocument`) differ. The PDF prints the core clause; reconciling the two with the accountant is a follow-up outside the design system (ACCT). If the PDF must print exactly the short form, the change belongs in InvoicingCore `DocumentClause.swift`.
 
-The same applies to the deduction line and the DDPP reference. InvoicingCore prints `DocumentClause.advancesDeducted` ("Odečteny zálohy zdaněné daňovými doklady č. … (§ 37a zákona o DPH).") and `DocumentClause.paymentReceived` ("Daňový doklad k platbě přijaté dne … na základě zálohové faktury č. …."). Reconcile them with the accountant (ACCT).
+The same applies to the deduction clause and the DDPP reference. InvoicingCore prints `DocumentClause.advancesDeducted` ("Odečteny zálohy zdaněné daňovými doklady č. … (§ 37a zákona o DPH).") and `DocumentClause.paymentReceived` ("Daňový doklad k platbě přijaté dne … na základě zálohové faktury č. …."). Reconcile them with the accountant (ACCT).
 
 - **In the UI** the printed Czech title follows the English name, as in "Advance invoice (Zálohová faktura)", wherever the distinction matters: the type picker and the Issue sheet.
 - **Document language** (per document, default from the client): **"Czech"** or **"Czech + English"**. These are InvoicingCore `DocumentLanguage.czech` ("cs", Czech only, for Czech customers) and `.english` ("en", bilingual: Czech first, then English, for foreign customers). On a bilingual document every legal string is in Czech, with the English gloss underneath. The UI label is "Document language". The client default uses the same two values. Czech remains on documents. The UI shows Czech only where it quotes printed text (P7).

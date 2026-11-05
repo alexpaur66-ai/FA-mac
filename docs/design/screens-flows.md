@@ -12,7 +12,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
   - Czech appears only in **document text**: what prints on the PDF (titles, legal and tax strings), the column names of the accountant's CSV (ACCT, §2h), and what Sasa types into a document (line descriptions, units, footer text).
   - The only language control sets document text, never the UI: "Document language: Czech / Czech + English" on each document (its default for new clients is in Settings ▸ General, §2i), mapped to InvoicingCore `DocumentLanguage.czech` ("cs", Czech only, for Czech customers) and `.english` ("en", bilingual, Czech first then English, for foreign customers).
   - The Czech entries in `DesignSystem.xcstrings` stay as a free bonus from the build thread. Nothing in this spec depends on them.
-- The only legal wording used verbatim in this spec is the wording from the brief: "Faktura – daňový doklad", "Zálohová faktura", "Daňový doklad k přijaté platbě", "Není daňovým dokladem" (the brief's short form; the English UI shows "Not a tax document" instead, and the PDF prints the InvoicingCore clause from design-system §9, ACCT) and "daň odvede zákazník". Everything else printed on a PDF is ACCT. **All legal and tax strings, with their status (Brief or ACCT), are kept in one reviewed table: design-system §9 "Legal and tax strings".** Czech terms in this spec such as "přenesená daňová povinnost", "Osvobozeno", "Tuzemsko", "Mimo EU", "DUZP / Datum uskutečnění zdanitelného plnění", "Obchodní firma", "Kurzový rozdíl", "Konečná faktura" and "Odečtené zálohy" are **ACCT: confirm with accountant** wherever they appear. In the app they appear only in document text, if at all.
+- The only legal wording used verbatim in this spec is the wording from the brief: "Faktura – daňový doklad", "Zálohová faktura", "Daňový doklad k přijaté platbě", "Není daňovým dokladem" (the brief's short form; the English UI shows "Not a tax document" instead, and the PDF prints the InvoicingCore clause from design-system §9, ACCT) and "daň odvede zákazník". Everything else printed on a PDF is ACCT, except the **Design** strings (the draft markers, the QR captions and the QR-unavailable notice, the continuation marker and the bank label), which carry no legal or tax meaning. **All printed and legal strings, with their status (Brief, Design or ACCT), are kept in one reviewed table: design-system §9 "Legal and tax strings".** Czech terms in this spec such as "přenesená daňová povinnost", "Osvobozeno", "Tuzemsko", "Mimo EU", "DUZP / Datum uskutečnění zdanitelného plnění", "Obchodní firma", "Kurzový rozdíl", "Konečná faktura" and "Odečtené zálohy" are **ACCT: confirm with accountant** wherever they appear. In the app they appear only in document text, if at all.
 - **Cross-references.** design-system.md owns the tokens, colours, status styles, components and the toolbar table (§8.11). This spec owns the screens, flows, menus and the **one authoritative keyboard map (§3.1)**.
 - Notation:
   - ⌘ = Command, ⇧ = Shift, ⌥ = Option, ⌃ = Control, ↩ = Return, ⌫ = Delete, ⎋ = Esc.
@@ -85,7 +85,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
 | Settings | `Settings` scene (macOS only) | App-level configuration (§2i) | It enables the app's Settings item and ⌘, [S76]. |
 | Command palette | Sheet on the key window | ⌘K (§2k) | Standard component, so there is no custom window UI [S26]. `presentationSizing` is available from macOS 15 [S90]. |
 
-Window titles are the section name or the document number, never the app name, and under 15 characters ("Documents", "FV 2026-0042", "New Invoice") [S19]. The subtitle carries the filter or state through `navigationSubtitle` [S100].
+Window titles are the section name, the document number or a name (a client; for a draft its client, or "New Invoice" before one is chosen), never the app name. Keep them under 15 characters where the name allows ("Documents", "FV 2026-0042", "Acme GmbH", "New Invoice") [S19]. The subtitle carries the filter or state through `navigationSubtitle` [S100].
 
 ### 1.2 Main window sidebar
 
@@ -95,7 +95,7 @@ This is **the** sidebar; design-system §5.1 and §7 refer to it.
 
 | # | Section | Children (smart filters) | Shortcut | Content column | Detail column |
 |---|---|---|---|---|---|
-| 1 | Overview | — | ⌘1 | Tiles, VAT table and attention queue (§2a) | The selected queue item's document (preview, Record Payment); with nothing selected, a calm placeholder |
+| 1 | Overview | — | ⌘1 | Tiles, VAT table and attention queue (§2a) | The selected queue item's document (Record Payment and payments, then the PDF pages); with nothing selected, a calm placeholder |
 | 2 | Documents | All · Drafts (badge) · Unpaid · Overdue (badge, red) · This month · Open advances (badge) | ⌘2 | One `Table` with filters (§2b) | Issued view, or the draft editor in place |
 | 3 | Clients | — | ⌘3 | Clients table (§2e) | Client detail |
 | 4 | Payments & Bank | All payments · v0.2: one row per bank account · Unmatched (badge) | ⌘4 | Payments list (§2f) | The payment's document |
@@ -166,7 +166,7 @@ Menu rules:
 | — | | |
 | Save PDF… | — | One or more issued documents are selected. Drafts can only produce a watermarked preview. |
 | Show PDF in Finder | — | An issued document has a saved PDF (uses `activateFileViewerSelecting` [S92]) |
-| Print… | ⌘P | A document is selected (prints its PDF through the system print panel [S44]). A draft prints with the fixed-colour "KONCEPT / DRAFT" watermark and the "QR po vystavení / QR after issue" placeholder (document text, §2c) instead of a scannable QR (design-system §8.8). |
+| Print… | ⌘P | A document is selected (prints its PDF through the system print panel [S44]). A draft prints with the fixed-colour "KONCEPT / DRAFT" watermark and the "QR po vystavení / QR after issue" placeholder ("QR po vystavení" alone on a Czech document; document text, §2c) instead of a scannable QR (design-system §8.8). |
 | — | | |
 | Close | ⌘W | — |
 
@@ -216,7 +216,7 @@ Deliberately left out:
 | Add Line Item | ⌘L | Editor |
 | Delete Line | — | Editor, with the cursor in a line. **No shortcut** (⌘⌫ stays unbound, §3.1); also in the row's context menu. Undoable. |
 | Move Line Up / Move Line Down | — | Editor, with the cursor in a line. No shortcut on purpose, to keep custom shortcuts few [S17]. Dragging also works on 27. |
-| Change Type ▸ Invoice / Advance Invoice / Tax Document for Received Payment / Final Invoice | — | Draft (checkmark on the current type) |
+| Change Type ▸ Invoice / Advance Invoice / Final Invoice | — | Draft (checkmark on the current type). Not on a tax document for a received payment: that type is created only from its payment and can't be changed (§2d, ADR 0009). |
 | Currency ▸ EUR / CZK / USD · Document Language ▸ Czech / Czech + English · VAT Treatment ▸ … · QR ▸ QR Platba / EPC QR (SEPA) / None | — | Draft. Checkmarked items, so every header control has a path that doesn't depend on Tab (§2c). Also in the palette. |
 | Apply Client Defaults | — | Draft |
 | Enter Rate… | — | A draft in EUR or USD. Moves focus to the draft's inline rate form (§2c), or opens Change… when a rate is already set. The v0.1 rate path. |
@@ -372,8 +372,8 @@ Deliberately left out:
 - Each filter remembers its own sort. iDoklad likewise remembers the last filter [S114].
 
 **Detail column.**
-- **Issued documents:** a summary header (number, type, client link, status badge, total, open balance and due date; the critical numbers sit at the top [S11]), then a `PDFView` preview. `PDFView` is an `NSView`, so it needs `NSViewRepresentable` [S78].
-- The preview shows white paper in both Light and Dark mode, because it is content.
+- **Issued documents:** a summary header (number, type, client link, status badge, total, open balance and due date; the critical numbers sit at the top [S11]), then the payments and the actions, then the PDF row (Save PDF…, Show PDF in Finder, Print…) and the page images of the stored PDF (ADR 0010). The pages come last because they are tall: placed above the payments, they would push Record Payment and the payment list below the fold.
+- The page images show white paper in both Light and Dark mode, because they are content.
 - **Drafts are edited right here** (§2c): selecting a draft shows its editor in the detail column; ↩ in the table moves focus into it. Document ▸ Open in New Window opens the same draft in its own window.
 
 **Inspector** (it follows the selection and updates automatically [S22]); derived information only, design-system §8.12:
@@ -399,7 +399,7 @@ Deliberately left out:
 | Key | Action |
 |---|---|
 | ↑ ↓, ⇧↑ ⇧↓ | Select or extend the selection; the detail follows |
-| ↩ | Open: a draft moves focus into its editor in the detail column; an issued document moves focus to the preview. Implemented explicitly with `onKeyPress(.return)` on the focused Table [S67]: the `primaryAction` docs describe only the double-click on macOS [S69], so that ↩ triggers it by itself is UNVERIFIED. |
+| ↩ | Open: a draft moves focus into its editor in the detail column; an issued document moves focus into its detail (the prominent Record Payment, or the first control when nothing is payable). Implemented explicitly with `onKeyPress(.return)` on the focused Table [S67]: the `primaryAction` docs describe only the double-click on macOS [S69], so that ↩ triggers it by itself is UNVERIFIED. |
 | Double-click | The same as ↩ (`contextMenu(forSelectionType:menu:primaryAction:)`: "a double click performs the primary action" on macOS [S69]) |
 | Space | Quick Look of the PDF [S8][S77] |
 | D | Duplicate as Draft (= ⌘D) |
@@ -439,7 +439,7 @@ Deliberately left out:
 
 ### (c) New invoice: fast path, editor, review and issue
 
-**Build status.** The first draft editor (ADR 0009, PR #12) leaves these items for later: the period-text shift and the comparison with the client's last invoice, the live PDF preview and the saved-PDF line, the command palette (§2k), natural-language dates, the "Go to Problem" default button, dropping a ČNB file onto the sheet, and the undo stack. This section stays the target for them.
+**Build status.** The first draft editor (ADR 0009, PR #12) leaves these items for later: the period-text shift and the comparison with the client's last invoice, the command palette (§2k), natural-language dates, the "Go to Problem" default button, dropping a ČNB file onto the sheet, and the undo stack. It has no floating "On issue" date (an issue date other than today is a ⚠ row with "Set to today") and no per-client DUZP rule yet. The live PDF preview and the saved-PDF line came with PR #14 (ADR 0010); the document window with editor and preview side by side still waits. This section stays the target for them.
 
 **Entry points** (all create a **Draft** with no number):
 
@@ -487,12 +487,13 @@ In the first editor (ADR 0009) a client change applies all of the new client's d
 - **Preview:** in the main-window detail, View ▸ Show/Hide Preview (the toolbar toggle) swaps the detail between the editor (min 520 pt) and the live PDF preview. A document window shows both side by side: editor min 520 pt, preview min 360 pt, thin divider [S21].
 - **Totals bar** pinned at the top of the editor with `safeAreaBar(edge: .top)` (macOS 26) [S82], so it gets the scroll edge effect and needs no custom background [S11][S51]:
   - Reverse-charge example (Acme): "Base 3 142,50 € · Reverse charge · Total 3 142,50 € · Amount due 3 142,50 €". There is no VAT line (rule 4, ACCT).
-  - Czech 21 % on an EUR document: "Base 4 000,00 € · VAT 840,00 € · Total 4 840,00 €" plus "VAT in CZK 20 424,60 Kč" at 24,315 (rule 5).
+  - Czech 21 % on an EUR document: "Base 4 000,00 € · VAT 840,00 € · Total 4 840,00 € · Amount due 4 840,00 €" plus "VAT in CZK 20 424,60 Kč" at 24,315 (rule 5). Amount due shows on an invoice, an advance and a final invoice, never on a DDPP (design-system §8.6).
   - plus the **one readiness chip**: "✓ Ready to issue" or "2 problems". Clicking it opens the review-and-issue sheet, which lists the problems with "Go to Problem". Readiness is shown only in this chip and in the sheet.
   - **The rate (EUR and USD documents) is typed here in v0.1.** When no stored rate covers the DUZP, the bar shows the inline rate form, the same one as in the Issue sheet (edge cases below). Typing the ČNB rate there is the **primary path** (Sasa types the rate for each invoice, §2g). When a stored rate covers the DUZP, the bar adds nothing, and the rate shows in the inspector's ExchangeRateRow (design-system §8.9).
 - **Header form** (a `Grid`, labels on the leading side). **This is the only place for header fields**; the inspector never repeats them, and Tab reaches every one:
   - Client: type-ahead on name, IČO and VAT ID, with caution chips "VAT ID missing" / "Address missing"; the last row is "New Client “X”…", which opens the New Client sheet (§2e).
-  - Type pop-up: each English name with its Czech document title, e.g. "Advance invoice (Zálohová faktura)" (document text, design-system §9) (also Document ▸ Change Type ▸).
+  - **Until Issue, a draft shows the current client card and company profile.** An edit there (a VAT ID, an address, the company DIČ) reaches every open draft, so its chips and ⛔ rows clear without re-picking the client. Only the party data is refreshed; the draft's other fields keep their values. Issue takes the snapshot (step 4 below). Build note: not built yet. The first editor keeps the parties copied when the client was picked and when the draft was created (editor design check, E024).
+  - Type pop-up: each English name with its Czech document title, e.g. "Advance invoice (Zálohová faktura)" (document text, design-system §9) (also Document ▸ Change Type ▸). It offers Invoice, Advance invoice and Final invoice; on a tax document for a received payment it is read-only (§1.4, ADR 0009).
   - Issue date: "On issue" until Sasa sets one (it then becomes the day of Issue).
   - Period (month): drives the DUZP rule and the period-text shift.
   - DUZP (label "Date of taxable supply", short form "DUZP"; the English wording is ACCT), with an ℹ line "DUZP 31. 10. = end of period October 2026". Hidden for an advance invoice.
@@ -502,13 +503,14 @@ In the first editor (ADR 0009) a client change applies all of the new client's d
   - VAT treatment: pop-up [S30] (also Document ▸ VAT Treatment ▸). Labels ACCT.
   - Bank account: filtered by currency.
   - QR type: pop-up (also Document ▸ QR ▸).
-  - VS: "assigned at issue", unless the client has a fixed VS.
+  - VS: "Assigned at issue", unless the client has a fixed VS.
+  - **Build note (v0.1):** the client model has no QR-type or fixed-VS field yet, and the first editor has no QR-type pop-up and no VS row. The QR type follows the currency alone: CZK → QR Platba, EUR → EPC QR (SEPA), USD → None (`PaymentInstructions.standard`, ADR 0010), and Issue assigns the VS. The client rule in §2i stays the target. When the pop-up and the VS row are built, the pop-up defaults from the currency and the VS row reads "Assigned at issue" until the client model has those fields.
   - **Keyboard paths that don't depend on Tab.** Whether a default setup (Full Keyboard Access off) skips segmented controls and pop-ups when tabbing is UNVERIFIED; the HIG treats such controls as Full Keyboard Access territory [S17]. So every non-text control above also has a checkmarked Document-menu item and a palette command.
 - **Line items** (an editable grid; design-system §8.5):
   - Columns: drag handle (27) · Description · Qty · Unit · Unit price · Discount % · VAT rate · Line total (read-only).
   - Unit is a combo box (ks, hod, den, MD, km, or free text; units print on the document, so they are document text) [S32]. SwiftUI has no combo box, so either wrap `NSComboBox` or use `textInputSuggestions` (macOS 15) [research §18].
-  - **VAT rate follows the document treatment** (rule 4): under the Czech treatment it is a text field with suggestions "21", "12", "0", "exempt" (no pop-up, so it needs no Tab-to-control); reverse charge is not offered per line. Under EU reverse charge the column shows "RC" (tooltip "EU reverse charge"; RECOMMENDATION), is locked, and all VAT amounts are hidden. Outside EU and exempt: ACCT. Mixed documents only if the accountant confirms them.
-  - A fully empty trailing line is dropped on save and at issue; it never counts as invalid and never prints.
+  - **VAT rate follows the document treatment** (rule 4): under the Czech treatment it is a text field with suggestions "21", "12" and "0" (no pop-up, so it needs no Tab-to-control). Neither reverse charge nor exempt is offered per line: both are document-level treatments (VAT treatment pop-up, ADR 0009). Under EU reverse charge the column shows "RC" (tooltip "EU reverse charge"; RECOMMENDATION), is locked, and all VAT amounts are hidden. Outside EU and exempt: ACCT. Mixed documents only if the accountant confirms them.
+  - Fully empty trailing lines are dropped on save and at issue (all of them, not only the last one); they never count as invalid and never print. The first editor drops only the last one, as ADR 0009 words it (editor design check, E021).
   - Reorder by drag: `reorderable()` + `reorderContainer(for:isEnabled:move:)` are **(27)** [S96]. Otherwise Document ▸ Move Line Up / Down.
 - **Notes on PDF** (above and below the lines) sit under a disclosure control.
 - **Inspector** (derived information only, design-system §8.12):
@@ -523,21 +525,21 @@ In the first editor (ADR 0009) a client change applies all of the new client's d
 |---|---|
 | Typing in Description | Suggests earlier lines with their last unit, price, VAT rate and discount (Fakturoid's price list "našeptává" and Invoiceur's reuse of past items are the model [S104][S135]) |
 | Tab | Accepts the suggestion and moves to Qty. Otherwise moves to the next cell (⇧Tab goes back). |
-| ↩ in a cell | Commits and moves down to the same column in the next row. On the last row it adds a new line and focuses its Description (RECOMMENDATION, spreadsheet-like). An empty trailing line is dropped later. |
+| ↩ in a cell | Commits and moves down to the same column in the next row. On the last row it adds a new line and focuses its Description (RECOMMENDATION, spreadsheet-like). Empty trailing lines are dropped later. |
 | ⌘L | Add Line Item |
 | Delete a line | Document ▸ Delete Line or the row's context menu, with undo. No key: a grid of text fields has no "row focused" state, and ⌘⌫ stays unbound (§3.1). |
 | ⎋ in a field | Revert the field. `onExitCommand` fires on Esc while the view has focus; whether it fires while a text field is being edited is UNVERIFIED, so prototype it and fall back to `onKeyPress(.escape)` or revert on focus loss. |
 
 **Fast entry for dates and amounts.**
 - Dates accept "today", "+14", "-1", "14d", "30.11." and "30.11.2026". The resolved date and weekday show next to the field. Things' parser is the model [S127].
-- Amounts accept a decimal comma or point and spaces.
+- Amounts accept a decimal comma or point and spaces, by the one separator rule in design-system §8.3 (in a comma-grouping locale "1,234" is 1234 and "36,5" is 36.5; rate fields always read "24,315" as 24.315).
 - `TextField(value:format:)` leaves the bound value unchanged if parsing fails [S70]. So show an inline error and never lose input.
 - When the value commits (per keystroke or on focus loss) is **UNVERIFIED**. The editor must commit on ⌘↩, on selection change and on ⌘W.
 - Money is `Decimal`. **One locale rule in both spec files** (design-system §8.2/§8.3): editor **input** uses the **UI locale** and a plain number format (`Decimal.FormatStyle(locale:)`, never `Currency`, so the currency isn't typed twice next to its suffix label); the **preview and PDF** use the PDF locale (Czech formatting in both document languages). The locale is always passed explicitly, because it defaults to `.autoupdatingCurrent` [S71].
 
 **Live preview.**
 - Re-render the PDF about 300 ms after typing stops (RECOMMENDATION) and keep the last frame visible to avoid flicker.
-- The preview is exactly what will be issued, except for three draft markers (document text, so they keep their Czech): the "KONCEPT / DRAFT" watermark (a fixed mid-grey colour drawn into the PDF, so it survives Dark Mode and printing; design-system §4.1), "Číslo bude přiděleno při vystavení / number assigned at issue" in place of the number, and a "QR po vystavení / QR after issue" placeholder instead of a scannable QR (a draft has no VS yet, so a payment from it couldn't be matched; design-system §8.8). The same applies to Print and Quick Look of a draft.
+- The preview is exactly what will be issued, except for three draft markers (document text, so they keep their Czech): the "KONCEPT / DRAFT" watermark (a fixed mid-grey colour drawn into the PDF, so it survives Dark Mode and printing; design-system §4.1), "Číslo bude přiděleno při vystavení / number assigned at issue" in place of the number, and a "QR po vystavení / QR after issue" placeholder instead of a scannable QR (a draft has no VS yet, so a payment from it couldn't be matched; design-system §8.8). The same applies to Print and Quick Look of a draft. The watermark reads "KONCEPT / DRAFT" on every draft, a Czech-only one included, so anyone who sees a printed draft can tell it apart from a document; the number and QR placeholders, and the QR-unavailable notice, follow the document language (the Czech part alone on a Czech document).
 
 **Autosave and undo.** Every change saves immediately. There is no Save command and no unsaved dot [S43]. Edits can be undone one by one, with named actions [S42].
 
@@ -551,7 +553,7 @@ In the first editor (ADR 0009) a client change applies all of the new client's d
   - A typed rate dated after the DUZP is blocked, and one more than 7 days older than the DUZP gets the stale-rate warning (§2g).
   - Q7 (a link to the ČNB page in Sasa's browser) is still open; §2g sketches it (RECOMMENDATION).
 - **A DUZP in a month already exported to the accountant** requires a checkbox in the review sheet.
-- **Changing the type in a draft** is allowed, because no number exists yet. Fakturoid locks the type after creation [S104]; that limitation doesn't apply here.
+- **Changing the type in a draft** is allowed between invoice, advance invoice and final invoice, because no number exists yet; a tax document for a received payment keeps its type (§1.4, ADR 0009). Fakturoid locks the type after creation [S104]; that limitation doesn't apply here.
 
 #### The review-and-issue step
 
@@ -571,7 +573,7 @@ This step is irreversible, so it is designed to be quick in the common case and 
 │ Dates       Issued 5. 11. 2026 · DUZP 31. 10. 2026 · Due …   │
 │ Total       3 142,50 €          VAT  — (daň odvede zákazník) │
 │ Rate        24,315 CZK/EUR · for 30. 10. 2026 · Typed        │
-│ Payment     RB EUR · IBAN … · EPC QR · VS 120260042          │
+│ Payment     RB EUR · IBAN … · EPC QR (SEPA) · VS 120260042   │
 │ PDF         ~/Documents/Faktury/2026/FV 2026-0042 Acme.pdf   │
 │                                                              │
 │ Changes vs FV 2026-0038 (last to Acme)                       │
@@ -718,7 +720,7 @@ Assumptions:
 The default sort is Name A–Z.
 
 **Client detail.**
-- **Header:** name, address, country. IČO and DIČ/VAT ID are selectable text, so they can be copied (HIG: make useful label text selectable [S56]). Default chips: "EUR · Czech + English · EU reverse charge · EPC QR · 30 days" (Acme's own settings).
+- **Header:** name, address, country. IČO and DIČ/VAT ID are selectable text, so they can be copied (HIG: make useful label text selectable [S56]). Default chips: "EUR · Czech + English · EU reverse charge · EPC QR (SEPA) · 30 days" (Acme's own settings).
 - **Tiles:** Open balance, Overdue, Invoiced this year, Last payment.
 - **Actions:** New Invoice (⌘N), Repeat Last Invoice "FV 2026-0038" (⌘D), New Advance Invoice (⇧⌘N), Add Note.
 - **Tabs:** Documents · Payments · Activity.
@@ -745,7 +747,7 @@ The default sort is Name A–Z.
   - Currency: EUR, CZK or USD. Sasa: "for start its enough, you can add dollar". It follows the country: CZ → CZK, any other → EUR; USD is picked by hand (RECOMMENDATION). The app sets it explicitly, because the core's own default is CZK.
   - Document language: Czech for a Czech address, Czech + English otherwise (the InvoicingCore `Customer` default).
   - No footer text: none prints until Sasa sets one in Settings ▸ Documents & PDF (§2i).
-- **Derived defaults, shown live** under the fields as one line, e.g. "DE + VAT ID → EU reverse charge · EUR · Czech + English · EPC QR · 14 days". Each can be changed later in the inspector.
+- **Derived defaults, shown live** under the fields as one line, e.g. "DE + VAT ID → EU reverse charge · EUR · Czech + English · EPC QR (SEPA) · 14 days". Each can be changed later in the inspector.
 - **How the country adjusts the VAT treatment** (labels and rules ACCT): CZ → Czech 21 %; another EU country **with** a VAT ID → EU reverse charge; another EU country **without** a VAT ID → Czech 21 % with an inline warning "Reverse charge needs the client's VAT ID"; outside the EU with a VAT ID → Outside EU; outside the EU without one → Czech 21 % (InvoicingCore `CustomerVATStatus.nonEUConsumer`; § 10h is ACCT); Outside EU can still be set by hand.
 - **Required:** name and country. Address and VAT ID are not required to save, but a missing one shows as a caution chip in the client picker and blocks Issue where the law needs it (§2c).
 - **↩** creates the client. Opened from a draft, it fills the draft's client, applies the defaults and returns focus to the first line's Description; otherwise it selects the new client.
@@ -1340,7 +1342,7 @@ Counting rules:
 | Locked | |
 | Not a tax document (in-app banner) | The brief's Czech short form "Není daňovým dokladem" isn't shown in the English UI |
 | This is not a tax document. A tax document will be issued upon receipt of the payment. (English gloss on a bilingual advance PDF) | **document text:** "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby." (InvoicingCore `DocumentClause.notATaxDocument`, ACCT) |
-| Draft markers on a draft PDF | **document text:** "KONCEPT / DRAFT", "Číslo bude přiděleno při vystavení / number assigned at issue", "QR po vystavení / QR after issue" (§2c) |
+| Draft markers on a draft PDF | **document text:** "KONCEPT / DRAFT", "Číslo bude přiděleno při vystavení / number assigned at issue", "QR po vystavení / QR after issue" (§2c); the watermark always prints both languages, the number and QR placeholders only their Czech part on a Czech document |
 
 **Overview**
 
@@ -1372,6 +1374,7 @@ Counting rules:
 | Go to Problem | |
 | Ready to issue | |
 | Number assigned at issue | |
+| Assigned at issue | The VS row of a draft (§2c) |
 | Client | |
 | Issue date | |
 | On issue | |
@@ -1397,7 +1400,7 @@ Counting rules:
 | Description / Qty / Unit / Unit price / Discount / VAT rate | |
 | Base / VAT / Total / Amount due | |
 | VAT in CZK | |
-| Advances deducted | **document text:** "Odečet zálohy … / Odečtené zálohy" on the final invoice (ACCT); InvoicingCore prints `DocumentClause.advancesDeducted` (design-system §9) |
+| Advances deducted | **document text:** "Odečet záloh" (caption), one "Odečet zálohy – daňový doklad č. …, platba ze dne …, sazba DPH … %" line per tax document and rate (`PDFStrings.deductionLine`) and the clause `DocumentClause.advancesDeducted` on the final invoice (ACCT, design-system §9) |
 | (DDPP reference line) | **document text:** "K záloze …, platba ze dne …" (ACCT); InvoicingCore prints `DocumentClause.paymentReceived` (design-system §9) |
 | When paid, prepare | |
 | Add Line Item | |
