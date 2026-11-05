@@ -6,17 +6,23 @@
 /// document validator asks the user to confirm it instead.
 public struct VATIdentifier: Hashable, Sendable, CustomStringConvertible {
     /// Two-letter prefix as used for VAT: ISO 3166 country code, except Greece, which uses "EL".
+    /// Greece's ISO code "GR" is accepted on input and stored as "EL".
     public let countryCode: String
     /// The part after the prefix, letters and digits only.
     public let number: String
 
     public init?(_ raw: String) {
-        let compact = raw.uppercased().filter { !$0.isWhitespace && $0 != "-" && $0 != "." }
+        // Reject non-ASCII input before changing case: uppercasing would fold "ß" to "SS" or "ﬁ" to "FI".
+        let filtered = raw.filter { !$0.isWhitespace && $0 != "-" && $0 != "." }
+        guard filtered.allSatisfy(\.isASCII) else { return nil }
+        let compact = filtered.uppercased()
         guard (4...16).contains(compact.count) else { return nil }
-        let prefix = String(compact.prefix(2))
+        let rawPrefix = String(compact.prefix(2))
         let rest = String(compact.dropFirst(2))
-        guard prefix.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        guard rawPrefix.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
         guard rest.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        // Greece's VAT prefix is "EL"; the ISO code "GR" would otherwise be taken for a non-EU state.
+        let prefix = rawPrefix == "GR" ? "EL" : rawPrefix
         if prefix == "CZ", !Self.isValidCzechNumber(rest) { return nil }
         self.countryCode = prefix
         self.number = rest
