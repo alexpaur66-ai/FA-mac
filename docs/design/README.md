@@ -5,11 +5,13 @@ The UI design for FA: how the app looks, how it is laid out, and how it stays fa
 | File | What it holds |
 | --- | --- |
 | [design-system.md](design-system.md) | Principles, platform baseline, typography, colour and status styles, spacing and layout, Liquid Glass rules, icons, components, writing and localisation, accessibility checklist, sources. |
-| [screens-flows.md](screens-flows.md) | Information architecture, menus, every screen and flow (Overview, Documents, draft editor and Issue, Clients, payments, ČNB rates, bank import, Settings, iPhone companion), the keyboard map, speed budgets, open questions. |
+| [screens-flows.md](screens-flows.md) | Information architecture, menus, every screen and flow (Overview, Documents, draft editor and Issue, Clients, payments, exchange rates, bank import, Settings, iPhone companion, Repair mode), the keyboard map, speed budgets, open questions. |
 | [review-log.md](review-log.md) | The review findings on both specs and what was changed for each. |
-| `App/FA/DesignSystem/` | The code: tokens, status styles, `StatusBadge`, `MoneyText`, `FloatingSurface`, a debug gallery, and the `DesignSystem` string table (English and Czech). |
+| `App/FA/DesignSystem/` | The code: tokens, status styles, `StatusBadge`, `MoneyText`, `FloatingSurface`, a debug gallery, and the `DesignSystem` string table (English; the Czech entries are a free bonus). |
 
 The interactive mockups (a design canvas with sample data) are linked from the project thread.
+
+**The UI is English only.** Saša answered "en" for the interface language (proposal doc, 5 Nov 2026). Czech appears only in document text (what prints on the PDF); Czech UI is out of scope.
 
 ## Markers in the specs
 
@@ -20,10 +22,10 @@ The interactive mockups (a design canvas with sample data) are linked from the p
 
 ## Platform policy (agreed with the build)
 
-The specs recommend targeting macOS 27.0, with macOS 26.1 as the fallback (design-system.md §2). That recommendation
-waits for Saša's macOS version. Until then the code follows the policy agreed for the repository:
+Saša's Mac runs **macOS 27.2** with English as the system language (Saša's answer in the proposal doc, 5 Nov 2026),
+so the question about the macOS version is answered. The decision, agreed with the build:
 
-- The deployment target stays **macOS 14.0**.
+- The deployment target stays **macOS 14.0** for now.
 - CI builds with the default Xcode of the `macos-15` runner, so any API from a newer SDK sits behind
   `#if compiler(>=6.2)` (Swift 6.2 ships with the macOS 26 SDK; a macOS 27 API needs the Swift version of that SDK)
   and an `if #available(macOS NN, *)` check for the API's own version, with a macOS 14 fallback.
@@ -31,6 +33,9 @@ waits for Saša's macOS version. Until then the code follows the policy agreed f
   opaque capsule, the same as with Reduce Transparency.
 - The runner's Xcode 16.4 (Swift 6.1) compiles only the fallback. The glass branch is first compiled by Xcode 26 or
   later, on the Mac.
+- The minimum rises once CI builds with Xcode 26 or later. For that raise the specs recommend **macOS 27.0**
+  (design-system.md §2, screens-flows.md §0.1). The macOS 27.0 APIs need the macOS 27 SDK, which ships with Xcode 27
+  (design-system.md §2), so a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1).
 - When the target is raised, the gated branches become the only branch, and the macOS 27 items in design-system.md §2
   (bordered text fields, `.tabs` pickers, `reorderable()`, concentric radii) can be adopted.
 
@@ -53,7 +58,7 @@ The code follows the specs, with a few names changed so they don't clash with In
 Text(verbatim: document.number ?? "—").textRole(.documentNumber)   // drafts have no number yet
 
 StatusBadge(DocumentStateInputs(kind: .invoice, settlement: .partlyPaid, isOverdue: true),
-            detail: "+12 dní · zbývá 1 000,00 €")
+            detail: "+12 days · 1 000,00 € left")
 
 MoneyText(amount: total, currency: "EUR", locale: uiLocale, czk: totalInCZK, role: .total)
 
@@ -74,6 +79,7 @@ the build adds with the project settings (not `.tint` on the root view). Links a
 `NSColor.linkColor`, never the brand colour.
 
 Every status label is a `LocalizedStringResource` in the `DesignSystem` table, with English defaults in sentence case and
-Czech translations in `DesignSystem.xcstrings`. Three Czech labels wait for the accountant: "Uzavřeno – neuhrazeno",
+Czech translations in `DesignSystem.xcstrings`. The app ships an English UI; the Czech entries stay as a free bonus. If
+the Czech UI is ever turned on, three Czech labels wait for the accountant: "Uzavřeno – neuhrazeno",
 "K opravě dobropisem" and "Zúčtováno v konečné faktuře" (it follows the type name "Konečná faktura"). `StatusBadge`
 resolves its word in the view's locale, so the visible word, the tooltip and VoiceOver always agree.
