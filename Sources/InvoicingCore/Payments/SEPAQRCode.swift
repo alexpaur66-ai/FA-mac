@@ -73,7 +73,9 @@ public struct SEPAQRCode: Hashable, Sendable {
 
     /// The complete payload to encode into the QR code (UTF-8, LF separated).
     public func encoded() throws -> String {
-        let name = PaymentStringText.collapsingWhitespace(self.name)
+        // NFC first, so a decomposed "é" (e + U+0301, common in text pasted on macOS) counts and travels
+        // as one character, as it does for the bank.
+        let name = PaymentStringText.collapsingWhitespace(self.name).precomposedStringWithCanonicalMapping
         guard !name.isEmpty else { throw EncodingError.emptyName }
         try Self.check(name, element: "Name", maximum: 70)
 
@@ -96,10 +98,11 @@ public struct SEPAQRCode: Hashable, Sendable {
             purposeText = code
         }
 
-        if creditorReference != nil, remittanceText != nil { throw EncodingError.bothRemittanceForms }
-        let remittance = remittanceText.map(PaymentStringText.collapsingWhitespace) ?? ""
+        // An empty or blank text is no remittance information, so it does not conflict with a reference.
+        let remittance = remittanceText.map(PaymentStringText.collapsingWhitespace)?.precomposedStringWithCanonicalMapping ?? ""
+        if creditorReference != nil, !remittance.isEmpty { throw EncodingError.bothRemittanceForms }
         try Self.check(remittance, element: "Remittance Information (Unstructured)", maximum: 140)
-        let information = self.information.map(PaymentStringText.collapsingWhitespace) ?? ""
+        let information = self.information.map(PaymentStringText.collapsingWhitespace)?.precomposedStringWithCanonicalMapping ?? ""
         try Self.check(information, element: "Beneficiary to Originator information", maximum: 70)
 
         var lines = [
@@ -118,7 +121,10 @@ public struct SEPAQRCode: Hashable, Sendable {
         return payload
     }
 
+    /// Counts Unicode scalars (code points), as bank parsers do, not Swift grapheme clusters: a letter
+    /// with a combining mark that has no precomposed form is two characters for the bank.
     private static func check(_ value: String, element: String, maximum: Int) throws {
-        if value.count > maximum { throw EncodingError.tooLong(element: element, maximum: maximum, actual: value.count) }
+        let length = value.unicodeScalars.count
+        if length > maximum { throw EncodingError.tooLong(element: element, maximum: maximum, actual: length) }
     }
 }

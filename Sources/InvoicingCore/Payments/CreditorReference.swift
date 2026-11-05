@@ -10,6 +10,10 @@ public struct CreditorReference: Hashable, Sendable, CustomStringConvertible {
         let compact = raw.uppercased().filter { !$0.isWhitespace }
         guard (5...25).contains(compact.count), compact.hasPrefix("RF") else { return nil }
         guard compact.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        // The check digits are 98 − (n mod 97), so always two decimal digits in 02…98. 00, 01 and 99
+        // satisfy mod 97 == 1 as aliases of 97, 98 and 02, and a letter maps to 10…35; neither is valid.
+        let checkDigits = compact.dropFirst(2).prefix(2)
+        guard checkDigits.allSatisfy(\.isASCIIDigit), let check = Int(checkDigits), (2...98).contains(check) else { return nil }
         guard IBAN.mod97(compact) == 1 else { return nil }
         self.value = compact
     }

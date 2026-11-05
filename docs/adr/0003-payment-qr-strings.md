@@ -15,16 +15,20 @@ Date: 2026-11-05 · Status: accepted, open to the adversarial review
   the QR alphanumeric mode the specification recommends; `*` and `%` are always percent-encoded;
   characters outside ISO-8859-1 are percent-encoded as UTF-8 (the mechanism the specification names).
   Length limits are enforced after encoding and reported as errors, never truncated silently.
+  CC must be three letters A–Z (ISO 4217 shape); anything else is an error, so no value can carry `*`.
 - Payment symbols are emitted with their digits as entered (leading zeros kept), so the QR matches
   the symbol printed on the document.
 - SEPA EPC QR (EPC069-12 v3.1, 19 March 2024, read from the EPC PDF on 5 Nov 2026): version 002 by
   default (BIC optional), character set 1 (UTF-8, so Czech names keep their diacritics), LF
   separators, the last populated element without a separator, payload ≤ 331 bytes, amounts
   `EUR` + two decimals within 0.01…999 999 999.99, structured remittance ≤ 35 as an ISO 11649
-  creditor reference, unstructured ≤ 140, the two mutually exclusive. The QR image must use error
-  correction level M and at most version 13; the generator exposes both constants.
+  creditor reference, unstructured ≤ 140, the two mutually exclusive (blank text counts as absent).
+  Text elements are normalised to NFC and their limits counted in Unicode code points. The QR
+  image must use error correction level M and at most version 13; the generator exposes both
+  constants.
 - `CreditorReference` implements ISO 11649 (RF + check digits + ≤ 21 characters) with the IBAN
-  mod-97 routine, so EU customers' payments can carry a machine-readable invoice reference.
+  mod-97 routine, so EU customers' payments can carry a machine-readable invoice reference. The
+  check digits must be two decimal digits in 02…98 (00, 01 and 99 pass mod 97 but are never issued).
 - `BIC` validates only the ISO 9362 shape (8 or 11 characters, first six letters).
 
 ## Alternatives rejected

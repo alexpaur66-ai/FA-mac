@@ -20,6 +20,8 @@ public struct QRPlatba: Hashable, Sendable {
         case invalidPaymentReference(String)
         /// The payment type (PT) must be 1–3 characters from the QR alphanumeric set.
         case invalidPaymentType(String)
+        /// The currency (CC) must be an ISO 4217 code: exactly three letters A–Z.
+        case invalidCurrency(String)
     }
 
     /// Account to pay to (ACC). With a BIC the field reads `IBAN+BIC`.
@@ -89,7 +91,13 @@ public struct QRPlatba: Hashable, Sendable {
             }
             fields.append(("AM", amount.plainString(minimumFractionDigits: 2)))
         }
-        if let currency { fields.append(("CC", currency.code)) }
+        if let currency {
+            let code = currency.code
+            guard code.unicodeScalars.count == 3, code.unicodeScalars.allSatisfy({ (0x41...0x5A).contains($0.value) }) else {
+                throw EncodingError.invalidCurrency(code)
+            }
+            fields.append(("CC", code))
+        }
         if let paymentReference {
             let digits = paymentReference.trimmingWhitespace()
             guard !digits.isEmpty, digits.count <= 16, digits.allSatisfy(\.isASCIIDigit) else {
@@ -97,18 +105,25 @@ public struct QRPlatba: Hashable, Sendable {
             }
             fields.append(("RF", digits))
         }
-        if let recipientName { fields.append(("RN", Self.encodeText(recipientName, fold: foldsTextToQRAlphanumeric))) }
+        if let recipientName {
+            // A blank name is no name: a bare "RN:" key is left out rather than emitted empty.
+            let encoded = Self.encodeText(recipientName, fold: foldsTextToQRAlphanumeric)
+            if !encoded.isEmpty { fields.append(("RN", encoded)) }
+        }
         if let dueDate {
             fields.append(("DT", String(dueDate.year).leftPadded(to: 4) + String(dueDate.month).leftPadded(to: 2) + String(dueDate.day).leftPadded(to: 2)))
         }
         if let paymentType {
             let type = paymentType.trimmingWhitespace().uppercased()
-            guard (1...3).contains(type.count), type.allSatisfy({ PaymentStringText.qrAlphanumeric.contains($0) && $0 != "*" }) else {
+            guard (1...3).contains(type.count), type.allSatisfy({ PaymentStringText.qrAlphanumeric.contains($0) && $0 != "*" && $0 != "%" }) else {
                 throw EncodingError.invalidPaymentType(paymentType)
             }
             fields.append(("PT", type))
         }
-        if let message { fields.append(("MSG", Self.encodeText(message, fold: foldsTextToQRAlphanumeric))) }
+        if let message {
+            let encoded = Self.encodeText(message, fold: foldsTextToQRAlphanumeric)
+            if !encoded.isEmpty { fields.append(("MSG", encoded)) }
+        }
         if let variableSymbol { fields.append(("X-VS", variableSymbol.digits)) }
         if let specificSymbol { fields.append(("X-SS", specificSymbol.digits)) }
         if let constantSymbol { fields.append(("X-KS", constantSymbol.digits)) }

@@ -139,6 +139,40 @@ import Testing
         }
     }
 
+    @Test func currencyMustBeThreeLetters() throws {
+        let account = try iban("CZ9106000000000000000123")
+        // "*" is the field separator: "CC:E*R" would split into CC:E and a stray field R.
+        #expect(throws: QRPlatba.EncodingError.invalidCurrency("E*R")) {
+            try QRPlatba(iban: account, amount: 450, currency: Currency(code: "E*R")).encoded()
+        }
+        #expect(throws: QRPlatba.EncodingError.invalidCurrency("")) {
+            try QRPlatba(iban: account, currency: Currency(code: "")).encoded()
+        }
+        #expect(throws: QRPlatba.EncodingError.invalidCurrency("12")) {
+            try QRPlatba(iban: account, currency: Currency(code: "12")).encoded()
+        }
+        #expect(throws: QRPlatba.EncodingError.invalidCurrency("EU ")) {
+            try QRPlatba(iban: account, currency: Currency(code: "EU ")).encoded()
+        }
+        #expect(throws: QRPlatba.EncodingError.invalidCurrency("EURO")) {
+            try QRPlatba(iban: account, currency: Currency(code: "EURO")).encoded()
+        }
+        let czk = try QRPlatba(iban: account, currency: .czk).encoded()
+        let eur = try QRPlatba(iban: account, currency: Currency(code: "eur")).encoded()
+        #expect(czk == "SPD*1.0*ACC:CZ9106000000000000000123*CC:CZK")
+        #expect(eur == "SPD*1.0*ACC:CZ9106000000000000000123*CC:EUR")
+    }
+
+    @Test func blankTextFieldsAreLeftOut() throws {
+        let account = try iban("CZ9106000000000000000123")
+        let payment = QRPlatba(iban: account, amount: 450, currency: .czk, message: "   ", recipientName: "")
+        let encoded = try payment.encoded()
+        #expect(encoded == "SPD*1.0*ACC:CZ9106000000000000000123*AM:450.00*CC:CZK")
+        #expect(throws: QRPlatba.EncodingError.invalidPaymentType("A%")) {
+            try QRPlatba(iban: account, paymentType: "A%").encoded()
+        }
+    }
+
     @Test func symbolsKeepTheirDigits() throws {
         let payment = QRPlatba(iban: try iban("CZ6508000000192000145399"), variableSymbol: PaymentSymbol.variable(fromDocumentNumber: "FV-2026-001"))
         let encoded = try payment.encoded()
