@@ -17,7 +17,9 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case rateNotInForce, exemptReferenceMissing, mixedTreatments
         case taxPointDateMissing, taxPointAfterIssueDate, issuedAfterDeadline, dueDateBeforeIssueDate
         case exchangeRateMissing, exchangeRateCurrencyMismatch, exchangeRateAfterTaxPoint, exchangeRateStale
-        case advanceDeductionsOnWrongKind, advanceRateDiffers, advancesExceedSupply
+        case advanceDeductionsOnWrongKind, advanceDeductedTwice, advanceCurrencyDiffers, advanceRateDiffers, advanceExchangeRateDiffers
+        case advancesExceedSupply
+        case documentTotalNegative, receivedAmountNotPositive
         case paymentInstructionsMissing, bankAccountCurrencyDiffers, amountsUnavailable
     }
 
@@ -39,11 +41,14 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
 
     public var isError: Bool { severity == .error }
 
-    /// The message for the user, in the interface language.
+    /// The message for the user, in the interface language. A date in `detail` (always stored as ISO
+    /// "2026-11-19") is printed the Czech way in Czech messages.
     public func message(language: DocumentLanguage) -> String {
         let texts = Self.texts(for: code)
         let template = language == .czech ? texts.cs : texts.en
-        return template.replacingOccurrences(of: "{detail}", with: detail ?? "")
+        var value = detail ?? ""
+        if language == .czech, let day = CalendarDay(iso: value) { value = day.czechString }
+        return template.replacingOccurrences(of: "{detail}", with: value)
     }
 
     private static func texts(for code: Code) -> (cs: String, en: String) {
@@ -106,8 +111,8 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
             return ("Chybí datum uskutečnění plnění nebo přijetí platby (§ 29 odst. 1 písm. h) ZDPH).",
                     "The date of supply or of payment receipt is missing (§ 29(1)(h) of the VAT Act).")
         case .taxPointAfterIssueDate:
-            return ("Datum plnění {detail} je po datu vystavení.",
-                    "The date of supply {detail} is after the issue date.")
+            return ("Datum plnění {detail} je po datu vystavení; služba se považuje za poskytnutou nejpozději dnem vystavení daňového dokladu (§ 21 odst. 3 ZDPH), u plnění s českou DPH proto uveďte datum plnění shodné s datem vystavení.",
+                    "The date of supply {detail} is after the issue date; a service is deemed supplied no later than the day its tax document is issued (§ 21(3) of the VAT Act), so for a supply with Czech VAT set the date of supply to the issue date.")
         case .issuedAfterDeadline:
             return ("Doklad je vystaven po lhůtě; měl být vystaven nejpozději {detail} (§ 28 ZDPH).",
                     "The document is issued late; the deadline was {detail} (§ 28 of the VAT Act).")
@@ -129,12 +134,27 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case .advanceDeductionsOnWrongKind:
             return ("Zálohy lze odečíst jen na konečné faktuře.",
                     "Advances can only be deducted on a final invoice.")
+        case .advanceDeductedTwice:
+            return ("Záloha {detail} je odečtena dvakrát; každý daňový doklad k platbě lze odečíst jen jednou za každý režim DPH.",
+                    "The advance {detail} is deducted twice; each payment tax document can be deducted only once per VAT treatment.")
+        case .advanceCurrencyDiffers:
+            return ("Záloha {detail} je v jiné měně než doklad.",
+                    "The advance {detail} is in another currency than the document.")
         case .advanceRateDiffers:
             return ("Zálohy byly zdaněny jinou sazbou než plnění; výpočet podle § 37a odst. 3 ZDPH prověřte s účetní.",
                     "The advances were taxed at a different rate than the supply; check the § 37a(3) computation with your accountant.")
+        case .advanceExchangeRateDiffers:
+            return ("Záporný rozdíl se přepočítává kurzem uplatněným u zálohy (§ 37a odst. 2 písm. b) ZDPH); kurz zálohy chybí nebo byly zálohy přepočteny různými kurzy, použit je kurz dokladu – prověřte s účetní.",
+                    "A negative difference is converted at the exchange rate applied to the advance (§ 37a(2)(b) of the VAT Act); the advance's rate is missing or the advances used different rates, so the document's rate was used – check with your accountant.")
         case .advancesExceedSupply:
             return ("Odečtené zálohy převyšují plnění; základ daně je záporný (§ 37a odst. 2 písm. b) ZDPH).",
                     "The deducted advances exceed the supply; the tax base is negative (§ 37a(2)(b) of the VAT Act).")
+        case .documentTotalNegative:
+            return ("Doklad nebo jeho řádek rekapitulace DPH je záporný; opravný daňový doklad (§ 45 ZDPH) zatím není podporován.",
+                    "The document or a row of its VAT summary is negative; corrective tax documents (§ 45 of the VAT Act) are not supported yet.")
+        case .receivedAmountNotPositive:
+            return ("Daňový doklad k přijaté platbě musí znít na kladnou částku.",
+                    "A tax document for a received payment must be for a positive amount.")
         case .paymentInstructionsMissing:
             return ("Doklad neuvádí bankovní spojení.",
                     "The document has no bank details.")
@@ -225,6 +245,19 @@ public enum DocumentValidator {
 
         // Advances: § 37a ZDPH.
         if !document.advanceDeductions.isEmpty && !document.kind.deductsAdvances { add(.advanceDeductionsOnWrongKind, .error) }
+        // One deduction per payment tax document and VAT treatment (ADR 0004); a payment tax document with
+        // several treatments legitimately gives several rows with the same number.
+        var seenDeductions = Set<String>()
+        var reportedTwice = Set<String>()
+        for deduction in document.advanceDeductions {
+            let number = deduction.documentNumber.trimmingWhitespace()
+            if !seenDeductions.insert(number + "|" + deduction.treatment.groupingKey).inserted, reportedTwice.insert(number).inserted {
+                add(.advanceDeductedTwice, .error, detail: number)
+            }
+            if let currency = deduction.currency, currency != document.currency {
+                add(.advanceCurrencyDiffers, .error, detail: number)
+            }
+        }
 
         // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH.
         do {
@@ -238,25 +271,53 @@ public enum DocumentValidator {
                     }
                 } else {
                     // Without Czech VAT there is no CZK tax amount to print, but the souhrnné hlášení still needs CZK values.
-                    add(.exchangeRateMissing, totals.taxableVAT == 0 ? .warning : .error)
+                    // Any row with Czech VAT needs its CZK tax amount, even when the rows net to zero.
+                    let chargesCzechVAT = totals.rows.contains {
+                        $0.treatment.chargesVAT || $0.vat != 0 || $0.taxableVAT != 0 || $0.deductedVAT != 0
+                    }
+                    add(.exchangeRateMissing, chargesCzechVAT ? .error : .warning)
                 }
             }
             if document.kind.deductsAdvances {
                 if totals.rows.contains(where: { $0.taxableBase < 0 }) { add(.advancesExceedSupply, .warning) }
+                // Deductions and their percentages per summary row, matched to rows by the same rule as the totals.
+                let lineTreatments = document.treatments
+                var deductionsByKey: [String: [AdvanceDeduction]] = [:]
                 var percentsByKey: [String: Set<Decimal>] = [:]
                 for deduction in document.advanceDeductions {
+                    let key = DocumentTotals.rowKey(for: deduction, lineTreatments: lineTreatments)
+                    deductionsByKey[key, default: []].append(deduction)
                     if let percent = deduction.ratePercent {
-                        percentsByKey[deduction.treatment.groupingKey, default: []].insert(percent)
+                        percentsByKey[key, default: []].insert(percent)
                     }
                 }
+                let suppliesCzechVAT = totals.rows.contains { $0.treatment.chargesVAT && $0.base != 0 }
                 for row in totals.rows {
                     guard var percents = percentsByKey[row.treatment.groupingKey] else { continue }
-                    if let rate = row.rate, row.base != 0 { percents.insert(rate.percent) }
-                    if percents.count > 1 {
+                    if let rate = row.rate { percents.insert(rate.percent) }
+                    // A taxed advance left on its own row next to a taxable supply: § 37a odst. 3 territory.
+                    let deductionOnly = row.base == 0 && row.deductedBase != 0
+                    if percents.count > 1 || (deductionOnly && row.treatment.chargesVAT && suppliesCzechVAT) {
                         add(.advanceRateDiffers, .warning)
                         break
                     }
                 }
+                // § 37a odst. 2 písm. b): a negative difference in a foreign currency is converted at the
+                // advance's exchange rate; without one rate shared by the row's advances the document's was used.
+                if document.currency != .czk, totals.rows.contains(where: { row in
+                    row.taxableBase < 0
+                        && DocumentTotals.advanceExchangeRate(of: deductionsByKey[row.treatment.groupingKey] ?? [], in: document.currency) == nil
+                }) {
+                    add(.advanceExchangeRateDiffers, .warning)
+                }
+            } else if document.kind == .paymentTaxDocument {
+                if totals.amountDue <= 0 || totals.rows.contains(where: { $0.taxableBase < 0 }) {
+                    add(.receivedAmountNotPositive, .error)
+                }
+            } else if totals.amountDue < 0 || totals.rows.contains(where: { $0.taxableBase < 0 }) {
+                // Negative lines are fine as discounts inside a positive document, not as a negative document
+                // or VAT row: that is a corrective tax document (§ 45 ZDPH), Phase 2 (ADR 0004).
+                add(.documentTotalNegative, .error)
             }
             if totals.amountDue > 0 {
                 if let payment = document.payment {
@@ -281,8 +342,11 @@ public enum DocumentValidator {
         !validate(document, forIssue: true).contains(where: \.isError)
     }
 
+    /// A street, a city and an ISO 3166-1 alpha-2 country code: "Czechia" or "CZE" would print as a country
+    /// line and be treated as a foreign address.
     static func isComplete(_ address: PostalAddress) -> Bool {
-        !address.street.trimmingWhitespace().isEmpty && !address.city.trimmingWhitespace().isEmpty
-            && !address.countryCode.trimmingWhitespace().isEmpty
+        let country = address.countryCode.trimmingWhitespace()
+        return !address.street.trimmingWhitespace().isEmpty && !address.city.trimmingWhitespace().isEmpty
+            && country.count == 2 && country.allSatisfy { $0.isASCII && $0.isLetter }
     }
 }

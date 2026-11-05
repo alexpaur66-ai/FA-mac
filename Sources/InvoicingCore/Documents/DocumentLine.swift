@@ -43,12 +43,20 @@ public struct AdvanceDeduction: Hashable, Sendable, Codable, Identifiable {
     /// The VAT percentage applied when the advance was taxed; it is the rate of a negative difference
     /// (§ 37a odst. 2 písm. b) ZDPH). Nil for treatments without Czech VAT.
     public var ratePercent: Decimal?
-    /// Base and VAT of the advance, in the final invoice's currency.
+    /// Base and VAT of the advance in `currency`, which must be the final invoice's currency (nil: legacy
+    /// data, assumed to match). The validator refuses a deduction in another currency.
     public var base: Decimal
     public var vat: Decimal
+    /// The currency of the payment tax document the advance was taxed on; nil for data stored before the
+    /// field existed.
+    public var currency: Currency?
+    /// The exchange rate the payment tax document converted the advance to CZK with; it is the rate of a
+    /// negative difference (§ 37a odst. 2 písm. b) ZDPH). Nil on CZK documents and for data stored before
+    /// the field existed, in which case the final invoice falls back to its own rate and warns.
+    public var exchangeRate: ExchangeRate?
 
     public init(id: String = UUID().uuidString, documentNumber: String, paymentDate: CalendarDay, treatment: VATTreatment,
-                ratePercent: Decimal?, base: Decimal, vat: Decimal) {
+                ratePercent: Decimal?, base: Decimal, vat: Decimal, currency: Currency? = nil, exchangeRate: ExchangeRate? = nil) {
         self.id = id
         self.documentNumber = documentNumber
         self.paymentDate = paymentDate
@@ -56,6 +64,8 @@ public struct AdvanceDeduction: Hashable, Sendable, Codable, Identifiable {
         self.ratePercent = ratePercent
         self.base = base
         self.vat = vat
+        self.currency = currency
+        self.exchangeRate = exchangeRate
     }
 
     public var gross: Decimal { base + vat }

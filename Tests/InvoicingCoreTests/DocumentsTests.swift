@@ -131,6 +131,9 @@ enum DocumentFixtures {
         #expect(totals.taxableVAT == 126)
         #expect(totals.amountDue == 726)
         #expect(totals.totalGross == 1210)
+        // A positive difference is taxed at the rate of the day of supply.
+        #expect(row.appliedRatePercent == 21)
+        #expect(row.rate?.percent == 21)
     }
 
     @Test func advancesAboveTheSupplyGiveANegativeBaseAtTheAdvanceRate() throws {
@@ -141,18 +144,22 @@ enum DocumentFixtures {
             AdvanceDeduction(documentNumber: "DD-2023-009", paymentDate: day("2023-12-20"), treatment: .taxable(.reduced), ratePercent: 15, base: 1200, vat: 180),
         ]
         let totals = try DocumentTotals.compute(for: document)
-        #expect(totals.rows.count == 2)
-        let supply = try #require(totals.rows.first)
-        #expect(supply.taxableBase == 1000)
-        #expect(supply.taxableVAT == 210)
-        let advance = try #require(totals.rows.last)
-        #expect(advance.treatment == .taxable(.reduced))
-        #expect(advance.base == 0)
-        #expect(advance.deductedBase == 1200)
-        #expect(advance.taxableBase == -1200)
-        // § 37a odst. 2 písm. b): the 15 % the advance was taxed at, not the 12 % of the day of supply.
-        #expect(advance.taxableVAT == -180)
-        #expect(totals.amountDue == -170)
+        // § 37a odst. 1: one difference for the one supply, even though the advance was taxed as reduced.
+        #expect(totals.rows.count == 1)
+        let row = try #require(totals.rows.first)
+        #expect(row.treatment == .taxable(.standard))
+        #expect(row.base == 1000)
+        #expect(row.deductedBase == 1200)
+        #expect(row.deductedVAT == 180)
+        #expect(row.taxableBase == -200)
+        // § 37a odst. 2 písm. b): the 15 % the advance was taxed at, not the 21 % of the day of supply.
+        #expect(row.taxableVAT == -30)
+        #expect(row.appliedRatePercent == 15)
+        #expect(row.rate?.percent == 21)
+        #expect(totals.amountDue == -230)
+        let codes = Set(DocumentValidator.validate(document).map(\.code))
+        #expect(codes.contains(.advancesExceedSupply))
+        #expect(codes.contains(.advanceRateDiffers))
     }
 
     @Test func paymentTaxDocumentFromAdvanceRequest() throws {
@@ -179,6 +186,7 @@ enum DocumentFixtures {
 
         let deductions = receipt.advanceDeductions(totals: receiptTotals)
         #expect(deductions.count == 1)
+        #expect(deductions.allSatisfy { $0.currency == receipt.currency })
         #expect(deductions.first?.documentNumber == "DD-2026-001")
         #expect(deductions.first?.paymentDate == day("2026-11-03"))
         #expect(deductions.first?.base == 1000)
@@ -291,6 +299,27 @@ enum DocumentFixtures {
         #expect(!DocumentValidator.validate(document, forIssue: false).contains { $0.code == .numberMissing })
     }
 
+    @Test func addressNeedsATwoLetterCountryCode() {
+        var document = DocumentFixtures.czkInvoice()
+        document.customer.address = PostalAddress(street: "Krátká 1", city: "Brno", postalCode: "602 00", countryCode: "Czechia")
+        #expect(DocumentValidator.validate(document).contains { $0.code == .customerAddressIncomplete && $0.isError })
+        document.customer.address = PostalAddress(street: "Krátká 1", city: "Brno", postalCode: "602 00", countryCode: "cz")
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .customerAddressIncomplete })
+        document.customer.address = PostalAddress(street: "Krátká 1", city: "Brno", postalCode: "602 00", countryCode: "C1")
+        #expect(DocumentValidator.validate(document).contains { $0.code == .customerAddressIncomplete })
+    }
+
+    @Test func taxPointAfterIssueDateCitesTheTimingRule() {
+        var document = DocumentFixtures.czkInvoice()
+        document.taxPointDate = day("2026-11-06")
+        let issue = DocumentValidator.validate(document).first { $0.code == .taxPointAfterIssueDate }
+        #expect(issue?.severity == .warning)
+        #expect(issue?.detail == "2026-11-06")
+        #expect(issue?.message(language: .czech).contains("§ 21 odst. 3 ZDPH") == true)
+        #expect(issue?.message(language: .czech).hasPrefix("Datum plnění 6. 11. 2026 je po datu vystavení") == true)
+        #expect(issue?.message(language: .english).contains("§ 21(3) of the VAT Act") == true)
+    }
+
     @Test func supplierAndCustomerData() {
         var document = DocumentFixtures.czkInvoice()
         document.supplier.vatIdentifier = nil
@@ -326,6 +355,8 @@ enum DocumentFixtures {
         let issues = DocumentValidator.validate(document)
         #expect(issues.contains { $0.code == .advancesExceedSupply && $0.severity == .warning })
         #expect(!issues.contains { $0.code == .advanceDeductionsOnWrongKind })
+        // Advances above the supply stay a warning on a final invoice (§ 37a odst. 2 písm. b)).
+        #expect(!issues.contains { $0.code == .documentTotalNegative })
         document.lines = [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 1000, treatment: .taxable(.reduced))]
         document.advanceDeductions = [
             AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2023-12-20"), treatment: .taxable(.reduced), ratePercent: 15, base: 400, vat: 60),
@@ -372,8 +403,11 @@ enum DocumentFixtures {
                 #expect(!message.contains("{detail}"))
             }
         }
+        // Dates are stored as ISO strings and printed the Czech way in Czech messages.
         let issue = ValidationIssue(code: .issuedAfterDeadline, severity: .warning, detail: "2026-11-19")
-        #expect(issue.message(language: .czech) == "Doklad je vystaven po lhůtě; měl být vystaven nejpozději 2026-11-19 (§ 28 ZDPH).")
+        #expect(issue.message(language: .czech) == "Doklad je vystaven po lhůtě; měl být vystaven nejpozději 19. 11. 2026 (§ 28 ZDPH).")
+        #expect(issue.message(language: .english) == "The document is issued late; the deadline was 2026-11-19 (§ 28 of the VAT Act).")
+        #expect(ValidationIssue(code: .advanceDeductedTwice, severity: .error, detail: "DD-1").message(language: .czech).contains("Záloha DD-1 "))
         #expect(issue.id == "issuedAfterDeadline")
         #expect(ValidationIssue(code: .lineTextMissing, severity: .error, lineID: "l1").id == "lineTextMissing#l1")
     }
@@ -388,7 +422,12 @@ enum DocumentFixtures {
         #expect(DocumentClause.exchangeRate(DocumentFixtures.eurRate).text(language: .czech)
                 == "Přepočet na Kč kurzem ČNB 24,310 CZK/EUR ze dne 4. 11. 2026 (§ 4 odst. 8 zákona o DPH).")
         #expect(DocumentClause.exchangeRate(DocumentFixtures.eurRate).text(language: .english)
-                == "Amounts in CZK converted at the CNB exchange rate 24,310 CZK/EUR of 4 November 2026 (Section 4(8) of the Czech VAT Act).")
+                == "Amounts in CZK converted at the CNB exchange rate 24.310 CZK/EUR of 4 November 2026 (Section 4(8) of the Czech VAT Act).")
+        let huf = ExchangeRate(currency: Currency(code: "HUF"), amount: 100, czkPerAmount: d("6.512"), validFor: day("2026-11-04"), source: .cnb(order: 212))
+        #expect(DocumentClause.exchangeRate(huf).text(language: .english)
+                == "Amounts in CZK converted at the CNB exchange rate 6.512 CZK/100 HUF of 4 November 2026 (Section 4(8) of the Czech VAT Act).")
+        #expect(DocumentClause.exchangeRate(huf).text(language: .czech)
+                == "Přepočet na Kč kurzem ČNB 6,512 CZK/100 HUF ze dne 4. 11. 2026 (§ 4 odst. 8 zákona o DPH).")
     }
 
     @Test func otherClausesAndLabels() {
@@ -460,5 +499,497 @@ enum DocumentFixtures {
         #expect(back.treatments == [.reverseChargeEU])
         #expect(back.title == "Final invoice – tax document")
         #expect(back.taxPoint == day("2026-11-04"))
+    }
+}
+
+/// Review fixes: advance deductions, split receipts, negative documents, exchange-rate severity, QR limits.
+@Suite struct DocumentAdvanceReviewTests {
+    /// A CZK final invoice to the Czech customer with the given lines and deductions.
+    static func czkFinalInvoice(lines: [DocumentLine], deductions: [AdvanceDeduction]) -> Document {
+        var document = DocumentFixtures.czkInvoice()
+        document.kind = .finalInvoice
+        document.lines = lines
+        document.advanceDeductions = deductions
+        return document
+    }
+
+    /// A CZK advance request numbered ZF-2026-002.
+    static func advanceRequest(lines: [DocumentLine]) -> Document {
+        var request = DocumentFixtures.czkInvoice()
+        request.kind = .advanceRequest
+        request.number = "ZF-2026-002"
+        request.taxPointDate = nil
+        request.lines = lines
+        return request
+    }
+
+    @Test func sameAdvanceDeductedTwiceIsAnError() throws {
+        let deduction = AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                         ratePercent: 21, base: 1000, vat: 210)
+        let duplicate = AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                         ratePercent: 21, base: 1000, vat: 210)
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 5000, treatment: .taxable(.standard))],
+            deductions: [deduction, duplicate])
+        let issues = DocumentValidator.validate(document)
+        #expect(issues.contains { $0.code == .advanceDeductedTwice && $0.isError && $0.detail == "DD-1" })
+        #expect(issues.filter { $0.code == .advanceDeductedTwice }.count == 1)
+        #expect(!DocumentValidator.canIssue(document))
+    }
+
+    @Test func oneAdvanceWithTwoTreatmentsIsNotADuplicate() {
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 5000, treatment: .taxable(.standard)),
+                    DocumentLine(id: "l2", text: "Dodávka", quantity: 1, unitPrice: 5000, treatment: .taxable(.reduced))],
+            deductions: [
+                AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard), ratePercent: 21, base: 1000, vat: 210),
+                AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.reduced), ratePercent: 12, base: 1000, vat: 120),
+            ])
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .advanceDeductedTwice })
+        #expect(DocumentValidator.canIssue(document))
+    }
+
+    @Test func advanceInAnotherCurrencyIsAnError() throws {
+        var request = Self.advanceRequest(lines: [DocumentLine(id: "l1", text: "Advance", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard))])
+        request.currency = .eur
+        var receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: 1210, on: day("2026-11-03"))
+        receipt.number = "DD-2026-002"
+        let receiptTotals = try DocumentTotals.compute(for: receipt)
+        let deductions = receipt.advanceDeductions(totals: receiptTotals)
+        #expect(deductions.first?.currency == .eur)
+        #expect(deductions.first?.base == 1000)
+
+        let czkFinal = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 30000, treatment: .taxable(.standard))],
+            deductions: deductions)
+        #expect(DocumentValidator.validate(czkFinal).contains { $0.code == .advanceCurrencyDiffers && $0.isError && $0.detail == "DD-2026-002" })
+        #expect(!DocumentValidator.canIssue(czkFinal))
+
+        var eurFinal = czkFinal
+        eurFinal.currency = .eur
+        eurFinal.exchangeRate = DocumentFixtures.eurRate
+        eurFinal.payment = PaymentInstructions.standard(for: "FV-2026-001", bankConnection: DocumentFixtures.bank, currency: .eur)
+        #expect(!DocumentValidator.validate(eurFinal).contains { $0.code == .advanceCurrencyDiffers })
+    }
+
+    @Test func deductionWithoutCurrencyDecodes() throws {
+        let legacy = AdvanceDeduction(id: "ad1", documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                      ratePercent: 21, base: 100, vat: 21)
+        let data = try JSONEncoder().encode(legacy)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(!json.contains("currency"))
+        let decoded = try JSONDecoder().decode(AdvanceDeduction.self, from: data)
+        #expect(decoded.currency == nil)
+        #expect(decoded == legacy)
+        var withCurrency = legacy
+        withCurrency.currency = .czk
+        let roundTrip = try JSONDecoder().decode(AdvanceDeduction.self, from: try JSONEncoder().encode(withCurrency))
+        #expect(roundTrip.currency == .czk)
+    }
+
+    @Test func paymentTaxDocumentSplitsMixedRates() throws {
+        let request = Self.advanceRequest(lines: [
+            DocumentLine(id: "l1", text: "Dodávka A", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard)),
+            DocumentLine(id: "l2", text: "Dodávka B", quantity: 1, unitPrice: 1000, treatment: .taxable(.reduced)),
+        ])
+        let requestTotals = try DocumentTotals.compute(for: request)
+        #expect(requestTotals.amountDue == 2330)
+
+        var receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: 2330, on: day("2026-11-03"))
+        receipt.number = "DD-2026-003"
+        #expect(receipt.lines.count == 2)
+        #expect(receipt.lines.map(\.unitPrice) == [1210, 1120])
+        #expect(receipt.lines.first?.text == "Přijatá platba k zálohové faktuře č. ZF-2026-002 (DPH 21 %)")
+        #expect(receipt.lines.last?.text == "Přijatá platba k zálohové faktuře č. ZF-2026-002 (DPH 12 %)")
+        let receiptTotals = try DocumentTotals.compute(for: receipt)
+        #expect(receiptTotals.rows.count == 2)
+        let standard = try #require(receiptTotals.rows.first)
+        let reduced = try #require(receiptTotals.rows.last)
+        #expect(standard.taxableBase == 1000)
+        #expect(standard.taxableVAT == 210)
+        #expect(reduced.taxableBase == 1000)
+        #expect(reduced.taxableVAT == 120)
+        #expect(receiptTotals.taxableVAT == 330)
+        #expect(receiptTotals.amountDue == 2330)
+
+        let deductions = receipt.advanceDeductions(totals: receiptTotals)
+        #expect(deductions.map(\.ratePercent) == [21, 12])
+
+        let finalInvoice = Self.czkFinalInvoice(lines: request.lines, deductions: deductions)
+        let finalTotals = try DocumentTotals.compute(for: finalInvoice)
+        #expect(finalTotals.rows.allSatisfy { $0.taxableBase == 0 && $0.taxableVAT == 0 })
+        #expect(finalTotals.taxableBase == 0)
+        #expect(finalTotals.taxableVAT == 0)
+        #expect(finalTotals.amountDue == 0)
+        let issues = DocumentValidator.validate(finalInvoice)
+        #expect(!issues.contains { $0.code == .advancesExceedSupply })
+        #expect(!issues.contains { $0.code == .advanceRateDiffers })
+    }
+
+    @Test func partialPaymentIsSplitInProportion() throws {
+        let request = Self.advanceRequest(lines: [
+            DocumentLine(id: "l1", text: "Dodávka A", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard)),
+            DocumentLine(id: "l2", text: "Dodávka B", quantity: 1, unitPrice: 1000, treatment: .taxable(.reduced)),
+        ])
+        let half = Document.paymentTaxDocument(forAdvanceRequest: request, received: 1165, on: day("2026-11-03"))
+        #expect(half.lines.map(\.unitPrice) == [605, 560])
+        let halfTotals = try DocumentTotals.compute(for: half)
+        #expect(halfTotals.rows.map(\.taxableBase) == [500, 500])
+        #expect(halfTotals.rows.map(\.taxableVAT) == [105, 60])
+
+        // 1000 × 1210 / 2330 = 519.313…, rounded to 519.31; the reduced line takes the remainder 480.69.
+        let part = Document.paymentTaxDocument(forAdvanceRequest: request, received: 1000, on: day("2026-11-03"))
+        #expect(part.lines.map(\.unitPrice) == [d("519.31"), d("480.69")])
+        #expect(part.lines.reduce(Decimal(0)) { $0 + $1.unitPrice } == 1000)
+        let partTotals = try DocumentTotals.compute(for: part)
+        #expect(partTotals.rows.map(\.taxableBase) == [d("429.18"), d("429.19")])
+        #expect(partTotals.rows.map(\.taxableVAT) == [d("90.13"), d("51.50")])
+        #expect(partTotals.amountDue == 1000)
+    }
+
+    @Test func paymentForReverseChargeAndDomesticLinesKeepsTheDomesticDeadline() throws {
+        let request = Self.advanceRequest(lines: [
+            DocumentLine(id: "l1", text: "Consulting", quantity: 1, unitPrice: 1000, treatment: .reverseChargeEU),
+            DocumentLine(id: "l2", text: "Domestic service", quantity: 1, unitPrice: 200, treatment: .taxable(.standard)),
+        ])
+        let receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: 1242, on: day("2026-11-04"))
+        #expect(receipt.lines.map(\.treatment) == [.reverseChargeEU, .taxable(.standard)])
+        #expect(receipt.lines.map(\.unitPrice) == [1000, 242])
+        let totals = try DocumentTotals.compute(for: receipt)
+        #expect(totals.rows.map(\.taxableBase) == [1000, 200])
+        #expect(totals.taxableVAT == 42)
+        #expect(IssueDeadline.lastDay(for: receipt) == day("2026-11-19"))
+    }
+
+    @Test func paymentForASingleTreatmentStaysOneLine() {
+        let request = Self.advanceRequest(lines: [
+            DocumentLine(id: "l1", text: "Dodávka A", quantity: 1, unitPrice: 1000, treatment: .taxable(.reduced)),
+            DocumentLine(id: "l2", text: "Dodávka B", quantity: 2, unitPrice: 500, treatment: .taxable(.reduced)),
+        ])
+        let receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: 700, on: day("2026-11-03"))
+        #expect(receipt.lines.count == 1)
+        #expect(receipt.lines.first?.unitPrice == 700)
+        #expect(receipt.lines.first?.treatment == .taxable(.reduced))
+        #expect(receipt.lines.first?.text == "Přijatá platba k zálohové faktuře č. ZF-2026-002")
+    }
+
+    @Test func advanceTaxedAtTheOldReducedRateIsDeductedFromTheSupply() throws {
+        // Cleaning: 15 % reduced rate in 2023, standard 21 % from 2024 (§ 37a odst. 2 písm. a)).
+        var document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Úklid", quantity: 1, unitPrice: 20000, treatment: .taxable(.standard))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-2023-010", paymentDate: day("2023-12-15"), treatment: .taxable(.reduced),
+                                          ratePercent: 15, base: 10000, vat: 1500)])
+        document.issueDate = day("2024-01-31")
+        document.taxPointDate = day("2024-01-31")
+        document.dueDate = day("2024-02-14")
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.count == 1)
+        #expect(totals.taxableBase == 10000)
+        #expect(totals.taxableVAT == 2100)
+        #expect(totals.amountDue == 12100)
+        let codes = Set(DocumentValidator.validate(document).map(\.code))
+        #expect(codes.contains(.advanceRateDiffers))
+        #expect(!codes.contains(.advancesExceedSupply))
+    }
+
+    @Test func advanceUnderAThirdRateKeepsItsOwnRowAndWarns() throws {
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka A", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard)),
+                    DocumentLine(id: "l2", text: "Dodávka B", quantity: 1, unitPrice: 1000, treatment: .taxable(.reduced))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-2023-011", paymentDate: day("2023-12-20"), treatment: .taxable(.secondReduced),
+                                          ratePercent: 10, base: 500, vat: 50)])
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.count == 3)
+        let advance = try #require(totals.rows.last)
+        #expect(advance.treatment == .taxable(.secondReduced))
+        #expect(advance.base == 0)
+        #expect(advance.taxableBase == -500)
+        #expect(advance.taxableVAT == -50)
+        #expect(advance.appliedRatePercent == 10)
+        #expect(DocumentValidator.validate(document).contains { $0.code == .advanceRateDiffers && $0.severity == .warning })
+    }
+
+    @Test func negativeDifferenceRowReportsTheAppliedRate() throws {
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 800, treatment: .taxable(.reduced))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-2023-009", paymentDate: day("2023-12-20"), treatment: .taxable(.reduced),
+                                          ratePercent: 15, base: 1200, vat: 180)])
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(row.taxableBase == -400)
+        #expect(row.taxableVAT == d("-60.00"))
+        #expect(row.appliedRatePercent == 15)
+        #expect(row.rate?.percent == 12)
+    }
+
+    @Test func deductionOnlyRowReportsTheAdvanceRate() throws {
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Consulting", quantity: 1, unitPrice: 1000, treatment: .exempt(reference: "§ 56"))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-2023-009", paymentDate: day("2023-12-20"), treatment: .taxable(.reduced),
+                                          ratePercent: 15, base: 1200, vat: 180)])
+        let totals = try DocumentTotals.compute(for: document)
+        let advance = try #require(totals.rows.last)
+        #expect(advance.base == 0)
+        #expect(advance.taxableVAT == -180)
+        #expect(advance.appliedRatePercent == 15)
+        #expect(advance.rate?.percent == 12)
+        #expect(DocumentValidator.validate(document).contains { $0.code == .advanceRateDiffers })
+    }
+
+    @Test func amountDueIsTheBalanceOfWhatWasPaid() throws {
+        // Payment of 1000.01 received at 21 %: base 826.45, VAT 173.56.
+        let document = Self.czkFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 2000, treatment: .taxable(.standard))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-2026-004", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                          ratePercent: 21, base: d("826.45"), vat: d("173.56"))])
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.taxableBase == d("1173.55"))
+        #expect(totals.taxableVAT == d("246.45"))
+        #expect(totals.amountDue == d("1419.99"))
+        let qr = try #require(document.qrPlatba(totals: totals))
+        #expect(qr.amount == d("1419.99"))
+    }
+}
+
+@Suite struct DocumentNegativeAmountTests {
+    @Test func negativeInvoiceIsAnError() {
+        var document = DocumentFixtures.czkInvoice()
+        document.lines = [DocumentLine(id: "l1", text: "Dobropis", quantity: 1, unitPrice: -1000, treatment: .taxable(.standard))]
+        #expect(DocumentValidator.validate(document).contains { $0.code == .documentTotalNegative && $0.isError })
+        #expect(!DocumentValidator.canIssue(document))
+    }
+
+    @Test func discountLineInAPositiveInvoiceIsFine() {
+        var document = DocumentFixtures.czkInvoice()
+        document.lines = [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard)),
+                          DocumentLine(id: "l2", text: "Sleva", quantity: 1, unitPrice: -100, treatment: .taxable(.standard))]
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .documentTotalNegative })
+        #expect(DocumentValidator.canIssue(document))
+    }
+
+    @Test func receiptMustBePositive() {
+        let request = DocumentAdvanceReviewTests.advanceRequest(lines: [
+            DocumentLine(id: "l1", text: "Záloha", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard)),
+        ])
+        var receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: -500, on: day("2026-11-03"))
+        receipt.number = "DD-2026-005"
+        #expect(DocumentValidator.validate(receipt).contains { $0.code == .receivedAmountNotPositive && $0.isError })
+        #expect(!DocumentValidator.canIssue(receipt))
+        var zero = Document.paymentTaxDocument(forAdvanceRequest: request, received: 0, on: day("2026-11-03"))
+        zero.number = "DD-2026-006"
+        #expect(DocumentValidator.validate(zero).contains { $0.code == .receivedAmountNotPositive })
+    }
+}
+
+@Suite struct DocumentExchangeRateSeverityTests {
+    static func eurFinalInvoice(lines: [DocumentLine], deductions: [AdvanceDeduction]) -> Document {
+        var document = DocumentFixtures.euInvoice()
+        document.kind = .finalInvoice
+        document.customer = DocumentFixtures.czechCustomer
+        document.exchangeRate = nil
+        document.lines = lines
+        document.advanceDeductions = deductions
+        return document
+    }
+
+    @Test func czechVATRowsThatNetToZeroStillNeedTheRate() {
+        let document = Self.eurFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Supply", quantity: 1, unitPrice: 500, treatment: .taxable(.standard))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.reduced),
+                                          ratePercent: 12, base: 875, vat: 105, currency: .eur)])
+        #expect(DocumentValidator.validate(document).contains { $0.code == .exchangeRateMissing && $0.isError })
+        #expect(!DocumentValidator.canIssue(document))
+    }
+
+    @Test func fullyCoveredSupplyStillNeedsTheRate() throws {
+        let document = Self.eurFinalInvoice(
+            lines: [DocumentLine(id: "l1", text: "Supply", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard))],
+            deductions: [AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                          ratePercent: 21, base: 1000, vat: 210, currency: .eur)])
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.taxableVAT == 0)
+        #expect(DocumentValidator.validate(document).contains { $0.code == .exchangeRateMissing && $0.isError })
+    }
+}
+
+@Suite struct DocumentQRLimitTests {
+    static func encodedField(_ key: String, in encoded: String) -> String? {
+        encoded.split(separator: "*").first { $0.hasPrefix(key + ":") }.map { String($0.dropFirst(key.count + 1)) }
+    }
+
+    @Test func longSupplierNameIsShortened() throws {
+        var document = DocumentFixtures.czkInvoice()
+        document.supplier.name = "Stavební společnost Novák a synové s.r.o."
+        let totals = try DocumentTotals.compute(for: document)
+        let qr = try #require(document.qrPlatba(totals: totals))
+        let encoded = try qr.encoded()
+        let name = try #require(Self.encodedField("RN", in: encoded))
+        #expect(name.count <= 35)
+        #expect(name.hasPrefix("STAVEBNI SPOLECNOST NOVAK A SYNOVE"))
+    }
+
+    @Test func longMessageIsShortened() throws {
+        var document = DocumentFixtures.czkInvoice()
+        document.payment?.message = String(repeating: "Platba za zboží ", count: 5)
+        let totals = try DocumentTotals.compute(for: document)
+        let qr = try #require(document.qrPlatba(totals: totals))
+        let encoded = try qr.encoded()
+        let message = try #require(Self.encodedField("MSG", in: encoded))
+        #expect(message.count <= 60)
+    }
+
+    @Test func percentEscapeIsNeverCut() throws {
+        var document = DocumentFixtures.czkInvoice()
+        document.supplier.name = String(repeating: "A", count: 33) + "*BBB"
+        let totals = try DocumentTotals.compute(for: document)
+        let qr = try #require(document.qrPlatba(totals: totals))
+        let encoded = try qr.encoded()
+        let name = try #require(Self.encodedField("RN", in: encoded))
+        #expect(name == String(repeating: "A", count: 33))
+    }
+}
+
+/// § 37a odst. 2 ZDPH for the conversion to CZK: a positive difference uses the rate of the day of supply, a
+/// negative one the rate that was applied to the advance.
+@Suite struct DocumentAdvanceExchangeRateTests {
+    static let advanceRate = ExchangeRate(currency: .eur, czkPerAmount: d("25.000"), validFor: day("2026-10-01"), source: .cnb(order: 190))
+
+    /// A EUR final invoice to the Czech customer, converted at the fixture rate 24.310 of 4 November 2026.
+    static func eurFinalInvoice(supply: Decimal, deductions: [AdvanceDeduction]) -> Document {
+        var document = DocumentFixtures.euInvoice()
+        document.kind = .finalInvoice
+        document.language = .czech
+        document.customer = DocumentFixtures.czechCustomer
+        document.lines = [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: supply, treatment: .taxable(.standard))]
+        document.advanceDeductions = deductions
+        return document
+    }
+
+    static func deduction(_ number: String, base: Decimal, vat: Decimal, rate: ExchangeRate?) -> AdvanceDeduction {
+        AdvanceDeduction(documentNumber: number, paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                         ratePercent: 21, base: base, vat: vat, currency: .eur, exchangeRate: rate)
+    }
+
+    @Test func negativeDifferenceIsConvertedAtTheAdvancesRate() throws {
+        let document = Self.eurFinalInvoice(supply: 1000, deductions: [Self.deduction("DD-2026-001", base: 1200, vat: 252, rate: Self.advanceRate)])
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(row.taxableBase == -200)
+        #expect(row.taxableVAT == -42)
+        // 25.000 of the advance, not 24.310 of the day of supply (§ 37a odst. 2 písm. b)).
+        #expect(row.taxableBaseCZK == d("-5000.00"))
+        #expect(row.taxableVATCZK == d("-1050.00"))
+        #expect(row.exchangeRate == Self.advanceRate)
+        #expect(totals.taxableBaseCZK == d("-5000.00"))
+        #expect(totals.exchangeRate == DocumentFixtures.eurRate)
+        #expect(totals.advanceExchangeRates == [Self.advanceRate])
+        let codes = Set(DocumentValidator.validate(document).map(\.code))
+        #expect(codes.contains(.advancesExceedSupply))
+        #expect(!codes.contains(.advanceExchangeRateDiffers))
+        // The document explains the rate it used, whether or not the caller passes the totals.
+        let clauses = DocumentClause.clauses(for: document, totals: totals)
+        #expect(clauses == [.advancesDeducted(documentNumbers: ["DD-2026-001"]), .exchangeRate(DocumentFixtures.eurRate),
+                            .advanceExchangeRate(Self.advanceRate)])
+        #expect(DocumentClause.clauses(for: document) == clauses)
+        #expect(DocumentClause.advanceExchangeRate(Self.advanceRate).text(language: .czech)
+                == "Záporný rozdíl základu daně přepočten kurzem ČNB 25,000 CZK/EUR ze dne 1. 10. 2026, uplatněným u přijaté zálohy (§ 37a odst. 2 písm. b) zákona o DPH).")
+        #expect(DocumentClause.advanceExchangeRate(Self.advanceRate).text(language: .english)
+                == "The negative difference in the tax base is converted at the CNB exchange rate 25.000 CZK/EUR of 1 October 2026 applied to the advance payment (Section 37a(2)(b) of the Czech VAT Act).")
+    }
+
+    @Test func positiveDifferenceKeepsTheDocumentsRate() throws {
+        let document = Self.eurFinalInvoice(supply: 1000, deductions: [Self.deduction("DD-2026-001", base: 400, vat: 84, rate: Self.advanceRate)])
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(row.taxableBase == 600)
+        #expect(row.taxableBaseCZK == d("14586.00"))
+        #expect(row.taxableVATCZK == d("3063.06"))
+        #expect(row.exchangeRate == DocumentFixtures.eurRate)
+        #expect(totals.advanceExchangeRates.isEmpty)
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers })
+        let clauses = DocumentClause.clauses(for: document, totals: totals)
+        #expect(clauses == [.advancesDeducted(documentNumbers: ["DD-2026-001"]), .exchangeRate(DocumentFixtures.eurRate)])
+    }
+
+    @Test func advancesAtDifferentRatesFallBackToTheDocumentsRateAndWarn() throws {
+        let other = ExchangeRate(currency: .eur, czkPerAmount: d("24.000"), validFor: day("2026-10-15"), source: .cnb(order: 200))
+        let document = Self.eurFinalInvoice(supply: 1000, deductions: [
+            Self.deduction("DD-2026-001", base: 700, vat: 147, rate: Self.advanceRate),
+            Self.deduction("DD-2026-002", base: 500, vat: 105, rate: other),
+        ])
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(row.taxableBase == -200)
+        // § 37a odst. 3 is not computed: the document's rate, and the accountant is asked.
+        #expect(row.taxableBaseCZK == d("-4862.00"))
+        #expect(row.exchangeRate == DocumentFixtures.eurRate)
+        #expect(totals.advanceExchangeRates.isEmpty)
+        #expect(DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers && $0.severity == .warning })
+        #expect(DocumentValidator.canIssue(document))
+    }
+
+    @Test func sameRateOnTwoAdvancesIsOneRate() throws {
+        let sameDay = ExchangeRate(currency: .eur, czkPerAmount: d("25.000"), validFor: day("2026-10-02"), source: .cnb(order: 191))
+        let document = Self.eurFinalInvoice(supply: 1000, deductions: [
+            Self.deduction("DD-2026-001", base: 700, vat: 147, rate: Self.advanceRate),
+            Self.deduction("DD-2026-002", base: 500, vat: 105, rate: sameDay),
+        ])
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.first?.taxableBaseCZK == d("-5000.00"))
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers })
+    }
+
+    @Test func deductionWithoutAnExchangeRateWarnsOnlyOnANegativeDifference() throws {
+        var document = Self.eurFinalInvoice(supply: 1000, deductions: [Self.deduction("DD-2026-001", base: 1200, vat: 252, rate: nil)])
+        var totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.first?.taxableBaseCZK == d("-4862.00"))
+        #expect(DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers })
+        document.advanceDeductions = [Self.deduction("DD-2026-001", base: 400, vat: 84, rate: nil)]
+        totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.first?.taxableBaseCZK == d("14586.00"))
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers })
+    }
+
+    @Test func czkDocumentsNeverCarryARate() throws {
+        var document = DocumentFixtures.czkInvoice()
+        document.kind = .finalInvoice
+        document.lines = [DocumentLine(id: "l1", text: "Dodávka", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard))]
+        document.advanceDeductions = [AdvanceDeduction(documentNumber: "DD-1", paymentDate: day("2026-10-01"), treatment: .taxable(.standard),
+                                                       ratePercent: 21, base: 1200, vat: 252, currency: .czk)]
+        let totals = try DocumentTotals.compute(for: document)
+        #expect(totals.rows.first?.exchangeRate == nil)
+        #expect(totals.rows.first?.taxableBaseCZK == -200)
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .advanceExchangeRateDiffers })
+    }
+
+    @Test func paymentTaxDocumentPassesItsRateToTheDeductions() throws {
+        var request = DocumentFixtures.euInvoice()
+        request.kind = .advanceRequest
+        request.number = "ZF-2026-003"
+        request.taxPointDate = nil
+        request.customer = DocumentFixtures.czechCustomer
+        request.lines = [DocumentLine(id: "l1", text: "Záloha", quantity: 1, unitPrice: 1000, treatment: .taxable(.standard))]
+        request.exchangeRate = nil
+        var receipt = Document.paymentTaxDocument(forAdvanceRequest: request, received: 1210, on: day("2026-10-01"))
+        receipt.number = "DD-2026-001"
+        receipt.exchangeRate = Self.advanceRate
+        let totals = try DocumentTotals.compute(for: receipt)
+        let deductions = receipt.advanceDeductions(totals: totals)
+        let deduction = try #require(deductions.first)
+        #expect(deductions.count == 1)
+        #expect(deduction.currency == .eur)
+        #expect(deduction.exchangeRate == Self.advanceRate)
+        #expect(deduction.base == 1000)
+        #expect(deduction.vat == 210)
+        #expect(deduction.ratePercent == 21)
+        // Round trip through JSON keeps the rate; a deduction stored without one decodes with nil.
+        let data = try JSONEncoder().encode(deduction)
+        #expect(try JSONDecoder().decode(AdvanceDeduction.self, from: data) == deduction)
+        var czkReceipt = Document.paymentTaxDocument(forAdvanceRequest: DocumentAdvanceReviewTests.advanceRequest(lines: request.lines),
+                                                     received: 1210, on: day("2026-10-01"))
+        czkReceipt.number = "DD-2026-002"
+        let czkDeductions = czkReceipt.advanceDeductions(totals: try DocumentTotals.compute(for: czkReceipt))
+        #expect(czkDeductions.first?.exchangeRate == nil)
+        #expect(czkDeductions.first?.currency == .czk)
     }
 }
