@@ -125,3 +125,23 @@ InvoicingCore; a verifier checked each finding. 17 confirmed, 10 refuted. Those 
 - sf §2f: the Raiffeisenbank format and price statements and Q8 are marked UNVERIFIED (not confirmed on any page in the source list).
 - sf §2g: the ČNB publication-day assumption in the coverage grid and the resolver is marked UNVERIFIED / ACCT.
 - sf §2f: the Xero sentence now says only what [S120] shows (one idea, 248 votes, "In development").
+
+## 2026-11-05 — Re-check of the review fixes (after PR 7 merged)
+
+Three checkers read the review-fix commit for compile risks, behaviour and doc/code agreement; a verifier checked each
+finding. 4 verdicts confirmed (3 distinct issues), 4 refuted. Fixed in this follow-up:
+
+- The ds §4.3 Precedence paragraph and the sf §2b Status column said Overdue always wins for an open or partly paid
+  document; the Label order and the code let an advance's missing tax document win. Both now name that exception.
+- An advance whose client needs no tax document, once paid, would have shown "Tax document issued". `DocumentStateInputs`
+  gained `taxDocumentRequired` (default true; false when the client's advances need none, Q5, ACCT): the warning is
+  skipped and a paid advance shows "Uhrazeno / Paid". New ds §4.3 row; sf §2d says the same.
+- "Zúčtováno v konečné faktuře" was called ACCT but was missing from the ds §9 legal-strings table. Added, and marked
+  ACCT in the glossary.
+
+Refuted: `ViewThatFits` dropping the word in an `HStack` row with a `Spacer` (a spacer only takes the space left over),
+and an overpaid advance without its DDPP hiding the surplus (a documented trade-off: the warning outranks Overpaid).
+
+Also in this follow-up, from the build thread: the VS prefixes are FV 1 and ZF 2, with none for DD, which carries no
+payment request (sf §2i); the per-series prefix lands in the core with the next data-layer PR. The M1 Pro facts now cite
+Sasa's message in the project chat.
