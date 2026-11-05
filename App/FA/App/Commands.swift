@@ -271,8 +271,12 @@ struct AppCommands: Commands {
         }
         .disabled(editor == nil)
         Picker(selection: Binding(get: { editor?.treatmentChoice ?? .czechVAT }, set: { choice in editor?.setTreatment(choice) })) {
-            ForEach(TreatmentChoice.allCases) { choice in
-                Text(choice.title).tag(choice)
+            ForEach(TreatmentChoice.euChoices) { choice in
+                Text(choice.menuTitle).tag(choice)
+            }
+            Divider()
+            ForEach(TreatmentChoice.otherChoices) { choice in
+                Text(choice.menuTitle).tag(choice)
             }
         } label: {
             Text(L.menuVATTreatment)

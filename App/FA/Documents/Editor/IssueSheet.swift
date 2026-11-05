@@ -176,7 +176,7 @@ struct IssueSheet: View {
 
     private func clientLine(_ document: Document) -> LocalizedStringResource {
         let name = document.customer.name.isEmpty ? String(localized: L.noClient) : document.customer.name
-        let treatment = String(localized: model.treatmentChoice.title)
+        let treatment = String(localized: model.treatmentChoice.shortTitle)
         if let vatID = document.customer.vatIdentifier {
             return L.clientSummaryWithVATID(name, vatID.value, treatment)
         }
@@ -214,6 +214,9 @@ struct IssueSheet: View {
                             dashRow(L.vatInCZK, clause: nil)
                         }
                     }
+                } else if document.hasIntraCommunityGoods && !document.hasReverseCharge {
+                    // § 64 goods: the same notice as the editor's totals bar.
+                    dashRow(L.exemptSection64Item, clause: nil)
                 } else {
                     // Reverse charge: the dash carries the notice the PDF prints (§ 29 odst. 2 písm. c) ZDPH).
                     dashRow(L.vat, clause: document.hasReverseCharge ? DocumentClause.reverseChargeNotice : nil)

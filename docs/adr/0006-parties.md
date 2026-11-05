@@ -88,3 +88,11 @@ check and leave the rest to the user and the accountant.
 - Noted for later, not defects: a warning when a Czech DIČ does not match the IČO; a per-country shape
   warning for foreign VAT numbers; a switch for a customer outside the EU without a VAT ID (business or
   consumer; today a consumer, so Czech VAT is charged by default); per-country postal code checks.
+
+## Amendments (PR 21, EU goods, November 2026)
+
+- `CustomerVATStatus` has seven cases: `euBusiness` splits into `euBusinessGoods`, whose default
+  treatment is § 64 goods (ADR 0011), and `euBusinessServices`, the reverse charge. `euBusinessServices`
+  keeps the stored value "euBusiness", so a client saved before keeps its treatment. An EU VAT ID now implies
+  `euBusinessGoods`, because most of Saša's EU sales are goods. Both EU business statuses need the
+  customer's VAT ID. `defaultServiceTreatment` is now `defaultTreatment`.

@@ -99,3 +99,17 @@ zákoníku, must be issued within the § 28 deadline, and must show the VAT in C
 - Converting the EUR totals once and deriving the CZK VAT from the CZK base: the VAT is what the law
   wants in CZK, and the row-by-row conversion keeps the printed summary consistent.
 - Throwing validation: a document with three problems should show three problems, not the first one.
+
+## Amendments (PR 21, EU goods, November 2026)
+
+ADR 0011 adds goods supplied to a business in another member state, exempt under § 64 odst. 1; the rest
+of this ADR stands.
+
+- **Treatments**: `VATTreatment.intraCommunityGoods` joins Czech VAT, the reverse charge, outside the
+  EU and the other exemptions. It needs the customer's VAT ID from another member state (an error
+  without it, § 64 odst. 1 písm. a)) and goes into the souhrnné hlášení.
+- **Deadline**: 15 days after the end of the month of the supply (§ 28 odst. 9 písm. a)).
+- **Tax point after the issue date**: not warned on a document whose lines are all § 64 goods, as goods
+  may be invoiced before they leave.
+- **Clauses**: the § 64 reference replaces „daň odvede zákazník“ on goods; the English line adds Article
+  138 of Directive 2006/112/EC.

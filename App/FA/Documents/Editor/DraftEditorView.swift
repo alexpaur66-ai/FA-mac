@@ -265,8 +265,9 @@ struct DraftEditorView: View {
 
     /// Base and Total are the lines before any deduction; a final invoice then shows the advances
     /// deducted, the amount due and the VAT after the deduction, the base of the VAT in CZK
-    /// (screens-flows.md §2d, step 4: Total → − advances → Amount due). Under reverse charge the VAT
-    /// figure's place says so; the VAT in CZK appears only when Czech VAT is charged in a foreign currency.
+    /// (screens-flows.md §2d, step 4: Total → − advances → Amount due). Under reverse charge or the § 64
+    /// exemption the VAT figure's place says so; the VAT in CZK appears only when Czech VAT is charged in a
+    /// foreign currency.
     @ViewBuilder private func figures(_ document: Document) -> some View {
         if let totals = model.totals {
             let chargesVAT = totals.rows.contains(where: { $0.treatment.chargesVAT })
@@ -275,6 +276,9 @@ struct DraftEditorView: View {
             figure(L.base, totals.totalBase, document.currency)
             if document.hasReverseCharge && !chargesVAT {
                 dashFigure(L.reverseChargeItem)
+            }
+            if document.hasIntraCommunityGoods && !chargesVAT {
+                dashFigure(L.exemptSection64Item)
             }
             if chargesVAT && !isFinal {
                 figure(L.vat, totals.totalVAT, document.currency)
@@ -492,7 +496,11 @@ struct DraftEditorView: View {
                 Text(L.fieldTreatment).textRole(.label)
                 HStack(spacing: Spacing.m) {
                     Picker(selection: Binding(get: { model.treatmentChoice }, set: { model.setTreatment($0) })) {
-                        ForEach(TreatmentChoice.allCases) { choice in
+                        ForEach(TreatmentChoice.euChoices) { choice in
+                            Text(choice.title).tag(choice)
+                        }
+                        Divider()
+                        ForEach(TreatmentChoice.otherChoices) { choice in
                             Text(choice.title).tag(choice)
                         }
                     } label: {
@@ -700,6 +708,11 @@ struct DraftEditorView: View {
             VATRateField(line: line, kind: kind, day: document.taxPoint, model: model, focus: $focus, focusValue: .vatRate(line.id),
                          commit: { newKind in model.setLine(line.id) { $0.treatment = .taxable(newKind) } },
                          onSubmit: { moveDown(from: .vatRate(line.id)) })
+        case .intraCommunityGoods:
+            Text(L.rateExempt)
+                .textRole(.rowSecondary)
+                .help(Text(L.treatmentEUGoods))
+                .accessibilityLabel(Text(L.treatmentEUGoods))
         case .reverseChargeEU:
             Text(L.rateReverseCharge)
                 .textRole(.rowSecondary)
@@ -954,7 +967,7 @@ struct ClientField<Focus: Hashable>: View {
             }
             if let document = model.document, document.customerID != nil, !(isFocused && editing) {
                 HStack(spacing: Spacing.s) {
-                    if document.customer.vatIdentifier == nil, document.hasReverseCharge {
+                    if document.customer.vatIdentifier == nil, document.requiresCustomerVATID {
                         chip(L.vatIDMissing)
                     }
                     if document.customer.address.street.isEmpty || document.customer.address.city.isEmpty {
@@ -1003,7 +1016,7 @@ struct ClientField<Focus: Hashable>: View {
             Text(verbatim: customer.party.name).textRole(.body)
             HStack(spacing: Spacing.s) {
                 Text(Self.suggestionLine(customer)).textRole(.rowSecondary)
-                if customer.party.vatIdentifier == nil, customer.vatStatus.defaultServiceTreatment == .reverseChargeEU {
+                if customer.party.vatIdentifier == nil, customer.vatStatus.defaultTreatment.requiresCustomerVATID {
                     chip(L.vatIDMissing)
                 }
                 if customer.party.address.street.isEmpty || customer.party.address.city.isEmpty {
@@ -1016,7 +1029,7 @@ struct ClientField<Focus: Hashable>: View {
     static func suggestionLine(_ customer: Customer) -> LocalizedStringResource {
         let country = customer.party.address.countryCode
         let language = String(localized: customer.language == .czech ? L.languageCzech : L.languageEnglish)
-        let treatment = String(localized: TreatmentChoice(customer.vatStatus.defaultServiceTreatment).title)
+        let treatment = String(localized: TreatmentChoice(customer.vatStatus.defaultTreatment).shortTitle)
         if let ico = customer.party.identificationNumber?.digits {
             return L.clientSuggestionLine(ico, country, customer.currency.code, language, treatment)
         }

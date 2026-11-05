@@ -9,25 +9,55 @@ import Observation
 
 /// The document-level VAT treatment the header offers. Under Czech VAT each line keeps its own rate; the
 /// other treatments apply to every line (screens-flows.md §2c: mixed documents are the accountant's
-/// decision and are not offered).
+/// decision and are not offered). The order is the design thread's (5 Nov 2026): the two EU choices
+/// first, as most of Saša's sales go to EU businesses, then a divider and the rest.
 enum TreatmentChoice: Hashable, CaseIterable, Identifiable {
-    case czechVAT, reverseChargeEU, outsideEU, exempt
+    case intraCommunityGoods, reverseChargeEU, czechVAT, outsideEU, exempt
 
     var id: Self { self }
+
+    /// The pop-up and the menu show these two groups with a divider between them.
+    static let euChoices: [TreatmentChoice] = [.intraCommunityGoods, .reverseChargeEU]
+    static let otherChoices: [TreatmentChoice] = [.czechVAT, .outsideEU, .exempt]
 
     init(_ treatment: VATTreatment) {
         switch treatment {
         case .taxable: self = .czechVAT
+        case .intraCommunityGoods: self = .intraCommunityGoods
         case .reverseChargeEU: self = .reverseChargeEU
         case .outsideEU: self = .outsideEU
         case .exempt: self = .exempt
         }
     }
 
+    /// The name in the editor's pop-up.
     var title: LocalizedStringResource {
         switch self {
-        case .czechVAT: L.treatmentCzechVAT
+        case .intraCommunityGoods: L.treatmentEUGoods
         case .reverseChargeEU: L.treatmentReverseCharge
+        case .czechVAT: L.treatmentCzechVAT
+        case .outsideEU: L.treatmentOutsideEU
+        case .exempt: L.treatmentExempt
+        }
+    }
+
+    /// The item under Document ▸ VAT Treatment, in title case.
+    var menuTitle: LocalizedStringResource {
+        switch self {
+        case .intraCommunityGoods: L.menuTreatmentEUGoods
+        case .reverseChargeEU: L.menuTreatmentReverseCharge
+        case .czechVAT: L.menuTreatmentCzechVAT
+        case .outsideEU: L.menuTreatmentOutsideEU
+        case .exempt: L.menuTreatmentExempt
+        }
+    }
+
+    /// The short form for the client suggestion line and the Issue summary.
+    var shortTitle: LocalizedStringResource {
+        switch self {
+        case .intraCommunityGoods: L.shortTreatmentEUGoods
+        case .reverseChargeEU: L.treatmentReverseCharge
+        case .czechVAT: L.shortTreatmentCzechVAT
         case .outsideEU: L.treatmentOutsideEU
         case .exempt: L.treatmentExempt
         }
@@ -36,11 +66,13 @@ enum TreatmentChoice: Hashable, CaseIterable, Identifiable {
     /// The treatment a line takes under this choice; a Czech rate the line already had is kept.
     func apply(to existing: VATTreatment?, exemptReference: String) -> VATTreatment {
         switch self {
+        case .intraCommunityGoods:
+            return .intraCommunityGoods
+        case .reverseChargeEU:
+            return .reverseChargeEU
         case .czechVAT:
             if case .taxable(let kind)? = existing { return .taxable(kind) }
             return .taxable(.standard)
-        case .reverseChargeEU:
-            return .reverseChargeEU
         case .outsideEU:
             return .outsideEU
         case .exempt:
@@ -172,7 +204,7 @@ struct NumberCell: Hashable {
                 treatmentChoice = TreatmentChoice(first)
                 if case .exempt(let reference) = first { exemptReference = reference }
             } else if let customer = customers.first(where: { $0.id == document.customerID }) {
-                treatmentChoice = TreatmentChoice(customer.vatStatus.defaultServiceTreatment)
+                treatmentChoice = TreatmentChoice(customer.vatStatus.defaultTreatment)
             }
             // A payment tax document's tax point is the day of its payment and never follows the issue date.
             taxPointExplicit = document.kind == .paymentTaxDocument || document.taxPointDate.map { $0 != document.issueDate } ?? false
@@ -395,7 +427,7 @@ struct NumberCell: Hashable {
             doc.dueDate = doc.issueDate.adding(days: chosen.paymentTermDays)
             doc.payment = nil
             doc.exchangeRate = nil
-            treatmentChoice = TreatmentChoice(chosen.vatStatus.defaultServiceTreatment)
+            treatmentChoice = TreatmentChoice(chosen.vatStatus.defaultTreatment)
             for index in doc.lines.indices {
                 doc.lines[index].treatment = treatmentChoice.apply(to: doc.lines[index].treatment, exemptReference: exemptReference)
             }
@@ -543,7 +575,7 @@ struct NumberCell: Hashable {
         refreshRate()
     }
 
-    /// A line under reverse charge, outside EU or exempt has no VAT rate cell, so typed text that was not
+    /// A line under any treatment but Czech VAT has no VAT rate cell, so typed text that was not
     /// a rate in force no longer blocks Issue.
     private func dropRateCellsOfUntaxedLines() {
         guard let document else { return }
@@ -930,7 +962,7 @@ struct NumberCell: Hashable {
         var result = deductionWarnings
         if let document, let customer, document.kind != .paymentTaxDocument {
             if document.currency != customer.currency { result.append(String(localized: L.currencyDiffersFromClient)) }
-            if TreatmentChoice(customer.vatStatus.defaultServiceTreatment) != treatmentChoice {
+            if TreatmentChoice(customer.vatStatus.defaultTreatment) != treatmentChoice {
                 result.append(String(localized: L.treatmentDiffersFromClient))
             }
         }
