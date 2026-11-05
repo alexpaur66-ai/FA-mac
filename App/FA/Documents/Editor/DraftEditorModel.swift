@@ -420,7 +420,9 @@ struct NumberCell: Hashable {
         recompute()
     }
 
-    /// The latest issue date per client over every document; a read error keeps the last known order.
+    /// The latest issue date per client over every document, latest first and the client's name breaking
+    /// a tie (recheck N04); a read error keeps the last known order. Reads `customers`, so callers assign
+    /// it first.
     private func refreshRecentCustomers() {
         guard let summaries = try? stores.documents.summaries() else { return }
         var latest: [String: CalendarDay] = [:]
@@ -429,7 +431,13 @@ struct NumberCell: Hashable {
             if let known = latest[customerID], known >= summary.issueDate { continue }
             latest[customerID] = summary.issueDate
         }
-        recentCustomerIDs = latest.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map { $0.key }
+        let names: [String: String] = Dictionary(customers.map { ($0.id, $0.party.name) }, uniquingKeysWith: { first, _ in first })
+        recentCustomerIDs = latest.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            let order = (names[lhs.key] ?? "").localizedStandardCompare(names[rhs.key] ?? "")
+            if order != .orderedSame { return order == .orderedAscending }
+            return lhs.key < rhs.key
+        }.map { $0.key }
     }
 
     /// The supplier and the client are copied onto the draft and frozen at issue. Until then the copies
@@ -886,7 +894,9 @@ struct NumberCell: Hashable {
             for other in try stores.documents.summaries(DocumentFilter(kinds: [.finalInvoice], status: .draft)) where other.id != documentID {
                 guard let draft = try stores.documents.document(id: other.id) else { continue }
                 for number in Set(draft.advanceDeductions.map(\.documentNumber)).intersection(numbers).sorted() {
-                    warnings.append(String(localized: L.receiptAlsoInDraft(number)))
+                    // One warning per receipt, however many other drafts list it (the rows are keyed by text).
+                    let warning = String(localized: L.receiptAlsoInDraft(number))
+                    if !warnings.contains(warning) { warnings.append(warning) }
                 }
             }
             deductionWarnings = warnings

@@ -505,7 +505,7 @@ struct DraftEditorView: View {
                             Text(L.exemptReference)
                         }
                         .textRole(.body)
-                        .frame(width: 220)
+                        .frame(width: 220 * textScale)
                     }
                 }
             }
@@ -1406,21 +1406,19 @@ struct RateEntryForm<Focus: Hashable>: View {
                         .foregroundStyle(.orange)
                         .accessibilityHidden(true)
                 }
-                HStack(spacing: Spacing.m) {
-                    TextField(text: $text) {
-                        Text(L.rateFieldLabel(document.currency.code))
+                // At View ▸ Bigger the scaled field no longer leaves room for the day and the buttons on
+                // one line, so they move under it, as the totals bar's figures wrap.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.m) {
+                        rateField(currencyCode: document.currency.code)
+                        rateControls
                     }
-                    .textRole(.amount)
-                    .frame(width: 120 * textScale)
-                    .focused(focus, equals: focusValue)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
+                    VStack(alignment: .leading, spacing: Spacing.s) {
+                        rateField(currencyCode: document.currency.code)
+                        HStack(spacing: Spacing.m) {
+                            rateControls
+                        }
                     }
-                    .onSubmit { save() }
-                    DatePicker(selection: $day, displayedComponents: .date) { Text(L.rateDateLabel) }
-                    Button { save() } label: { Text(L.saveRate) }
-                        .disabled((parsed ?? 0) <= 0)
-                    Button { importing = true } label: { Text(L.importRates) }
                 }
                 if invalid {
                     InlineMessage(L.enterRateNumber(FixIt.rateExample(locale)))
@@ -1440,6 +1438,30 @@ struct RateEntryForm<Focus: Hashable>: View {
                 if outcome.count != nil { model.refreshRate() }
             }
         }
+    }
+
+    /// The rate field; each layout of the row places it once.
+    @ViewBuilder
+    private func rateField(currencyCode: String) -> some View {
+        TextField(text: $text) {
+            Text(L.rateFieldLabel(currencyCode))
+        }
+        .textRole(.amount)
+        .frame(width: 120 * textScale)
+        .focused(focus, equals: focusValue)
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
+        }
+        .onSubmit { save() }
+    }
+
+    /// The publication day, Save Rate and Import Rates…, beside the field or under it.
+    @ViewBuilder
+    private var rateControls: some View {
+        DatePicker(selection: $day, displayedComponents: .date) { Text(L.rateDateLabel) }
+        Button { save() } label: { Text(L.saveRate) }
+            .disabled((parsed ?? 0) <= 0)
+        Button { importing = true } label: { Text(L.importRates) }
     }
 
     private func save() {

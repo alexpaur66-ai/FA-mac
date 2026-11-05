@@ -343,7 +343,7 @@ enum L {
 
     static let dbCannotOpen = r("error.dbCannotOpen", "Data can't be opened")
     static let errorGeneric = r("error.generic", "That did not work. Nothing was changed.")
-    static let errorReceiptMismatch = r("error.receiptMismatch", "The tax document must match its payment: the same client, currency, advance, day received and total. Nothing was changed.")
+    static let errorReceiptMismatch = r("error.receiptMismatch", "The tax document must match its payment: the same client, currency, advance, day received and total. The change is not saved until it does.")
     static let errorNotFound = r("error.notFound", "The record no longer exists. It may have been deleted in the meantime.")
     static let errorFrozen = r("error.frozen", "The document is issued and locked. Corrections go through a credit note (Phase 2).")
     static let errorNotIssued = r("error.notIssued", "Issue the document first.")

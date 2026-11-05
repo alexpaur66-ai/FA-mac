@@ -158,13 +158,14 @@ taken in PR 20; the rest of this ADR stands.
 - **Totals bar** (E035): on macOS 26 the bar is a safe-area bar with the system's scroll edge effect; the
   opaque inset with a divider stays for macOS 14 and 15. The macOS job of CI builds with Xcode 26, so that
   branch compiles there too.
-- **Inline errors** (E042): the error symbol is `exclamationmark.triangle` in the caution hue; red stays
-  with Overdue.
+- **Inline errors** (E042): an inline message's error symbol is `exclamationmark.triangle` in the caution
+  hue instead of red. An invalid cell keeps its red outline (N07 restores it with the text).
 - **Issue sheet** (E047, E096): the Rate row uses the amount role and shows the last rate error.
 - **Advances deducted** (E068): one row per advance, naming its tax documents, with the days received, the
   summed VAT taxed in CZK and the summed gross; the remove button drops all of that advance's rows.
-- **Text size** (E078): the grid's fixed columns, the due-days field and the rate fields scale with View ▸
-  Bigger, so the cells keep holding their numbers and the grid scrolls sideways.
+- **Text size** (E078): the grid's fixed columns, the due-days field, the exemption reference and the rate
+  fields scale with View ▸ Bigger, so the cells keep holding their numbers and the grid scrolls sideways;
+  when the scaled rate field leaves no room, the day and the rate buttons move under it.
 - **Client suggestions** (N03, N04): each suggestion's second line reads "IČO · country · default currency ·
   document language · VAT treatment"; names sort as the Finder sorts them; with nothing typed, the clients
   with the latest documents come first.
