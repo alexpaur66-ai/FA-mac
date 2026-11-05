@@ -159,7 +159,6 @@ enum L {
     static let paymentDetails = r("document.paymentDetails", "Payment details")
     static let account = r("document.account", "Account")
     static let chain = r("document.chain", "Related documents")
-    static let openPreview = r("document.openPreview", "The PDF preview arrives with the PDF step.")
 
     // MARK: Sheets
 
@@ -291,7 +290,6 @@ enum L {
     static let pdfPreviewUnavailable = r("pdf.previewUnavailable", "Preview unavailable.")
     static let pdfPageImage = r("pdf.pageImage", "Page of the document")
     static let pdfRow = r("pdf.row", "PDF")
-    static let pdfFile = r("pdf.file", "PDF file")
     static let pdfNotSavedYet = r("pdf.notSavedYet", "Kept in the app, not saved as a file yet.")
     static let pdfFileMoved = r("pdf.fileMoved", "File moved – use Save PDF…")
     static func pdfSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.savedTo", "PDF saved to \(path)") }

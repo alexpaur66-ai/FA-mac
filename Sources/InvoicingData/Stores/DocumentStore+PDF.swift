@@ -58,6 +58,14 @@ extension DocumentStore {
         try database.queue.read { db in try DocumentPDFRecord.fetchOne(db, key: documentID)?.stored() }
     }
 
+    /// The path the PDF was last saved to, read without the bytes (the menus check it on every change);
+    /// nil when no PDF is stored or it was never saved.
+    public func savedPDFPath(for documentID: String) throws -> String? {
+        try database.queue.read { db in
+            try String.fetchOne(db, sql: "SELECT savedPath FROM documentPDF WHERE documentID = ?", arguments: [documentID])
+        }
+    }
+
     /// Remembers where the PDF file was last written (Show PDF in Finder, the inspector's "PDF file" row).
     public func recordSavedPDF(documentID: String, path: String, now: Date = Date()) throws {
         try database.queue.write { db in

@@ -62,6 +62,15 @@ and leaves the image to the app.
   white, stacked inside the detail's scroll view, so there is no scroll view inside a scroll view. The
   draft editor's View ▸ Show Preview swaps the editor for the same view, re-rendered about 300 ms after
   the last edit. Print… prints through `PDFView.printOperation` and the system print panel.
+- **The preview and the PDF actions live in the main window.** An issued document's detail shows the
+  PDF row (the saved file, or "kept in the app"), Save PDF…, Show PDF in Finder (disabled while the file
+  is missing; the app keeps its own frozen copy) and Print…, then the pages. On a draft, View ▸ Show/Hide
+  Preview and the toolbar toggle swap the editor's content for the live preview, rendered 300 ms after the
+  last change; the toolbar, Issue and the review sheet stay. File ▸ Save PDF…, Show PDF in Finder and
+  Print… (⌘P) follow the selected document; a draft prints as its watermarked preview. After Issue the
+  result line names the file written; when the write fails the document is issued anyway and the detail
+  shows a banner with Choose Folder… and Save PDF…. The review sheet's PDF row predicts the file from the
+  predicted number. The document window of screens-flows.md §1.1 waits.
 
 ## Alternatives rejected
 

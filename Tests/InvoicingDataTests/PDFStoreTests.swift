@@ -36,14 +36,17 @@ import InvoicingCore
         let store = DocumentStore(database)
         try store.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
         try store.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        #expect(try store.savedPDFPath(for: "doc-cz") == nil)
         #expect(throws: DataError.pdfNotStored("doc-cz")) {
             try store.recordSavedPDF(documentID: "doc-cz", path: "/Users/sasa/Faktury/FV-2026-001.pdf", now: Fixtures.now)
         }
         try store.storePDF(documentID: "doc-cz", data: Data("%PDF".utf8), now: Fixtures.now)
+        #expect(try store.savedPDFPath(for: "doc-cz") == nil)
         let later = Fixtures.now.addingTimeInterval(120)
         try store.recordSavedPDF(documentID: "doc-cz", path: "/Users/sasa/Faktury/2026/FV-2026-001 Odběratel s. r. o..pdf", now: later)
         let stored = try #require(try store.pdf(for: "doc-cz"))
         #expect(stored.savedPath == "/Users/sasa/Faktury/2026/FV-2026-001 Odběratel s. r. o..pdf")
+        #expect(try store.savedPDFPath(for: "doc-cz") == stored.savedPath)
         #expect(stored.savedAt == "2026-11-05T05:02:00Z")
         #expect(stored.renderedAt == "2026-11-05T05:00:00Z")
         #expect(stored.data == Data("%PDF".utf8))
