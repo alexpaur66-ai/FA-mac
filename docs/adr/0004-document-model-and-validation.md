@@ -111,6 +111,12 @@ of this ADR stands.
 - **Deadline**: 15 days after the end of the month of the supply (§ 28 odst. 9 písm. a)).
 - **Tax point after the issue date**: not warned on a document whose lines are all § 64 goods, as goods
   may be invoiced before they leave.
+- **Exchange rate**: § 4 odst. 8 asks for the rate of the day the obligation to declare the tax or the
+  supply arose. On a document whose lines are all § 64 goods that is the § 22 odst. 1 day
+  (`Document.exchangeRateDay`: the 15th of the month after the supply, or the earlier issue date), not
+  the tax point, and the error for a rate dated after the day and the seven-day staleness warning use
+  that day. Every other document, a mixed one and a payment tax document included, keeps the tax point
+  (ACCT).
 - **Clauses**: the § 64 reference replaces „daň odvede zákazník“ on goods; the English line adds Article
   138 of Directive 2006/112/EC.
 
