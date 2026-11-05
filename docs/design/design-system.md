@@ -37,7 +37,7 @@ The HIG design principles page backs the spirit of these: Agency ("Help people r
 ### Facts
 
 - **Current release.** macOS 27 Golden Gate shipped on 14 Sep 2026, and **27.2 is the current release** (26 Oct 2026). The 27.3 betas are out. macOS Tahoe still gets updates, most recently 26.7.2 [S40][S45].
-- **Sasa's hardware is supported.** The M1 Pro ships only in the MacBook Pro (14-inch, 2021) and (16-inch, 2021) [S39]. Both models are on the macOS 27 compatibility list [S37] and the macOS Tahoe 26 list [S38].
+- **Sasa's hardware is supported.** Sasa's Mac is an M1 Pro with 32 GB (Sasa's message in the project chat, 5 Nov 2026). The M1 Pro ships only in the MacBook Pro (14-inch, 2021) and (16-inch, 2021) [S39]. Both models are on the macOS 27 compatibility list [S37] and the macOS Tahoe 26 list [S38].
 - **Liquid Glass needs macOS 26.** Every Liquid Glass API is macOS 26.0 or later: `glassEffect(_:in:)`, `GlassEffectContainer`, the `.glass` and `.glassProminent` button styles, `ToolbarSpacer`, `scrollEdgeEffectStyle`, `ConcentricRectangle` and `containerShape(_:)` [S52][S53][S74]. So does the non-deprecated drop API `dropDestination(for:isEnabled:action:)` [S62].
 - **macOS 27 additions.** `TextFieldStyle.bordered` and `textInputBorderShape(_:)` are macOS 27.0 [S73]. They replace `.roundedBorder`, which is deprecated in 27.3. Also macOS 27.0: `PickerStyle.tabs` [S75], `GeometryProxy.concentricCornerRadii` [S53], `reorderable()`, and `NSMenuItem.preferredImageVisibility` [S45][S46].
 - **The new design can't be switched off.** When you build for macOS 27 or later, the system ignores `UIDesignRequiresCompatibility` [S43]. Apps rebuilt with Xcode 27 always use Liquid Glass [S44].
@@ -181,9 +181,9 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 **Document state: two axes.** The model owns the state; the UI only displays it. It is computed from the document **kind**, the lifecycle (Draft → Issued) and the payments, on two independent axes (RECOMMENDATION):
 - **Settlement**: `draft`, `open` (issued, nothing paid), `partlyPaid`, `paid`, `overpaid`, `settledByAdvances` (final invoice whose amount due is 0), `closedUnpaid` (advance closed without payment, screens-flows §2d).
 - **`isOverdue`**: past the due date and not settled. It never replaces the settlement; it adds to it.
-- Two document facts that are not states: `markedForCreditNote` (screens-flows §2d) and, for advances, whether a tax document exists and which final invoice deducted it.
+- Document facts that are not states: `markedForCreditNote` (screens-flows §2d) and, for advances, whether every received payment has its tax document, whether the client's advances need one at all (Q5, ACCT), and which final invoice deducted it.
 
-**Precedence.** When `isOverdue` is true and the settlement is `open` or `partlyPaid`, the badge is Overdue: **word, tone and symbol** (danger). Its detail keeps the days overdue and the open balance, so a partly paid overdue invoice never hides what is left. **One detail format in both spec files:** "+12 dní · zbývá 1 000,00 €" / "+12 days · 1 000,00 € left". The days are counted from the due date; the remainder is the open balance in the document currency.
+**Precedence.** When `isOverdue` is true and the settlement is `open` or `partlyPaid`, the badge is Overdue: **word, tone and symbol** (danger), unless it is an advance whose received payment still lacks its tax document (see Label order). Its detail keeps the days overdue and the open balance, so a partly paid overdue invoice never hides what is left. **One detail format in both spec files:** "+12 dní · zbývá 1 000,00 €" / "+12 days · 1 000,00 € left". The days are counted from the due date; the remainder is the open balance in the document currency.
 
 **Label order.** A badge shows one label, chosen in this order: Draft; Marked for credit note (it outranks every settlement word, because the whole document is to be corrected); Closed unpaid; Settled in final invoice; Issued (paid) for a DDPP; an advance's missing tax document (Partly paid – / Paid – tax document missing), which outranks Overdue because the § 28 deadline is the supplier's; Overdue (open or partly paid only); then the settlement label from the table below.
 
@@ -199,6 +199,7 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 | Zálohová | partlyPaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Částečně uhrazeno – chybí daňový doklad / Partly paid – tax document missing | "zaplaceno před 3 dny · zbývá 700,00 €" |
 | Zálohová | paid or overpaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Uhrazeno – chybí daňový doklad / Paid – tax document missing | "zaplaceno před 3 dny" |
 | Zálohová | paid, tax document issued, not yet deducted | success (`.green`) | `checkmark.circle.fill` (10.15) | Daňový doklad vystaven / Tax document issued | the DDPP number |
+| Zálohová | paid, the client's advances need no tax document (Q5, ACCT) | success (`.green`) | `checkmark.circle.fill` (10.15) | Uhrazeno / Paid | payment date |
 | Zálohová | deducted by an issued final invoice | neutral (`.secondary`) | `checkmark.seal` (10.15) | Zúčtováno v konečné faktuře / Settled in final invoice (wording ACCT, follows "Konečná faktura") | the final invoice number |
 | Zálohová | closedUnpaid | neutral (`.secondary`) | `xmark.circle` (10.15) | Uzavřeno – neuhrazeno / Closed unpaid | the reason (ACCT wording) |
 | DDPP | (always paid by definition) | success (`.green`) | `checkmark.circle.fill` (10.15) | Vystaveno (uhrazeno) / Issued (paid) | the advance number |
@@ -1033,7 +1034,7 @@ Use specific verbs ("Vystavit", "Smazat"), never "OK", and always "Zrušit" / "C
 | Koncept | Draft |
 | Po splatnosti | Overdue |
 | Částečně uhrazeno / Uhrazeno / Přeplaceno | Partly paid / Paid / Overpaid |
-| Čeká na platbu / Částečně uhrazeno – chybí daňový doklad / Uhrazeno – chybí daňový doklad / Daňový doklad vystaven / Zúčtováno v konečné faktuře / Uzavřeno – neuhrazeno | Awaiting payment / Partly paid – tax document missing / Paid – tax document missing / Tax document issued / Settled in final invoice / Closed unpaid |
+| Čeká na platbu / Částečně uhrazeno – chybí daňový doklad / Uhrazeno – chybí daňový doklad / Daňový doklad vystaven / Zúčtováno v konečné faktuře (ACCT) / Uzavřeno – neuhrazeno | Awaiting payment / Partly paid – tax document missing / Paid – tax document missing / Tax document issued / Settled in final invoice / Closed unpaid |
 | Vystaveno (uhrazeno) / Uhrazeno (zálohami) | Issued (paid) / Paid (by advances) |
 | K opravě dobropisem (ACCT) | Marked for credit note |
 | Variabilní symbol (VS) | Variable symbol (VS) |
@@ -1066,6 +1067,7 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 | Dobropis / opravný daňový doklad | credit note (Phase 2) | ACCT |
 | K záloze … , platba ze dne … | reference line on a DDPP | ACCT |
 | Uzavřeno – neuhrazeno · K opravě dobropisem | closing actions (screens-flows §2d) | ACCT |
+| Zúčtováno v konečné faktuře | status of an advance deducted by an issued final invoice (follows "Konečná faktura") | ACCT |
 | Texts for outside-EU and exempt supplies | PDF notes | ACCT |
 
 The advance note: the brief's short form "Není daňovým dokladem" and the clause InvoicingCore prints (`DocumentClause.notATaxDocument`) differ. The PDF prints the core clause; reconciling the two with the accountant is a follow-up outside the design system (ACCT). If the PDF must print exactly the short form, the change belongs in InvoicingCore `DocumentClause.swift`.

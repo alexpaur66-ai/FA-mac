@@ -48,7 +48,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
   - Apps built with Xcode 27 always use Liquid Glass, because `UIDesignRequiresCompatibility` is ignored when building for macOS 27 [S2][S3].
   - So design for Liquid Glass from day one.
 - **Minimum OS:** target macOS 27.0 if Sasa's Mac runs 27 or can update (the hardware is supported); otherwise macOS 26.1 (Fallback A) with the `#available(macOS 27, *)` branches listed in design-system §2 (Q1).
-  - An M1 Pro Mac (the 14- or 16-inch MacBook Pro from 2021) is on the compatibility lists for both 26 and 27 [S5][S6][S7].
+  - Sasa's Mac is an M1 Pro (Sasa's message in the project chat, 5 Nov 2026). An M1 Pro Mac (the 14- or 16-inch MacBook Pro from 2021) is on the compatibility lists for both 26 and 27 [S5][S6][S7].
   - APIs that need 27 are marked **(27)** in this spec; each is on the design-system §2 list.
 - **Standard components only in v0.1:** `NavigationSplitView`, `Table`, `inspector`, toolbars, sheets.
   - They pick up glass automatically [S1].
@@ -337,7 +337,7 @@ Deliberately left out:
 
 | Column (EN / CZ) | Default | Align | Content |
 |---|---|---|---|
-| Status / Stav | visible | leading | StatusBadge (design-system §4.3): symbol + word, e.g. Koncept, Vystaveno, Čeká na platbu, Částečně uhrazeno, Uhrazeno, Přeplaceno, and Po splatnosti with the detail "+12 dní · zbývá 1 000,00 €". Overdue replaces the word, tone and symbol; the detail keeps the days and the open balance. Never colour alone [S13]. |
+| Status / Stav | visible | leading | StatusBadge (design-system §4.3): symbol + word, e.g. Koncept, Vystaveno, Čeká na platbu, Částečně uhrazeno, Uhrazeno, Přeplaceno, and Po splatnosti with the detail "+12 dní · zbývá 1 000,00 €". Overdue replaces the word, tone and symbol; the detail keeps the days and the open balance. Exception: an advance with a received payment that still lacks its tax document shows that instead (design-system §4.3, Label order). Never colour alone [S13]. |
 | Number / Číslo | visible | leading | "FV 2026-0042"; drafts show "—" |
 | Type / Typ | visible | leading | Short type names from §5: Faktura / Zálohová / DDPP / Konečná |
 | Client / Klient | visible | leading | Name, middle-truncated [S23] |
@@ -630,7 +630,7 @@ Assumptions:
 
 **Advance states** (shown in the Status column; symbols, tones and EN labels in design-system §4.3):
 
-`Čeká na platbu` → `Částečně uhrazeno – chybí daňový doklad` → `Částečně uhrazeno` → `Uhrazeno – chybí daňový doklad` → `Daňový doklad vystaven` → `Zúčtováno v konečné faktuře` (detail: FV 2026-0050), or `Uzavřeno – neuhrazeno` (closed without payment). Each received payment, partial or not, shows "chybí daňový doklad" until its DDPP is issued, and that wins over Overdue. Otherwise an open or partly paid advance past its due date shows Overdue, with the days and the open balance in the detail.
+`Čeká na platbu` → `Částečně uhrazeno – chybí daňový doklad` → `Částečně uhrazeno` → `Uhrazeno – chybí daňový doklad` → `Daňový doklad vystaven` → `Zúčtováno v konečné faktuře` (detail: FV 2026-0050), or `Uzavřeno – neuhrazeno` (closed without payment). Each received payment, partial or not, shows "chybí daňový doklad" until its DDPP is issued, and that wins over Overdue. When the client's advances need no tax document (Q5, ACCT), a paid advance shows `Uhrazeno`. Otherwise an open or partly paid advance past its due date shows Overdue, with the days and the open balance in the detail.
 
 **Closing an advance or a tax document without a credit note** (v0.1; neither action edits the document, each appends a dated event; wording and accounting effect ACCT):
 - **Document ▸ "Uzavřít zálohu bez úhrady… / Close Advance as Unpaid…"** for an issued advance the client will never pay (scope dropped, or the client paid the final invoice directly). A reason is required. The status becomes "Uzavřeno – neuhrazeno / Closed unpaid"; the advance leaves Unpaid, Overdue, Otevřené zálohy and the queue; it stays in the CSV with that status. A credit note is the wrong tool here, because an advance is not a tax document. Closing an advance after a partial payment (the received part keeps its DDPP) is ACCT.
@@ -952,8 +952,9 @@ All panes follow the HIG Settings rules [S29]:
 - One row per series: Faktura (final invoices included by default, ACCT), Zálohová faktura, Daňový doklad k přijaté platbě.
   - Each row has: name, pattern with tokens (`{YYYY}`, `{NNNN}`) and a live preview, **next number**, and the yearly-restart policy (ACCT).
 - **The next number is editable only until the first document of that series is issued in the app.** After that it is read-only, because the series must stay gapless.
-- **VS rule.** By default the VS is the digits of the number, at most 10 digits (Fakturoid's derivation [S106]), plus a series digit so that two series never produce the same VS.
-  - Example: FV 2026-0042 and ZF 2026-0042 would both become 20260042. The defaults are therefore 1…, 2… and 3… prefixes: FV → 120260042.
+- **VS rule.** By default the VS is the digits of the number, at most 10 digits (Fakturoid's derivation [S106]), plus a series prefix so that two series never produce the same VS.
+  - Example: FV 2026-0042 and ZF 2026-0042 would both become 20260042. The default prefixes are therefore FV 1 and ZF 2, and none for DD, which carries no payment request: FV 2026-0042 → 120260042. The user can change them per series.
+  - The core applies the prefix within the 10-digit limit, keeping the prefix. The per-series prefix lands with the build's next data-layer PR, with an ADR 0003 addendum.
   - The pane blocks patterns whose VS could collide.
   - A VS that is unique across series matters for v0.2 auto-matching, which uses VS + amount (Fakturoid and iDoklad both match this way [S107][S115]).
 
