@@ -381,7 +381,9 @@ enum PDFInspection {
         document.supplier.name = "Nováková a synové, stavební, projekční a poradenská společnost s. r. o."
         let pdf = try PDFInspection.document(try DocumentPDF.render(document))
         let text = PDFInspection.text(pdf)
-        #expect(text.contains("QR kód není k dispozici / QR code unavailable"), "the notice stands where the code would be")
+        // The notice wraps inside the 85 pt box, so the words are compared, not the lines.
+        #expect(PDFInspection.words(text).joined(separator: " ").contains("QR kód není k dispozici / QR code unavailable"),
+                "the notice stands where the code would be")
         #expect(!text.contains("SEPA QR (EPC)"), "no caption without a code")
         #expect(try PDFInspection.qrPayloads(pdf).isEmpty, "no code is drawn")
         #expect(text.contains("IBAN"), "the payment details still let the customer pay")
@@ -389,7 +391,7 @@ enum PDFInspection {
         document.status = .draft
         document.number = nil
         let draft = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
-        #expect(draft.contains("QR po vystavení / QR after issue"))
+        #expect(PDFInspection.words(draft).joined(separator: " ").contains("QR po vystavení / QR after issue"))
         #expect(!draft.contains("QR code unavailable"))
     }
 
