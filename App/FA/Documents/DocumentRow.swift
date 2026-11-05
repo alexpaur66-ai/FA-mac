@@ -75,6 +75,21 @@ extension DocumentKind {
         }
     }
 
+    /// The English name of the type (screens-flows.md §5), for the Type pop-up and the Issue sheet.
+    var longTitle: LocalizedStringResource {
+        switch self {
+        case .invoice: L.typeLongInvoice
+        case .advanceRequest: L.typeLongAdvance
+        case .paymentTaxDocument: L.typeLongPaymentTaxDocument
+        case .finalInvoice: L.typeLongFinal
+        }
+    }
+
+    /// "Advance invoice (Zálohová faktura)": the English name with the printed Czech title (design-system.md §9).
+    var pickerTitle: String {
+        String(localized: L.kindWithCzechTitle(String(localized: longTitle), title(language: .czech)))
+    }
+
     var symbol: String {
         switch self {
         case .invoice: Symbols.document

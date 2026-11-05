@@ -96,3 +96,47 @@ the list, and uses an English interface.
   default focus, and the mouse always works. The common case stays ⌘↩ ↩.
 - Open: the customer setting for advances without a tax document (screens-flows.md §6, question 5),
   the per-client DUZP rule, ⌘D from the Clients section, PDF rendering and the QR code on the PDF.
+
+## Amendments (design check of PR 12, November 2026)
+
+The design check of the editor (`design/pr12-design-check.md`) changed these decisions; the rest of this
+ADR stands.
+
+- **Rate resolution** (E026): the rate of the tax point is the stored rate of that day. On a weekend or a
+  Czech public holiday (zákon č. 245/2000 Sb.) it is the stored rate of the last working day before it.
+  On a working day without a row that lies between imported ČNB rows of the previous and the next working
+  day, it is the previous row (the ČNB published nothing that day). Otherwise the rate is missing and the
+  sheet asks for it: never an arbitrary earlier rate. The ℹ row says which day's rate is used and why.
+- **Promoted problems** (E032): a missing company IČO and, except on a payment tax document, a missing
+  bank account in the document's currency are ⛔, not ⚠.
+- **Issue sheet** (E073, E011): with a rate missing, the rate field has the default focus, before the
+  Checked box. Create Final Invoice has no ellipsis: it opens the draft directly. The summary names the QR
+  code the document gets (QR Platba, EPC QR (SEPA) or none) and the legal notes the PDF prints; a
+  payment tax document and a final invoice with nothing due show no payment row.
+- **Payment tax document** (E022, E101): an issued payment tax document carries no payment instructions,
+  the payment it documents has been received. Its draft must stay linked to its payment: the editor blocks
+  Issue when the link is gone and says to delete the draft and create the tax document again from the
+  payment's row. Deleting a payment that has a draft tax document asks whether to delete the draft too;
+  the store deletes both in one transaction. The store itself does not refuse an unlinked receipt: a
+  receipt issued before its payment was recorded still names its advance
+  (`aReceiptIssuedBeforeItsPaymentStillNamesItsAdvance`).
+- **Client type-ahead**: the editor draws its own suggestion list under the client field (↓ ↑ pick, ↩
+  takes the highlighted client, Esc reverts) with a "New Client “X”…" row that opens the client sheet
+  with the typed name and puts the saved client into the draft. `textInputSuggestions` is macOS 15 only
+  and has no such row; the VAT-rate cell uses it where available.
+- **Rates**: Change… on a resolved rate replaces the stored rate of its day, so a mistyped manual rate is
+  not frozen at issue and reused by the next document with that date.
+- **Keyboard**: Document ▸ Add Line Item (⌘L), Delete Line, Move Line Up/Down (no shortcuts, §1.4), Change Type,
+  Currency, Document Language, VAT Treatment and Enter Rate… act on the editor of the selected draft.
+  Duplicate moved to File ▸ New (⌘D) and names the document it copies.
+- **Numbers**: a numeric cell accepts either decimal separator (`DecimalInput`): with both kinds present
+  the last one is the decimal separator; a lone separator is a grouping separator only when it is the
+  locale's and the groups have three digits. An invalid cell is a ⛔ row with a fix-it example.
+- **Lists and focus**: opening a draft clears the Documents search, and the row of the draft being edited
+  stays listed whatever the search says. A new draft opens with the cursor in the client field (no client)
+  or the first line; an opened draft in the first line's quantity.
+- **Quit** writes the open draft at once (`NSApplication.willTerminateNotification`), so autosave's delay
+  loses nothing.
+- **Deferred to a later PR**: the QR type pop-up and the VS row (E059), item history (E062), the currency
+  banner (E025), the series-order warning (E033), E098 and E100 (they wait on Saša's answers), the
+  New ▸ submenu (E001), the "D" key (E018) and `textInputSuggestions` for the client field.

@@ -84,7 +84,7 @@ enum LayoutMetrics {
 /// which `textRole(_:scale:)`, `MoneyText` and `StatusBadge` read.
 enum TextRole: CaseIterable, Sendable {
     case screenTitle, sectionTitle, documentNumber, body, label, rowSecondary, caption
-    case amount, amountStrong, amountSecondary, total, kpi, legalNote, badge
+    case amount, amountStrong, amountSecondary, total, kpi, legalNote, badge, inlineMessage
 
     private struct Spec {
         let style: Font
@@ -123,6 +123,9 @@ enum TextRole: CaseIterable, Sendable {
             return Spec(style: .largeTitle.bold(), size: 26, lineHeight: 32, weight: .bold, tabular: true)
         case .legalNote:
             // Legal and tax wording is never drawn in the secondary colour.
+            return Spec(style: .callout, size: 12, lineHeight: 15, weight: .regular)
+        case .inlineMessage:
+            // An error or warning next to a field: the symbol carries the hue, the words stay primary (§4.4).
             return Spec(style: .callout, size: 12, lineHeight: 15, weight: .regular)
         case .badge:
             return Spec(style: .callout.weight(.medium), size: 12, lineHeight: 15, weight: .medium)

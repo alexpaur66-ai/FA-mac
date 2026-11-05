@@ -11,20 +11,23 @@ struct DocumentsView: View {
     let filter: DocumentSmartFilter
     @Binding var selection: Set<String>
     @Binding var inspectorPresented: Bool
+    /// The search text; the window owns it so that opening a draft can clear it.
+    @Binding var search: String
+    /// The draft open in the editor: its row stays listed whatever the search says.
+    let editingID: String?
     /// An inline result or error line from the last action; stays until the next action (never time-boxed).
     let resultLine: String?
     let newDocument: @MainActor (DocumentKind) -> Void
     let recordPayment: @MainActor (String) -> Void
     let deleteDraft: @MainActor (String) -> Void
 
-    @State private var search = ""
     @State private var sortOrder: [KeyPathComparator<DocumentRow>] = [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
     @SceneStorage("documentsColumns") private var columnCustomization: TableColumnCustomization<DocumentRow>
     @Environment(\.locale) private var locale
 
     private var rows: [DocumentRow] {
         documents.rows(for: filter)
-            .filter { $0.matches(search: search) }
+            .filter { $0.matches(search: search) || $0.id == editingID }
             .sorted(using: sortOrder)
     }
 

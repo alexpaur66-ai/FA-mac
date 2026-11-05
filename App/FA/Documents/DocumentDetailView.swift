@@ -25,6 +25,8 @@ struct DocumentDetailView: View {
     var pdfSaveFailure: Binding<PDFSaveFailure?> = .constant(nil)
 
     @State private var payments: [DocumentPayment] = []
+    /// A payment with a draft tax document, waiting for the answer whether the draft goes too.
+    @State private var paymentPendingDeletion: DocumentPayment?
     /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
     @State private var deductions: [AdvanceDeductionLink] = []
     @State private var loadError: String?
@@ -242,10 +244,31 @@ struct DocumentDetailView: View {
                         Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
                     }
                     if !payment.receiptIssued {
-                        Button(role: .destructive) { deletePayment(payment.id) } label: { Text(L.delete) }
+                        Button(role: .destructive) {
+                            // A draft tax document of the payment documents nothing without it: ask (ADR 0009 amendments).
+                            if payment.receiptDocumentID != nil {
+                                paymentPendingDeletion = payment
+                            } else {
+                                deletePayment(payment.id, deletingDraftReceipt: false)
+                            }
+                        } label: {
+                            Text(L.delete)
+                        }
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            Text(L.deletePaymentWithDraftTitle),
+            isPresented: Binding(get: { paymentPendingDeletion != nil }, set: { if !$0 { paymentPendingDeletion = nil } }),
+            titleVisibility: .visible,
+            presenting: paymentPendingDeletion
+        ) { payment in
+            Button(role: .destructive) { deletePayment(payment.id, deletingDraftReceipt: true) } label: { Text(L.deletePaymentAndDraft) }
+            Button { deletePayment(payment.id, deletingDraftReceipt: false) } label: { Text(L.deletePaymentOnly) }
+            Button(role: .cancel) {} label: { Text(L.cancel) }
+        } message: { _ in
+            Text(L.deletePaymentWithDraftMessage)
         }
     }
 
@@ -267,9 +290,9 @@ struct DocumentDetailView: View {
         }
     }
 
-    private func deletePayment(_ id: String) {
+    private func deletePayment(_ id: String, deletingDraftReceipt: Bool) {
         do {
-            try stores.documents.deletePayment(id: id)
+            try stores.documents.deletePayment(id: id, deletingDraftReceipt: deletingDraftReceipt)
             load()
         } catch {
             loadError = ErrorText.message(error, locale: locale)

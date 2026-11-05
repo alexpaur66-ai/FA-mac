@@ -364,7 +364,7 @@ enum PDFInspection {
         #expect(payload.hasPrefix("BCD\n002\n1\nSCT\n"))
         #expect(payload.contains(PDFFixtures.bank.iban.value))
         #expect(payload.contains("EUR1000.00"))
-        #expect(PDFInspection.text(eurPDF).contains("SEPA QR (EPC)"))
+        #expect(PDFInspection.text(eurPDF).contains("EPC QR (SEPA)"))
         #expect(PDFInspection.text(czkPDF).contains("QR Platba"))
 
         // A final invoice asks for the balance after the advances, not the supply.
@@ -384,7 +384,7 @@ enum PDFInspection {
         // The notice wraps inside the 85 pt box, so the words are compared, not the lines.
         #expect(PDFInspection.words(text).joined(separator: " ").contains("QR kód není k dispozici / QR code unavailable"),
                 "the notice stands where the code would be")
-        #expect(!text.contains("SEPA QR (EPC)"), "no caption without a code")
+        #expect(!text.contains("EPC QR (SEPA)"), "no caption without a code")
         #expect(try PDFInspection.qrPayloads(pdf).isEmpty, "no code is drawn")
         #expect(text.contains("IBAN"), "the payment details still let the customer pay")
         // The draft shows the placeholder and renders.

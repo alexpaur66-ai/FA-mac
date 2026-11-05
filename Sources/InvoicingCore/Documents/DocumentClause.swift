@@ -19,6 +19,9 @@ public enum DocumentClause: Hashable, Sendable {
     /// písm. b) ZDPH).
     case advanceExchangeRate(ExchangeRate)
 
+    /// The prescribed Czech words alone, for screens that show "VAT —" with the reason beside it.
+    public static let reverseChargeNotice = "daň odvede zákazník"
+
     public func text(language: DocumentLanguage) -> String {
         switch (self, language) {
         case (.reverseCharge, .czech):

@@ -1,6 +1,6 @@
-// The review-and-issue sheet (screens-flows.md §2c, ADR 0009): the number the series would assign, what
-// the document says in a few lines, then the problems in three severities. ↩ issues when nothing blocks
-// and every ⚠ row is checked; the data layer issues in one transaction (ADR 0005).
+// The review-and-issue sheet (screens-flows.md §2c, ADR 0009 and its amendments): the number the series
+// would assign, what the document will say, then the problems in three severities. ↩ issues when nothing
+// blocks and every ⚠ row is checked; the data layer issues in one transaction (ADR 0005).
 
 import InvoicingCore
 import InvoicingData
@@ -10,14 +10,16 @@ struct IssueSheet: View {
     let model: DraftEditorModel
     let onIssued: @MainActor (Document) -> Void
 
-    private enum Field: Hashable {
+    enum Field: Hashable {
         case checkbox
+        case rate
     }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var seriesID: String?
     @State private var checked = false
+    @State private var issuing = false
     @State private var error: String?
     @FocusState private var focus: Field?
 
@@ -29,12 +31,21 @@ struct IssueSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
-            if let document = model.document, document.status == .draft {
+            if issuing {
+                // Between the store's commit and the dismissal the draft is already issued; the sheet must
+                // not flash "This draft no longer exists" then.
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .frame(minHeight: 160)
+            } else if let document = model.document, document.status == .draft {
                 heading(document)
                 summary(document)
                 problems(document)
                 if let error {
-                    Text(verbatim: error).textRole(.caption).foregroundStyle(.red)
+                    InlineMessage(error)
                 }
                 HStack {
                     Spacer()
@@ -55,8 +66,9 @@ struct IssueSheet: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(minWidth: 560, maxWidth: 720)
-        .defaultFocus($focus, .checkbox)
+        .formSized()
+        // The rate field comes first when a rate is missing: it is the one thing to type here (E073).
+        .defaultFocus($focus, model.rateIsMissing ? .rate : .checkbox)
         .onAppear {
             // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
             // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the tax point's rate).
@@ -66,18 +78,15 @@ struct IssueSheet: View {
                 seriesID = model.series.first?.id
             }
         }
+        // A changed set of ⚠ rows is checked again.
+        .onChange(of: warningKey) { _, _ in checked = false }
     }
 
     // MARK: Heading and summary
 
     private func heading(_ document: Document) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            let type = String(localized: document.kind.shortTitle)
-            if let seriesID, let number = model.predictedNumber(seriesID: seriesID) {
-                Text(L.issueTitle(type, number)).textRole(.screenTitle)
-            } else {
-                Text(L.issueTitleNoNumber(type)).textRole(.screenTitle)
-            }
+            Text(title(document)).textRole(.screenTitle)
             Text(L.issueSubtitle).textRole(.rowSecondary)
             if model.series.count > 1 {
                 Picker(selection: $seriesID) {
@@ -92,19 +101,66 @@ struct IssueSheet: View {
         }
     }
 
+    /// "Issue invoice FV-2026-007?": the kind in the question, the number the series would assign.
+    private func title(_ document: Document) -> LocalizedStringResource {
+        let number = seriesID.flatMap { model.predictedNumber(seriesID: $0) }
+        switch document.kind {
+        case .invoice: return number.map { L.issueInvoiceTitle($0) } ?? L.issueInvoiceTitleNoNumber
+        case .advanceRequest: return number.map { L.issueAdvanceTitle($0) } ?? L.issueAdvanceTitleNoNumber
+        case .paymentTaxDocument: return number.map { L.issueTaxDocumentTitle($0) } ?? L.issueTaxDocumentTitleNoNumber
+        case .finalInvoice: return number.map { L.issueFinalTitle($0) } ?? L.issueFinalTitleNoNumber
+        }
+    }
+
     private func summary(_ document: Document) -> some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.s) {
-            row(L.summaryType, document.kind.title(language: document.language))
-            row(L.summaryClient, clientLine(document))
-            row(L.summaryDates, datesLine(document))
-            row(L.summaryTotal, totalLine(document))
+        let clauses = DocumentClause.clauses(for: document, totals: model.totals).map { $0.text(language: .ui(locale)) }
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.s) {
+            row(L.summaryType) {
+                Text(verbatim: document.kind.pickerTitle).textRole(.body)
+            }
+            row(L.summaryClient) {
+                Text(clientLine(document)).textRole(.body)
+            }
+            row(L.summaryLanguage) {
+                Text(document.language == .czech ? L.languageCzech : L.languageEnglish).textRole(.body)
+            }
+            row(L.summaryDates) {
+                Text(datesLine(document)).textRole(.body)
+            }
+            row(L.summaryTotal) {
+                totalsGrid(document)
+            }
             if model.needsExchangeRate {
-                row(L.summaryRate, rateLine(document))
+                row(L.summaryRate) {
+                    rateLine(document)
+                }
             }
-            if document.kind != .paymentTaxDocument {
-                row(L.summaryPayment, paymentLine(document))
+            if showsPayment(document) {
+                row(L.summaryPayment) {
+                    paymentLine(document)
+                }
             }
-            row(L.pdfRow, pdfLine(document))
+            if !clauses.isEmpty {
+                row(L.summaryLegal) {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(clauses, id: \.self) { clause in
+                            Text(verbatim: clause).textRole(.legalNote).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            row(L.pdfRow) {
+                Text(verbatim: pdfLine(document)).textRole(.body).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func row<Content: View>(_ label: LocalizedStringResource, @ViewBuilder _ content: () -> Content) -> some View {
+        GridRow {
+            Text(label).textRole(.label)
+            content()
+                .textSelection(.enabled)
+                .gridColumnAlignment(.leading)
         }
     }
 
@@ -118,86 +174,141 @@ struct IssueSheet: View {
         return String(localized: L.pdfWillBeSavedTo(PDFSettings.displayPath(PDFSettings.plannedURL(for: predicted, in: folder))))
     }
 
-    private func row(_ label: LocalizedStringResource, _ value: String) -> some View {
-        GridRow {
-            Text(label).textRole(.label)
-            Text(verbatim: value).textRole(.body).textSelection(.enabled)
-        }
-    }
-
-    private func clientLine(_ document: Document) -> String {
-        var parts = [document.customer.name.isEmpty ? String(localized: L.noClient) : document.customer.name]
+    private func clientLine(_ document: Document) -> LocalizedStringResource {
+        let name = document.customer.name.isEmpty ? String(localized: L.noClient) : document.customer.name
+        let treatment = String(localized: model.treatmentChoice.title)
         if let vatID = document.customer.vatIdentifier {
-            parts.append(String(localized: L.vatID(vatID.value)))
+            return L.clientSummaryWithVATID(name, vatID.value, treatment)
         }
-        parts.append(String(localized: document.language == .czech ? L.languageCzech : L.languageEnglish))
-        parts.append(String(localized: model.treatmentChoice.title))
-        return parts.joined(separator: " · ")
+        return L.clientSummary(name, treatment)
     }
 
-    private func datesLine(_ document: Document) -> String {
-        var parts = [String(localized: L.issuedOnDay(document.issueDate.formatted(locale)))]
-        if document.kind != .advanceRequest {
-            parts.append(String(localized: L.taxPointOn(document.taxPoint.formatted(locale))))
+    private func datesLine(_ document: Document) -> LocalizedStringResource {
+        let issued = document.issueDate.formatted(locale)
+        let due = document.dueDate.formatted(locale)
+        if document.kind == .advanceRequest {
+            return L.datesSummaryNoTaxPoint(issued, due)
         }
-        parts.append(String(localized: L.dueOnDay(document.dueDate.formatted(locale))))
-        return parts.joined(separator: " · ")
+        return L.datesSummary(issued, document.taxPoint.formatted(locale), due)
     }
 
-    private func totalLine(_ document: Document) -> String {
-        guard let totals = model.totals else { return String(localized: L.totalsUnavailable) }
-        let code = document.currency.code
-        var parts = [MoneyText.format(totals.totalGross, currency: code, locale: locale)]
-        if document.kind == .finalInvoice, totals.totalGross != totals.amountDue {
-            parts.append(String(localized: L.advancesDeducted) + " "
-                + MoneyText.format(-(totals.totalGross - totals.amountDue), currency: code, locale: locale))
-        }
-        if totals.rows.contains(where: { $0.treatment.chargesVAT }) {
-            // On a final invoice the VAT after the deduction, the same base as the VAT in CZK.
-            if document.kind == .finalInvoice {
-                parts.append(String(localized: L.vatAfterAdvances) + " " + MoneyText.format(totals.taxableVAT, currency: code, locale: locale))
-            } else {
-                parts.append(String(localized: L.vat) + " " + MoneyText.format(totals.totalVAT, currency: code, locale: locale))
-            }
-            if let czk = totals.taxableVATCZK, document.currency != .czk {
-                parts.append(String(localized: L.vatInCZK) + " " + MoneyText.format(czk, currency: "CZK", locale: locale))
+    /// The same figures as the editor's totals bar, one per line: Total, the VAT (or why there is none),
+    /// the VAT in CZK, and on a final invoice the advances deducted and the amount due.
+    @ViewBuilder private func totalsGrid(_ document: Document) -> some View {
+        if let totals = model.totals {
+            let code = document.currency.code
+            let chargesVAT = totals.rows.contains(where: { $0.treatment.chargesVAT })
+            let isFinal = document.kind == .finalInvoice
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xxs) {
+                moneyRow(L.total, totals.totalGross, code, role: isFinal ? .amount : .amountStrong)
+                if chargesVAT {
+                    if isFinal {
+                        moneyRow(L.vatAfterAdvances, totals.taxableVAT, code)
+                    } else {
+                        moneyRow(L.vat, totals.totalVAT, code)
+                    }
+                    if document.currency != .czk, model.needsExchangeRate {
+                        if let czk = totals.taxableVATCZK {
+                            moneyRow(L.vatInCZK, czk, "CZK")
+                        } else {
+                            dashRow(L.vatInCZK, clause: nil)
+                        }
+                    }
+                } else {
+                    // Reverse charge: the dash carries the notice the PDF prints (§ 29 odst. 2 písm. c) ZDPH).
+                    dashRow(L.vat, clause: document.hasReverseCharge ? DocumentClause.reverseChargeNotice : nil)
+                }
+                if isFinal {
+                    let deducted = totals.totalGross - totals.amountDue
+                    if deducted != 0 {
+                        moneyRow(L.advancesDeducted, -deducted, code)
+                    }
+                    moneyRow(L.amountDue, totals.amountDue, code, role: .amountStrong)
+                }
             }
         } else {
-            switch model.treatmentChoice {
-            case .reverseChargeEU: parts.append(String(localized: L.noVATReverseCharge))
-            case .outsideEU: parts.append(String(localized: L.noVATOutsideEU))
-            case .exempt: parts.append(String(localized: L.noVATExempt))
-            case .czechVAT: break
-            }
+            InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .warning)
         }
-        if document.kind == .finalInvoice {
-            parts.append(String(localized: L.amountDue) + " " + MoneyText.format(totals.amountDue, currency: code, locale: locale))
-        }
-        return parts.joined(separator: " · ")
     }
 
-    private func rateLine(_ document: Document) -> String {
-        guard let rate = document.exchangeRate else {
-            return String(localized: L.rateMissing(document.currency.code, document.taxPoint.formatted(locale)))
+    private func moneyRow(_ label: LocalizedStringResource, _ amount: Decimal, _ code: String, role: TextRole = .amount) -> some View {
+        GridRow {
+            Text(label).textRole(.body)
+            MoneyText(amount: amount, currency: code, locale: locale, role: role)
+                .gridColumnAlignment(.trailing)
         }
-        return String(localized: L.rateLine(rate.czechLabel, rate.validFor.formatted(locale), RateEntryForm.sourceName(rate.source)))
+    }
+
+    private func dashRow(_ label: LocalizedStringResource, clause: String?) -> some View {
+        GridRow {
+            Text(label).textRole(.body)
+            if let clause {
+                Text(L.vatDashWithClause(clause)).textRole(.amount).gridColumnAlignment(.trailing)
+            } else {
+                Text(verbatim: "—").textRole(.amount).gridColumnAlignment(.trailing)
+            }
+        }
+    }
+
+    @ViewBuilder private func rateLine(_ document: Document) -> some View {
+        if let rate = document.exchangeRate {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(L.rateEquals(document.currency.code, DraftEditorView.rateText(rate, locale: locale))).textRole(.body)
+                Text(L.rateDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
+            }
+        } else {
+            // The day whose rate is needed (the last working day on a weekend or holiday), as the form prefills it.
+            Text(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale))).textRole(.body)
+        }
+    }
+
+    /// A payment tax document asks for nothing (its payment has been received), nor does a final invoice
+    /// whose advances cover the supply.
+    private func showsPayment(_ document: Document) -> Bool {
+        if document.kind == .paymentTaxDocument { return false }
+        if document.kind == .finalInvoice, let totals = model.totals, totals.amountDue <= 0 { return false }
+        return true
     }
 
     /// The account the issued document will carry: the one picked in the header, else the company's
-    /// account for the currency (the data layer fills it at issue), and the variable symbol the number gives.
-    private func paymentLine(_ document: Document) -> String {
+    /// account for the currency (the data layer fills it at issue), the QR code it gets and the variable
+    /// symbol the number gives.
+    @ViewBuilder private func paymentLine(_ document: Document) -> some View {
         let account = document.payment?.bankConnection ?? model.profile?.bankConnection(for: document.currency)
-        guard let account else { return String(localized: L.noPayment) }
-        var parts = [account.bankName.map { $0 + " · " + account.iban.value } ?? account.iban.value]
-        if let seriesID, let stored = model.series.first(where: { $0.id == seriesID }),
-           let number = model.predictedNumber(seriesID: seriesID),
-           let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: stored.series.variableSymbolPrefix) {
-            parts.append(String(localized: L.vsPredicted(symbol.digits)))
+        if let account {
+            let accountText = String(localized: DraftEditorView.accountLabel(account))
+            let qrKind = document.payment?.qrCode
+                ?? PaymentInstructions.standard(for: "", bankConnection: account, currency: document.currency).qrCode
+            let qrText = String(localized: Self.qrKindTitle(qrKind))
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                if let symbol = predictedVariableSymbol() {
+                    Text(L.paymentSummaryWithVS(accountText, qrText, symbol)).textRole(.body)
+                } else {
+                    Text(L.paymentSummary(accountText, qrText)).textRole(.body)
+                }
+                if document.payment == nil {
+                    Text(L.paymentFromProfile).textRole(.rowSecondary)
+                }
+            }
+        } else {
+            Text(L.noPayment).textRole(.body)
         }
-        if document.payment == nil {
-            parts.append(String(localized: L.paymentFromProfile))
+    }
+
+    static func qrKindTitle(_ kind: PaymentQRKind) -> LocalizedStringResource {
+        switch kind {
+        case .qrPlatba: L.qrKindQRPlatba
+        case .sepa: L.qrKindSEPA
+        case .none: L.qrKindNone
         }
-        return parts.joined(separator: " · ")
+    }
+
+    private func predictedVariableSymbol() -> String? {
+        guard let seriesID, let stored = model.series.first(where: { $0.id == seriesID }),
+              let number = model.predictedNumber(seriesID: seriesID),
+              let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: stored.series.variableSymbolPrefix)
+        else { return nil }
+        return symbol.digits
     }
 
     // MARK: Problems
@@ -208,39 +319,48 @@ struct IssueSheet: View {
         let errors = model.blockingErrors
         let numberingProblem = model.numberingProblem(seriesID: seriesID)
         let warnings = model.warnings
+        let extraWarnings = model.extraWarnings
         let dateNotToday = document.issueDate != today
         let infos = infoLines(document)
         if model.blockingCount(seriesID: seriesID) > 0 {
             section(L.blockingTitle) {
                 ForEach(errors) { issue in
-                    problemRow(issue.message(language: .ui(locale)), symbol: "xmark.octagon.fill", tint: .red)
+                    InlineMessage(issue.message(language: .ui(locale)))
                 }
                 ForEach(model.deductionConflicts, id: \.self) { conflict in
-                    problemRow(conflict, symbol: "xmark.octagon.fill", tint: .red)
+                    InlineMessage(conflict)
                 }
                 if let numberingProblem {
-                    problemRow(numberingProblem, symbol: "xmark.octagon.fill", tint: .red)
+                    InlineMessage(numberingProblem)
+                }
+                ForEach(model.invalidCellMessages, id: \.self) { message in
+                    InlineMessage(message)
+                }
+                if model.receiptPaymentMissing {
+                    InlineMessage(L.receiptPaymentMissing)
                 }
                 if model.rateIsMissing {
-                    RateEntryForm(model: model)
+                    RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)
                 }
                 if model.series.isEmpty {
                     HStack(spacing: Spacing.m) {
-                        problemRow(String(localized: L.noSeriesForKind), symbol: "xmark.octagon.fill", tint: .red)
-                        SettingsLink { Text(L.goToSettings) }
+                        InlineMessage(L.noSeriesForKind)
+                        SettingsLink { Text(L.openSettings) }
                     }
                 }
             }
         }
-        if !warnings.isEmpty || dateNotToday {
+        if !warnings.isEmpty || !extraWarnings.isEmpty || dateNotToday {
             section(L.checkTitle) {
                 ForEach(warnings) { issue in
-                    problemRow(issue.message(language: .ui(locale)), symbol: "exclamationmark.triangle.fill", tint: .orange)
+                    InlineMessage(issue.message(language: .ui(locale)), kind: .warning)
+                }
+                ForEach(extraWarnings, id: \.self) { warning in
+                    InlineMessage(warning, kind: .warning)
                 }
                 if dateNotToday {
                     HStack(spacing: Spacing.m) {
-                        problemRow(String(localized: L.issueDateNotToday(document.issueDate.formatted(locale))),
-                                   symbol: "exclamationmark.triangle.fill", tint: .orange)
+                        InlineMessage(L.issueDateNotToday(document.issueDate.formatted(locale)), kind: .warning)
                         Button { model.setIssueDate(today) } label: { Text(L.setToToday) }
                     }
                 }
@@ -252,7 +372,7 @@ struct IssueSheet: View {
         if !infos.isEmpty {
             section(L.infoTitle) {
                 ForEach(infos, id: \.self) { line in
-                    problemRow(line, symbol: "info.circle", tint: .secondary)
+                    InlineMessage(line, kind: .info)
                 }
             }
         }
@@ -261,13 +381,27 @@ struct IssueSheet: View {
     private func infoLines(_ document: Document) -> [String] {
         var lines: [String] = []
         if let from = model.rateFallbackFrom {
-            lines.append(String(localized: L.rateFallback(document.taxPoint.formatted(locale), from.formatted(locale))))
+            let wanted = document.taxPoint.formatted(locale)
+            let used = from.formatted(locale)
+            let resource = model.rateResolution?.rule == .noPublicationThatDay
+                ? L.rateNotPublished(wanted, used) : L.rateFallback(wanted, used)
+            lines.append(String(localized: resource))
         }
         if document.kind != .advanceRequest,
            (document.taxPoint.year, document.taxPoint.month) != (document.issueDate.year, document.issueDate.month) {
             lines.append(String(localized: L.taxPointOtherMonth))
         }
         return lines
+    }
+
+    /// What the Checked box vouches for; when it changes, the box is cleared.
+    private var warningKey: [String] {
+        var key = model.warnings.map { String(describing: $0.code) }
+        key.append(contentsOf: model.extraWarnings)
+        if let document = model.document, document.issueDate != CalendarDay(Date(), in: .current) {
+            key.append(document.issueDate.formatted(locale))
+        }
+        return key
     }
 
     private func section<Content: View>(_ title: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
@@ -277,31 +411,40 @@ struct IssueSheet: View {
         }
     }
 
-    private func problemRow(_ text: String, symbol: String, tint: Color) -> some View {
-        Label {
-            Text(verbatim: text).textRole(.body).fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: symbol).foregroundStyle(tint)
-        }
-    }
-
     // MARK: Issue
 
     private func canIssue(_ document: Document) -> Bool {
         // The same count as the ⛔ section and the editor's readiness chip.
         guard seriesID != nil, model.blockingCount(seriesID: seriesID) == 0 else { return false }
-        let needsCheck = !model.warnings.isEmpty || document.issueDate != CalendarDay(Date(), in: .current)
+        let needsCheck = !model.warnings.isEmpty || !model.extraWarnings.isEmpty
+            || document.issueDate != CalendarDay(Date(), in: .current)
         return !needsCheck || checked
     }
 
     private func issue() {
         guard let seriesID else { return }
+        issuing = true
         do {
             let issued = try model.issue(seriesID: seriesID)
             dismiss()
             onIssued(issued)
+        } catch DraftEditorError.saveFailed(let detail) {
+            issuing = false
+            error = String(localized: L.issueFailed(detail))
         } catch {
+            issuing = false
             self.error = String(localized: L.issueFailed(ErrorText.message(error, locale: locale)))
+        }
+    }
+}
+
+private extension View {
+    /// A sheet sized to its content on macOS 15 (`presentationSizing(.form)`), a fixed width range before.
+    @ViewBuilder func formSized() -> some View {
+        if #available(macOS 15, *) {
+            frame(minWidth: 560, maxWidth: 720).presentationSizing(.form)
+        } else {
+            frame(minWidth: 560, maxWidth: 720)
         }
     }
 }
