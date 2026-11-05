@@ -140,11 +140,9 @@ Menu rules:
 |---|---|---|
 | New Invoice | ⌘N | Always. If a client is the current selection, it is prefilled. |
 | New Advance Invoice | ⇧⌘N | Always. Prefilled the same way. |
-| New ▸ Tax Document for Received Payment… | — | A paid advance with no tax document is selected (otherwise it asks which advance). DDPPs and final invoices come from the chain (§2d), not from scratch. |
+| New ▸ Tax Document for Received Payment… | — | An advance with a received payment that has no tax document is selected (otherwise it asks which advance). DDPPs and final invoices come from the chain (§2d), not from scratch. |
 | New ▸ Final Invoice… | — | An advance or a client is selected |
 | New Client… | ⌥⌘N | Always (opens the New Client sheet, §2e) |
-
-These items are the whole **File ▸ New** group: the menu is built with `CommandGroup(replacing: .newItem)` [S143], so the system's New Window item and the WindowGroup titles that SwiftUI lists under File ▸ New [S144] never appear. Whether the system item would otherwise also claim ⌘N is UNVERIFIED; the replacement makes it moot.
 | — | | |
 | Duplicate as Draft (the title names the source, e.g. "Duplicate FV 2026-0041 as Draft") | ⌘D | A document is selected. In client context it acts on that client's last invoice. |
 | — | | |
@@ -160,6 +158,8 @@ These items are the whole **File ▸ New** group: the menu is built with `Comman
 | Print… | ⌘P | A document is selected (prints its PDF through the system print panel [S44]). A draft prints with the fixed-colour "KONCEPT / DRAFT" watermark and the "QR po vystavení" placeholder instead of a scannable QR (design-system §8.8). |
 | — | | |
 | Close | ⌘W | — |
+
+The five New items above are the whole **File ▸ New** group: the menu is built with `CommandGroup(replacing: .newItem)` [S143], so the system's New Window item and the WindowGroup titles that SwiftUI lists under File ▸ New [S144] never appear. Whether the system item would otherwise also claim ⌘N is UNVERIFIED; the replacement makes it moot.
 
 Deliberately left out:
 - **Open (⌘O), Save (⌘S), Save As/Duplicate (⇧⌘S) and Page Setup (⇧⌘P).** Drafts autosave, so no Save is needed [S43]. The PDF is a fixed A4 page. These shortcuts stay **unbound** and are never reused for anything else (§3).
@@ -199,7 +199,7 @@ Deliberately left out:
 |---|---|---|
 | Issue… | ⌘↩ | A draft is focused (in the main-window detail, a document window, or a draft selected in the list) |
 | Record Payment… | ⌘R | An issued document with an open balance is selected |
-| Create Tax Document for Payment | — | A paid advance with a received payment that has no tax document yet |
+| Create Tax Document for Payment | — | An advance with a received payment that has no tax document yet |
 | Create Final Invoice | — | An advance is selected |
 | — | | |
 | Add Line Item | ⌘L | Editor |
@@ -290,7 +290,7 @@ Deliberately left out:
 3. **"Needs attention / K vyřízení" queue.**
    - It is a keyboard-navigable list. ↑↓ selects, ↩ runs the row's main action, Space previews the PDF. The groups appear in this order:
      1. Overdue documents, oldest first: "FV 2026-0031 · Beta s.r.o. · 23 days overdue · 1 200 €" with the action **Record Payment**. Advances closed as unpaid and documents marked for credit note never appear.
-     2. Paid advances with no tax document: **Create Tax Document**.
+     2. Advances with a received payment that has no tax document (paid in full or in part): **Create Tax Document**.
      3. **"Kurzy ke konci měsíce chybí / Month-end rates missing"**, from the first day of each month until the last day of the previous month is covered: **Import ČNB file… / Enter rate…**. This is the most common blocker of the monthly invoice (§2c), so it shows before any draft needs it.
      4. Other missing CNB rates needed by drafts or payments: **Import / Enter**.
      5. Drafts older than 7 days: **Open**.
@@ -337,7 +337,7 @@ Deliberately left out:
 
 | Column (EN / CZ) | Default | Align | Content |
 |---|---|---|---|
-| Status / Stav | visible | leading | StatusBadge (design-system §4.3): symbol + word, e.g. Koncept, Vystaveno, Čeká na platbu, Částečně uhrazeno, Uhrazeno, Přeplaceno, and Po splatnosti with the detail "+12 dní · zbývá 1 000,00 €". Overdue wins the tone; the settlement stays in the detail. Never colour alone [S13]. |
+| Status / Stav | visible | leading | StatusBadge (design-system §4.3): symbol + word, e.g. Koncept, Vystaveno, Čeká na platbu, Částečně uhrazeno, Uhrazeno, Přeplaceno, and Po splatnosti with the detail "+12 dní · zbývá 1 000,00 €". Overdue replaces the word, tone and symbol; the detail keeps the days and the open balance. Never colour alone [S13]. |
 | Number / Číslo | visible | leading | "FV 2026-0042"; drafts show "—" |
 | Type / Typ | visible | leading | Short type names from §5: Faktura / Zálohová / DDPP / Konečná |
 | Client / Klient | visible | leading | Name, middle-truncated [S23] |
@@ -630,10 +630,10 @@ Assumptions:
 
 **Advance states** (shown in the Status column; symbols, tones and EN labels in design-system §4.3):
 
-`Čeká na platbu` → `Částečně uhrazeno` → `Uhrazeno – chybí daňový doklad` → `Daňový doklad vystaven` → `Zúčtováno ve FV 2026-0050`, or `Uzavřeno – neuhrazeno` (closed without payment). Any open advance past its due date shows the Overdue tone with the settlement in the detail.
+`Čeká na platbu` → `Částečně uhrazeno – chybí daňový doklad` → `Částečně uhrazeno` → `Uhrazeno – chybí daňový doklad` → `Daňový doklad vystaven` → `Zúčtováno v konečné faktuře` (detail: FV 2026-0050), or `Uzavřeno – neuhrazeno` (closed without payment). Each received payment, partial or not, shows "chybí daňový doklad" until its DDPP is issued, and that wins over Overdue. Otherwise an open or partly paid advance past its due date shows Overdue, with the days and the open balance in the detail.
 
 **Closing an advance or a tax document without a credit note** (v0.1; neither action edits the document, each appends a dated event; wording and accounting effect ACCT):
-- **Document ▸ "Uzavřít zálohu bez úhrady… / Close Advance as Unpaid…"** for an issued advance the client will never pay (scope dropped, or the client paid the final invoice directly). A reason is required. The status becomes "Uzavřeno – neuhrazeno / Closed unpaid"; the advance leaves Unpaid, Overdue, Otevřené zálohy and the queue; it stays in the CSV with that status. A credit note is the wrong tool here, because an advance is not a tax document.
+- **Document ▸ "Uzavřít zálohu bez úhrady… / Close Advance as Unpaid…"** for an issued advance the client will never pay (scope dropped, or the client paid the final invoice directly). A reason is required. The status becomes "Uzavřeno – neuhrazeno / Closed unpaid"; the advance leaves Unpaid, Overdue, Otevřené zálohy and the queue; it stays in the CSV with that status. A credit note is the wrong tool here, because an advance is not a tax document. Closing an advance after a partial payment (the received part keeps its DDPP) is ACCT.
 - **Document ▸ "Označit k opravě dobropisem… / Mark for Credit Note…"** for a tax document issued by mistake. A reason is required. It stops the Overdue nags, shows a banner on the document ("K opravě dobropisem – dobropisy přijdou ve fázi 2"), sets a CSV flag, and becomes the entry point for Phase 2 credit notes.
 
 **Step 1: create the advance** (⇧⌘N, the palette "zálohová acme", or the client's New Advance Invoice).
@@ -673,7 +673,7 @@ Assumptions:
 - **If the amount due would be negative, Issue is blocked:** "Advances exceed the invoice – refund or credit note handling is Phase 2 (ACCT)".
 - An advance can be deducted by **one** issued final invoice only. Fakturoid also allows only one final invoice per advance [S109]. If two drafts deduct the same advance, both show a warning.
 - The PDF title is "Faktura – daňový doklad". Any extra wording about settling advances is ACCT.
-- After Issue, each deducted advance becomes "Zúčtováno ve FV …".
+- After Issue, each deducted advance becomes "Zúčtováno v konečné faktuře", with the final invoice number in the badge detail.
 - The final invoice uses the Faktura series by default, with an optional separate series. ACCT, and part of Q2.
 
 ### (e) Clients / Klienti
@@ -1229,9 +1229,10 @@ Counting rules:
 | Overpaid | Přeplaceno |
 | Overdue · +12 days · 1 000,00 € left | Po splatnosti · +12 dní · zbývá 1 000,00 € (one detail format in both spec files) |
 | Awaiting payment | Čeká na platbu |
+| Partly paid – tax document missing | Částečně uhrazeno – chybí daňový doklad |
 | Paid – tax document missing | Uhrazeno – chybí daňový doklad |
 | Tax document issued | Daňový doklad vystaven |
-| Settled in FV … | Zúčtováno ve FV … |
+| Settled in final invoice (number in the detail) | Zúčtováno v konečné faktuře (ACCT) |
 | Issued (paid) | Vystaveno (uhrazeno) |
 | Paid (by advances) | Uhrazeno (zálohami) |
 | Closed unpaid | Uzavřeno – neuhrazeno (ACCT) |
@@ -1558,7 +1559,7 @@ Added in the review pass (Apple docs read as DocC JSON on 2026-11-05; pattern `h
 - [S144] swiftui/windowgroup (titles appear in "The list of new windows that someone can open using the File > New menu"; File > New Window passes a `nil` value)
 - [S145] swiftui/view/defaultfocus(_:_:priority:) (macOS 13.0)
 - [S146] swiftui/view/presentationplacement(_:) ; swiftui/presentationplacement (macOS 27.0)
-- [S147] swiftui/view/keyboardshortcut(_:modifiers:) ("On macOS, the system looks in the key window first, then the main window, and then the command groups"; quoted in research/swiftui-apis.md)
+- [S147] swiftui/view/keyboardshortcut(_:modifiers:) ("On macOS, the system looks in the key window first, then the main window, and then the command groups"; quoted in the SwiftUI APIs research notes, kept in the design thread)
 - [S148] swiftui/dynamicviewcontent/reorderable() (macOS 27.0; "within a reorderable container")
 - [S151] HIG boxes (pattern above for HIG pages)
 - [S120] status re-checked 2026-11-05 through WebFetch: "In development" since 17 Nov 2025, 248 votes.

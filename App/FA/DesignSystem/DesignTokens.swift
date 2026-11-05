@@ -7,7 +7,7 @@ import SwiftUI
 
 // MARK: - Spacing
 
-/// Spacing on a 4-point grid. `xxs` is a half step, used only inside badges.
+/// Spacing on a 4-point grid. `xxs` is a half step, for vertical badge padding and tight two-line stacks.
 enum Spacing {
     static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
@@ -80,7 +80,8 @@ enum LayoutMetrics {
 
 /// The text roles of the app, mapped to the macOS text styles (design-system.md §3).
 /// macOS has no Dynamic Type; the default size is 13 pt and the smallest is 10 pt.
-/// View ▸ Bigger / Smaller scales every content surface through `textRole(_:scale:)`.
+/// View ▸ Bigger / Smaller scales every content surface through the `textScale` environment value,
+/// which `textRole(_:scale:)`, `MoneyText` and `StatusBadge` read.
 enum TextRole: CaseIterable, Sendable {
     case screenTitle, sectionTitle, documentNumber, body, label, rowSecondary, caption
     case amount, amountStrong, amountSecondary, total, kpi, legalNote, badge
@@ -150,13 +151,29 @@ enum TextRole: CaseIterable, Sendable {
     }
 }
 
+private struct TextScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    /// The app-wide View ▸ Bigger / Smaller scale, from 1 to 2. The scene root sets it once;
+    /// 1 uses the system text styles themselves.
+    var textScale: CGFloat {
+        get { self[TextScaleKey.self] }
+        set { self[TextScaleKey.self] = newValue }
+    }
+}
+
 struct TextRoleModifier: ViewModifier {
     let role: TextRole
-    /// 1 uses the system text style itself.
-    var scale: CGFloat = 1
+    /// nil follows the app-wide `textScale`.
+    var scale: CGFloat?
+
+    @Environment(\.textScale) private var environmentScale
 
     func body(content: Content) -> some View {
-        content
+        let scale = self.scale ?? environmentScale
+        return content
             .font(scale == 1 ? role.font : role.scaledFont(scale))
             // Hierarchical styles follow selected rows and inactive windows.
             .foregroundStyle(role.isSecondary ? HierarchicalShapeStyle.secondary : HierarchicalShapeStyle.primary)
@@ -164,8 +181,8 @@ struct TextRoleModifier: ViewModifier {
 }
 
 extension View {
-    /// Applies a text role's font and colour.
-    func textRole(_ role: TextRole, scale: CGFloat = 1) -> some View {
+    /// Applies a text role's font and colour, at the app-wide scale unless `scale` is given.
+    func textRole(_ role: TextRole, scale: CGFloat? = nil) -> some View {
         modifier(TextRoleModifier(role: role, scale: scale))
     }
 }

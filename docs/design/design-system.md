@@ -10,7 +10,7 @@ Native macOS invoicing app with a light CRM, built for Sasa's Czech s.r.o. (a VA
 - API availability ("macOS 26.0") is `introducedAt` from Apple's documentation JSON, read on 2026-11-05.
 - The documentation currently reflects the 27.3 **beta** SDK. Anything marked "deprecated 27.3" therefore comes from that beta.
 - SF Symbol names were checked against the SF Symbols name and availability data that the third-party SFSafeSymbols project mirrors [S85]. That data runs up to the 2025 release (macOS 26). It cannot show symbols added or renamed in SF Symbols 27, so confirm every name in the SF Symbols 27 app (the current download [S48]) before use.
-- Code companion: `App/FA/DesignSystem/`. It is written for the agreed deployment target, macOS 14.0, and gates the macOS 26 glass API. [README.md](README.md) lists where its names differ from this document.
+- Code companion: `App/FA/DesignSystem/`. It is written for the interim deployment target, macOS 14.0 (see the §2 decision gate), and gates the macOS 26 glass API. [README.md](README.md) lists where its names differ from this document.
 
 ---
 
@@ -54,7 +54,7 @@ The HIG design principles page backs the spirit of these: Agency ("Help people r
 
 **Baseline statement (used word for word in screens-flows §0.1 and Q1):** target macOS 27.0 if Sasa's Mac runs 27 or can update (the hardware is supported); otherwise macOS 26.1 (Fallback A) with the `#available(macOS 27, *)` branches listed above.
 
-**Decision gate:** before any code is written, Sasa opens Apple menu ▸ About This Mac and reports the version.
+**Decision gate:** before the deployment target is raised, Sasa opens Apple menu ▸ About This Mac and reports the version. Until then the code targets macOS 14.0 and gates newer APIs ([README.md](README.md), Platform policy). That interim target is not Fallback B.
 
 ---
 
@@ -183,7 +183,9 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 - **`isOverdue`**: past the due date and not settled. It never replaces the settlement; it adds to it.
 - Two document facts that are not states: `markedForCreditNote` (screens-flows §2d) and, for advances, whether a tax document exists and which final invoice deducted it.
 
-**Precedence.** When `isOverdue` is true the **tone and symbol** are Overdue (danger), but the badge keeps the settlement word in its detail, so a partly paid overdue invoice never hides its open balance. **One detail format in both spec files:** "+12 dní · zbývá 1 000,00 €" / "+12 days · 1 000,00 € left". The days are counted from the due date; the remainder is the open balance in the document currency.
+**Precedence.** When `isOverdue` is true and the settlement is `open` or `partlyPaid`, the badge is Overdue: **word, tone and symbol** (danger). Its detail keeps the days overdue and the open balance, so a partly paid overdue invoice never hides what is left. **One detail format in both spec files:** "+12 dní · zbývá 1 000,00 €" / "+12 days · 1 000,00 € left". The days are counted from the due date; the remainder is the open balance in the document currency.
+
+**Label order.** A badge shows one label, chosen in this order: Draft; Marked for credit note (it outranks every settlement word, because the whole document is to be corrected); Closed unpaid; Settled in final invoice; Issued (paid) for a DDPP; an advance's missing tax document (Partly paid – / Paid – tax document missing), which outranks Overdue because the § 28 deadline is the supplier's; Overdue (open or partly paid only); then the settlement label from the table below.
 
 **Labels derived from kind + settlement** (status badges use sentence case in English, §9):
 
@@ -192,11 +194,12 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 | any | draft | neutral (`.secondary`) | `pencil.circle` (10.15) | Koncept / Draft | — |
 | Faktura, Konečná | open, not overdue | pending (`.primary`) | `clock` (10.15) | Vystaveno / Issued | "splatné za 5 dní" / "due in 5 days" |
 | Zálohová | open, not overdue | pending (`.primary`) | `clock` (10.15) | Čeká na platbu / Awaiting payment | "splatné za 5 dní" |
-| Faktura, Konečná, Zálohová | partlyPaid | caution (`.orange`) | `circle.lefthalf.filled` (12.0) | Částečně uhrazeno / Partly paid | "zbývá 1 000,00 €" |
+| Faktura, Konečná; Zálohová with every payment's tax document | partlyPaid | caution (`.orange`) | `circle.lefthalf.filled` (12.0) | Částečně uhrazeno / Partly paid | "zbývá 1 000,00 €" |
 | Faktura, Konečná | paid | success (`.green`) | `checkmark.circle.fill` (10.15) | Uhrazeno / Paid | payment date |
-| Zálohová | paid, no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Uhrazeno – chybí daňový doklad / Paid – tax document missing | "zaplaceno před 3 dny" |
+| Zálohová | partlyPaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Částečně uhrazeno – chybí daňový doklad / Partly paid – tax document missing | "zaplaceno před 3 dny · zbývá 700,00 €" |
+| Zálohová | paid or overpaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Uhrazeno – chybí daňový doklad / Paid – tax document missing | "zaplaceno před 3 dny" |
 | Zálohová | paid, tax document issued, not yet deducted | success (`.green`) | `checkmark.circle.fill` (10.15) | Daňový doklad vystaven / Tax document issued | the DDPP number |
-| Zálohová | deducted by an issued final invoice | neutral (`.secondary`) | `checkmark.seal` (10.15) | Zúčtováno ve FV … / Settled in FV … | the final invoice number |
+| Zálohová | deducted by an issued final invoice | neutral (`.secondary`) | `checkmark.seal` (10.15) | Zúčtováno v konečné faktuře / Settled in final invoice (wording ACCT, follows "Konečná faktura") | the final invoice number |
 | Zálohová | closedUnpaid | neutral (`.secondary`) | `xmark.circle` (10.15) | Uzavřeno – neuhrazeno / Closed unpaid | the reason (ACCT wording) |
 | DDPP | (always paid by definition) | success (`.green`) | `checkmark.circle.fill` (10.15) | Vystaveno (uhrazeno) / Issued (paid) | the advance number |
 | Konečná | settledByAdvances | success (`.green`) | `checkmark.circle.fill` (10.15) | Uhrazeno (zálohami) / Paid (by advances) | — |
@@ -206,7 +209,7 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 
 - **Where the states come from.** The core states follow iDoklad's five, which include *Přeplaceno*, plus Draft [S88]. The brief requires partial payments and overpayments. The advance states come from the advance chain in screens-flows §2d.
 - **Overdue and the two "closing" facts.** A `closedUnpaid` advance and a document `markedForCreditNote` are never overdue: they leave the Unpaid and Overdue figures and the attention queue (screens-flows §2a aggregation rules).
-- **Orange means "the amount doesn't match, or a step is missing; decide something".** That is why Partly paid, Overpaid, Paid – tax document missing and a Suggested match share it. They are told apart by symbol and word.
+- **Orange means "the amount doesn't match, or a step is missing; decide something".** That is why Partly paid, Overpaid, both "tax document missing" states and a Suggested match share it. They are told apart by symbol and word.
 - **Lock glyph.** Every issued document also shows `lock.fill` (10.15) beside its number. This is a fact about the document, not a status, so it is never coloured.
 - Symbol names come from data up to macOS 26 [S85]; check them in the SF Symbols 27 app.
 
@@ -214,6 +217,7 @@ The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green`
 
 | State | Tone | Symbol (macOS since [S85]) | Label CZ / EN | Extra text |
 |---|---|---|---|---|
+| **Already recorded** | success (`.green`) | `checkmark.circle` (10.15) | Už zaznamenáno / Already recorded | the payment recorded by hand that the line confirms |
 | **Matched** | success (`.green`) | `checkmark.circle.fill` (10.15) | Spárováno / Matched | reason: "VS + částka", "Známý IBAN", "Ručně" |
 | **Suggested** | caution (`.orange`) | `checkmark.circle.badge.questionmark` (13.0) | Návrh / Suggested | reason and difference |
 | **Unmatched** | pending (`.primary`) | `circle.dashed` (11.0) | Nespárováno / Unmatched | — |
@@ -275,8 +279,8 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 
 | Token | pt | Use |
 |---|---|---|
-| `Spacing.xxs` | 2 | Half-step for badge internals only: symbol-to-text gap, vertical badge padding |
-| `Spacing.xs` | 4 | Icon-to-label gap; tight stacks (amount over its CZK line) |
+| `Spacing.xxs` | 2 | Half-step: vertical badge padding; tight two-line stacks (amount over its CZK line, caption under a value) |
+| `Spacing.xs` | 4 | Icon-to-label gap, including the badge's symbol-to-word and word-to-detail gaps; compact-badge horizontal padding |
 | `Spacing.s` | 8 | Gap between related controls; horizontal badge padding; grid cell spacing |
 | `Spacing.m` | 12 | **Padding around bezeled elements** (≈12 pt in the HIG [S5]); inspector row groups |
 | `Spacing.l` | 16 | Inspector insets; card padding; space between form groups |
@@ -358,7 +362,7 @@ Only one prominent control per context, on the trailing side [S8]:
 
 | Setting | System chrome | Custom parts of this app (RECOMMENDATION) |
 |---|---|---|
-| Reduce Transparency | adapts automatically [S1][S5] | v0.2: the Undo toast switches to an opaque `windowBackgroundColor` capsule with a `separatorColor` border (`FloatingSurface` in the Swift file). Whether system glass already goes opaque for a custom `glassEffect` is UNVERIFIED; keep the fallback until it's checked. v0.1 has no custom glass. |
+| Reduce Transparency | adapts automatically [S1][S5] | v0.2: the Undo toast switches to an opaque `windowBackgroundColor` capsule with a `separatorColor` border (`FloatingSurface` in `App/FA/DesignSystem/FloatingSurface.swift`). Whether system glass already goes opaque for a custom `glassEffect` is UNVERIFIED; keep the fallback until it's checked. v0.1 has no custom glass. |
 | Increase Contrast | adapts automatically | Status badges add a 1 pt border; the accent switches to its high-contrast variant; tiles and the drop zone get a `separatorColor` border. |
 | Show Borders (macOS 27) | supported [S44] | When `accessibilityShowBorders` is on (back-deployed, macOS 11.0 listing [S67]), borderless custom buttons (the inline result line's "Undo", inline "Change…", the v0.2 toast) get a border. |
 | Liquid Glass slider (27) | — | Test at both ends: ultra clear and fully tinted [S44]. |
@@ -465,14 +469,16 @@ The sketches are illustrative. The basic views they use (`Text`, `Button`, `Text
   - optional detail ("+12 dní · zbývá 1 000,00 €") in `.secondary`
 - **States:**
   - *regular*
-  - *in a selected, focused row* (`backgroundProminence == .increased`, macOS 14.0 [S54]): no tint fill, monochrome symbol
+  - *in a selected, focused row* (`backgroundProminence == .increased`, macOS 14.0 [S54]): no tint fill, monochrome symbol. The prominence is read in a custom `ShapeStyle`, as Apple recommends, because a table cell's top-level view may not see the row's value
   - *Increase Contrast*: 1 pt tone border
-  - *compact*: symbol only, for narrow columns. The tooltip and the VoiceOver label carry the **same** text, word plus detail: `help(Text(verbatim: spoken))` (the `Text` overload of `help(_:)`, macOS 13.0 [S108]), so mouse users don't lose the detail that VoiceOver users hear.
+  - *compact*: symbol only, for narrow columns. Without the flag, the badge falls back by itself when its column is too narrow: full, then word only, then symbol only (`ViewThatFits`, macOS 13.0). The tooltip and the VoiceOver label always carry the **same** text, word plus detail, in the view's locale: `help(Text(verbatim: spoken))` (the `Text` overload of `help(_:)`, macOS 11.0 [S108]), so mouse users don't lose the detail that VoiceOver users hear.
 - **Keyboard:** not focusable. Its text joins the row's accessibility label.
 - **SwiftUI:** see `StatusBadge` in `App/FA/DesignSystem/`. Usage:
 
 ```swift
-TableColumn("Stav") { doc in StatusBadge(doc.status, detail: doc.statusDetail) }   // "+12 dní · zbývá 1 000,00 €"
+TableColumn("Stav") { row in StatusBadge(row.stateInputs, detail: row.statusDetail) }
+// row.stateInputs: DocumentStateInputs from the data layer (not Document.status, which is draft/issued)
+// row.statusDetail: "+12 dní · zbývá 1 000,00 €"
 ```
 
 ### 8.2 MoneyText
@@ -488,7 +494,7 @@ TableColumn("Stav") { doc in StatusBadge(doc.status, detail: doc.statusDetail) }
   - unavailable (CZK line missing because there is no rate): the row shows ExchangeRateRow's warning instead of a fake number
 - **Locale (one rule in both spec files):** the **UI locale** everywhere in the app, including editor input and the editor's totals bar. The **PDF locale** in the PDF and its preview. The PDF locale is Czech formatting (`cs_CZ`) for both document languages, "Čeština" and "Čeština + English" (§9; RECOMMENDATION, confirm with Sasa and the accountant). The `locale` parameter is always passed explicitly, because `init(code:locale:)` otherwise defaults to `.autoupdatingCurrent` [S56].
 - **Keyboard:** the text is selectable (`textSelection(.enabled)`, macOS 12.0) so Sasa can copy amounts.
-- **VoiceOver:** reads the amount with the currency's full name, using `presentation(.fullName)` (macOS 12.0 [S56]). For example, "1 234,50 eura, 30 862,50 korun českých". The exact spoken output is UNVERIFIED.
+- **VoiceOver:** reads the amount with the currency's full name, using `presentation(.fullName)` (macOS 12.0 [S56]). For example, "1 234,50 eura, 30 862,50 české koruny". The exact spoken output is UNVERIFIED.
 - **SwiftUI:** see `MoneyText` in `App/FA/DesignSystem/`.
 
 ### 8.3 MoneyField
@@ -811,7 +817,7 @@ Bulk actions on a multi-selection (Save PDFs to Folder…, Export CSV…, Print)
 ### 8.12 Inspector panels
 
 - **Container:**
-  - `.inspector(isPresented:content:)` (macOS 14.0) [S60] at the Layout widths; the framework restores its presentation state [S60]
+  - `.inspector(isPresented:content:)` (macOS 14.0) [S60] at the `LayoutMetrics.inspector` widths (§5.3); the framework restores its presentation state [S60]
   - toggle: ⌥⌘I and the toolbar's `sidebar.right`
   - tabs: a `.tabs` picker (macOS 27.0) [S75] with **Údaje · Platby · Aktivita** (Details / Payments / Activity); six at most [S10]
   - content: `Form` + `.formStyle(.grouped)` [S1], section headers in title case [S1]
@@ -886,7 +892,7 @@ RoundedRectangle(cornerRadius: Radius.m)
 - **Purpose:** show one bank line beside its best candidate document, with one-key decisions.
 - **Anatomy, three zones:**
   - **Left, the bank line, untouched:** date, `MoneyText`, counterparty name, IBAN, VS, message.
-  - **Middle:** StatusBadge (Matched / Suggested / Unmatched / Ignored) plus the reason ("VS + částka") and any difference ("−0,40 Kč, haléřové vyrovnání").
+  - **Middle:** StatusBadge (Already recorded / Matched / Suggested / Unmatched / Ignored) plus the reason ("VS + částka") and any difference ("−0,40 Kč, haléřové vyrovnání").
   - **Right, the candidate:** number, client, open amount, due date. If there is none: "Žádný návrh".
   - The layout follows Xero's side-by-side row with one accept per line [S89]. Xero users asked for bulk accept (248 votes); the idea page has shown "in development" since 17 Nov 2025 (status checked 2026-11-05) [S90].
 - **States:**
@@ -968,7 +974,7 @@ This component is not in the task list, but P2 depends on it.
 - **Purpose:** confirm an undoable action that took effect immediately (delete a draft, unmatch, delete a note, import; in v0.2 also bulk accept), with a one-click Undo.
 - **Edit ▸ Undo (⌘Z) is the primary undo.** It never expires: ⌘Z works at any time, as many times as needed, with named actions [S16]. The visual confirmation is secondary.
 - **v0.1: inline result line** (no glass). A plain, opaque line at the top of the content pane, just under the toolbar: `checkmark.circle` + the message ("Koncept smazán") + a borderless "Odvolat" button. It is part of the content, not a floating layer.
-- **v0.2: Undo toast.** The same content in a capsule (`FloatingSurface` in the Swift file, the one custom glass element, §6), for bulk actions where a floating confirmation earns its cost.
+- **v0.2: Undo toast.** The same content in a capsule (`FloatingSurface` in `App/FA/DesignSystem/FloatingSurface.swift`, the one custom glass element, §6), for bulk actions where a floating confirmation earns its cost.
 - **Shared rules:**
   - Use the same word as the system's Czech Edit ▸ Undo item; the exact Czech term is UNVERIFIED, so check it on Sasa's Mac.
   - **Placement:** top of the content pane, never at the bottom edge [S7].
@@ -1025,7 +1031,7 @@ Use specific verbs ("Vystavit", "Smazat"), never "OK", and always "Zrušit" / "C
 | Koncept | Draft |
 | Po splatnosti | Overdue |
 | Částečně uhrazeno / Uhrazeno / Přeplaceno | Partly paid / Paid / Overpaid |
-| Čeká na platbu / Uhrazeno – chybí daňový doklad / Daňový doklad vystaven / Zúčtováno ve FV … / Uzavřeno – neuhrazeno | Awaiting payment / Paid – tax document missing / Tax document issued / Settled in FV … / Closed unpaid |
+| Čeká na platbu / Částečně uhrazeno – chybí daňový doklad / Uhrazeno – chybí daňový doklad / Daňový doklad vystaven / Zúčtováno v konečné faktuře / Uzavřeno – neuhrazeno | Awaiting payment / Partly paid – tax document missing / Paid – tax document missing / Tax document issued / Settled in final invoice / Closed unpaid |
 | Vystaveno (uhrazeno) / Uhrazeno (zálohami) | Issued (paid) / Paid (by advances) |
 | K opravě dobropisem (ACCT) | Marked for credit note |
 | Variabilní symbol (VS) | Variable symbol (VS) |
@@ -1231,7 +1237,7 @@ The research threads opened these on or before 2026-11-05. HIG and developer pag
 - [S105] bundleresources/entitlements/com.apple.security.network.client · …/com.apple.security.network.server
 - [S106] Apple Support, Mac keyboard shortcuts (published 14 Sep 2026) — https://support.apple.com/en-us/102650 [WebFetch]: Command-Delete = "Move the selected item to the Trash"; Shift-Command-Q, Command-Grave accent, Shift-Command-5, Shift-Command-6 (macOS 27 Siri); no Control-F1 row
 - [S107] foundation/decimal/formatstyle · foundation/decimal/formatstyle/init(locale:) · foundation/decimal/formatstyle/precision(_:) (all macOS 12.0) · foundation/decimal/formatstyle/configuration (typealias of NumberFormatStyleConfiguration) · foundation/numberformatstyleconfiguration/precision/fractionlength(_:)-3wkd9 (`static func fractionLength(_ length: Int)`, macOS 12.0) — https://developer.apple.com/documentation/foundation/numberformatstyleconfiguration/precision
-- [S108] swiftui/view/help(_:) (macOS 13.0; overloads for LocalizedStringResource, LocalizedStringKey, StringProtocol and Text)
+- [S108] swiftui/view/help(_:) (macOS 13.0 for the LocalizedStringResource overload; the Text overload, help(_:)-9lm7l, is macOS 11.0; overloads for LocalizedStringResource, LocalizedStringKey, StringProtocol and Text)
 - [S109] swiftui/tab (macOS 15.0)
 - [S110] appkit/nstableview/allowstypeselect ("The default value of this property is true")
 - [S111] swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l (`edge: VerticalEdge`, macOS 12.0) — https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l

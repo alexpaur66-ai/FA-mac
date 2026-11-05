@@ -208,8 +208,26 @@
         }
       }
     },
+    "status.document.partlyPaidTaxDocumentMissing" : {
+      "comment" : "Advance request with a partial payment that has no payment tax document yet.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Částečně uhrazeno – chybí daňový doklad"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partly paid – tax document missing"
+          }
+        }
+      }
+    },
     "status.document.settledInFinal" : {
-      "comment" : "Advance request deducted by an issued final invoice; the badge detail shows its number.",
+      "comment" : "Advance request deducted by an issued final invoice; the badge detail shows its number. The Czech wording follows the type name \"Konečná faktura\" and waits for the accountant.",
       "extractionState" : "manual",
       "localizations" : {
         "cs" : {

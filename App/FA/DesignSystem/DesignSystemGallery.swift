@@ -7,12 +7,14 @@ import SwiftUI
 
 struct DesignSystemGallery: View {
     private let czech = Locale(identifier: "cs_CZ")
+    @State private var selectedRow: DocumentStateLabel? = .overdue
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.section) {
                 textRoles
                 documentBadges
+                badgesInRows
                 matchBadges
                 amounts
                 accent
@@ -39,6 +41,25 @@ struct DesignSystemGallery: View {
             }
             StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
             StatusBadge(.partlyPaid, compact: true)
+            // Too narrow for the detail: the badge drops it by itself.
+            StatusBadge(.overdue, detail: "+12 dní · zbývá 1 000,00 €")
+                .frame(width: 140, alignment: .leading)
+        }
+    }
+
+    /// Selected rows of a focused list: the badges go monochrome on the accent fill.
+    private var badgesInRows: some View {
+        section("Badges in list rows") {
+            List(selection: $selectedRow) {
+                ForEach([DocumentStateLabel.overdue, .partlyPaidTaxDocumentMissing, .paid], id: \.self) { label in
+                    HStack {
+                        Text(verbatim: label.rawValue)
+                        Spacer()
+                        StatusBadge(label)
+                    }
+                }
+            }
+            .frame(height: 120)
         }
     }
 
@@ -98,5 +119,10 @@ struct DesignSystemGallery: View {
 #Preview("Czech") {
     DesignSystemGallery()
         .environment(\.locale, Locale(identifier: "cs_CZ"))
+}
+
+#Preview("Bigger 150 %") {
+    DesignSystemGallery()
+        .environment(\.textScale, 1.5)
 }
 #endif

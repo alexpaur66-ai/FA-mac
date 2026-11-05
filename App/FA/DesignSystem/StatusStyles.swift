@@ -35,8 +35,8 @@ struct StatusStyle {
 /// The facts a document's badge is computed from. The data layer fills it from the InvoicingCore
 /// document and its payments; the views only display the result.
 ///
-/// Two independent axes: `settlement` and `isOverdue`. Overdue never replaces the settlement. It wins
-/// the tone and symbol, and the badge detail keeps the open balance ("+12 dní · zbývá 1 000,00 €").
+/// Two independent axes: `settlement` and `isOverdue`. The model keeps both. On the badge, Overdue takes
+/// the word, tone and symbol, and the detail keeps the days and the open balance ("+12 dní · zbývá 1 000,00 €").
 struct DocumentStateInputs: Hashable, Sendable {
     /// The document type. The raw values match `InvoicingCore.DocumentKind`, so the data layer can map
     /// one to the other with `Kind(rawValue:)`.
@@ -61,14 +61,15 @@ struct DocumentStateInputs: Hashable, Sendable {
     var settlement: Settlement
     /// Axis 2: past the due date and not settled.
     var isOverdue = false
-    /// Advance requests: a payment tax document exists for the payment.
+    /// Advance requests: every payment received so far has its own payment tax document (one per payment,
+    /// screens-flows.md §2d). The data layer also sets it when the client's documents need none (question 5, ACCT).
     var taxDocumentIssued = false
     /// Advance requests: an issued final invoice deducted it.
     var deductedInFinal = false
     /// Tax documents marked "Označit k opravě dobropisem…". Such a document is never overdue.
     var markedForCreditNote = false
 
-    /// The one label to show. The order of the checks is the precedence in design-system.md §4.3.
+    /// The one label to show, in the label order of design-system.md §4.3.
     var label: DocumentStateLabel {
         if settlement == .draft { return .draft }
         if markedForCreditNote { return .markedForCreditNote }
@@ -76,13 +77,22 @@ struct DocumentStateInputs: Hashable, Sendable {
         if kind == .advanceRequest && deductedInFinal { return .settledInFinal }
         // A payment tax document records money already received, so it is paid by definition.
         if kind == .paymentTaxDocument { return .issuedPaid }
+        // Money received on an advance needs its tax document within the § 28 ZDPH deadline. That step is
+        // the supplier's to take, so it wins over Overdue; an overpaid advance with its tax documents shows Overpaid.
+        if kind == .advanceRequest && !taxDocumentIssued {
+            switch settlement {
+            case .partlyPaid: return .partlyPaidTaxDocumentMissing
+            case .paid, .overpaid: return .paidTaxDocumentMissing
+            default: break
+            }
+        }
         if isOverdue && (settlement == .open || settlement == .partlyPaid) { return .overdue }
 
         switch (kind, settlement) {
         case (.advanceRequest, .open):
             return .awaitingPayment
         case (.advanceRequest, .paid):
-            return taxDocumentIssued ? .taxDocumentIssued : .paidTaxDocumentMissing
+            return .taxDocumentIssued
         case (_, .open):
             return .issued
         case (_, .partlyPaid):
@@ -102,8 +112,9 @@ struct DocumentStateInputs: Hashable, Sendable {
 
 /// One label per displayable document state. English defaults use sentence case (design-system.md §9).
 enum DocumentStateLabel: String, CaseIterable, Sendable {
-    case draft, issued, awaitingPayment, partlyPaid, paid, paidTaxDocumentMissing, taxDocumentIssued
-    case settledInFinal, closedUnpaid, issuedPaid, paidByAdvances, overpaid, overdue, markedForCreditNote
+    case draft, issued, awaitingPayment, partlyPaid, partlyPaidTaxDocumentMissing, paid, paidTaxDocumentMissing
+    case taxDocumentIssued, settledInFinal, closedUnpaid, issuedPaid, paidByAdvances, overpaid, overdue
+    case markedForCreditNote
 
     var style: StatusStyle {
         switch self {
@@ -125,6 +136,12 @@ enum DocumentStateLabel: String, CaseIterable, Sendable {
                 tone: .caution, symbol: "circle.lefthalf.filled",
                 label: LocalizedStringResource(
                     "status.document.partlyPaid", defaultValue: "Partly paid", table: "DesignSystem"))
+        case .partlyPaidTaxDocumentMissing:
+            return StatusStyle(
+                tone: .caution, symbol: "checkmark.circle.trianglebadge.exclamationmark",
+                label: LocalizedStringResource(
+                    "status.document.partlyPaidTaxDocumentMissing", defaultValue: "Partly paid – tax document missing",
+                    table: "DesignSystem"))
         case .paid:
             return StatusStyle(
                 tone: .success, symbol: "checkmark.circle.fill",

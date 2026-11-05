@@ -25,7 +25,8 @@ waits for Saša's macOS version. Until then the code follows the policy agreed f
 
 - The deployment target stays **macOS 14.0**.
 - CI builds with the default Xcode of the `macos-15` runner, so any API from a newer SDK sits behind
-  `#if compiler(>=6.2)` and an `if #available(macOS 26, *)` check, with a macOS 14 fallback.
+  `#if compiler(>=6.2)` (Swift 6.2 ships with the macOS 26 SDK; a macOS 27 API needs the Swift version of that SDK)
+  and an `if #available(macOS NN, *)` check for the API's own version, with a macOS 14 fallback.
 - Today that applies to one call: `glassEffect(_:in:)` in `FloatingSurface`. On macOS 14 and 15 the surface is an
   opaque capsule, the same as with Reduce Transparency.
 - The runner's Xcode 16.4 (Swift 6.1) compiles only the fallback. The glass branch is first compiled by Xcode 26 or
@@ -45,22 +46,26 @@ The code follows the specs, with a few names changed so they don't clash with In
 | `DocumentKind` (`advance`) | `DocumentStateInputs.Kind` (`advanceRequest`) | Raw values match `InvoicingCore.DocumentKind`, so `Kind(rawValue:)` maps one to the other. |
 | `Settlement` | `DocumentStateInputs.Settlement` | Kept next to the inputs it belongs to. |
 | `MatchStatus` | `BankMatchState` | Says what is being matched. |
-| label "Zúčtováno ve FV …" | "Zúčtováno v konečné faktuře", number in the badge detail | The badge detail already carries the final invoice number. |
 
 ## Using it
 
 ```swift
-Text(document.number).textRole(.documentNumber)
+Text(verbatim: document.number ?? "—").textRole(.documentNumber)   // drafts have no number yet
 
 StatusBadge(DocumentStateInputs(kind: .invoice, settlement: .partlyPaid, isOverdue: true),
             detail: "+12 dní · zbývá 1 000,00 €")
 
 MoneyText(amount: total, currency: "EUR", locale: uiLocale, czk: totalInCZK, role: .total)
 
-NavigationSplitView { … }
-    .navigationSplitViewColumnWidth(min: LayoutMetrics.sidebar.min,
-                                    ideal: LayoutMetrics.sidebar.ideal,
-                                    max: LayoutMetrics.sidebar.max)
+NavigationSplitView {
+    Sidebar()
+        .navigationSplitViewColumnWidth(min: LayoutMetrics.sidebar.min,
+                                        ideal: LayoutMetrics.sidebar.ideal,
+                                        max: LayoutMetrics.sidebar.max)
+} content: { … } detail: { … }
+
+// View ▸ Bigger / Smaller: set once at the scene root; text roles, amounts and badges follow it.
+ContentView().environment(\.textScale, textScale)
 ```
 
 `Brand.accent` is the "Inkoust" accent as a fill colour, for custom drawing. App-wide, the accent comes from an
@@ -69,5 +74,6 @@ the build adds with the project settings (not `.tint` on the root view). Links a
 `NSColor.linkColor`, never the brand colour.
 
 Every status label is a `LocalizedStringResource` in the `DesignSystem` table, with English defaults in sentence case and
-Czech translations in `DesignSystem.xcstrings`. Two Czech labels wait for the accountant: "Uzavřeno – neuhrazeno" and
-"K opravě dobropisem".
+Czech translations in `DesignSystem.xcstrings`. Three Czech labels wait for the accountant: "Uzavřeno – neuhrazeno",
+"K opravě dobropisem" and "Zúčtováno v konečné faktuře" (it follows the type name "Konečná faktura"). `StatusBadge`
+resolves its word in the view's locale, so the visible word, the tooltip and VoiceOver always agree.

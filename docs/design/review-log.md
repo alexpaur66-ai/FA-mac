@@ -2,7 +2,7 @@
 
 ## 2026-11-05 — Editor pass: review findings F1–F68
 
-Files: design-system.md (ds), screens-flows.md (sf), DesignSystem.swift (swift). The pre-review originals are kept in the design thread.
+Files: design-system.md (ds), screens-flows.md (sf), DesignSystem.swift (swift; later split into App/FA/DesignSystem/, with the renames in README.md). The pre-review originals are kept in the design thread.
 I re-checked every finding against the source before changing anything. Sources added: ds [S99]–[S111], sf [S139]–[S148], [S151].
 
 **Totals:** 68 findings. 64 applied in full, 4 applied in part (one sub-claim rejected in each), 0 rejected outright.
@@ -13,8 +13,8 @@ Duplicates merged into one edit: F5 + F36 (shortcut map), F4 + F54 (dark accent)
 | F1 | `.primaryAction` is the leading edge on macOS | **Applied.** The sketch now uses `ToolbarItem { … }` (`.automatic`) with ToolbarSpacer, and ds §8.11 says not to use `.primaryAction` [S103]. The claim that `.automatic` sits on the trailing side is not in the docs I opened, so it is marked UNVERIFIED: check on a device. |
 | F2 | The Overview row says "no content column" in a three-column NSV | **Applied.** Overview sits in the content column and the detail column holds the selected tile or queue item. One three-column NSV everywhere (ds §5.1, sf §1.2/§2a) [S142]. |
 | F3 | An 8 s toast contradicts "nothing is time-boxed" | **Applied.** v0.1 uses an inline result line that stays until the next action or an explicit close. The toast moves to v0.2 and is not timed. The HIG "Minimize use of time-boxed interface elements" is cited. sf §0.1 speed principle 7. |
-| F4 | White text on the #8076FF prominent fill is 3.53:1 | **Applied** (merged with F54). Dark is now #6A5FF5 (white text 4.60:1; 3.63:1 vs #1E1E1E as a non-text fill). Increased-contrast dark is #5F54E8 (5.36:1). ds §4.2 explains that AccentColor is a fill, and links use linkColor. Same values in the Swift file. |
-| F5 | The two shortcut maps disagree (⇧⌘N, ⌥⌘N, R/⌘R, P) | **Applied** (merged with F36). sf §3.1 is now the one authoritative map. ds §8.11a points to it. The values are ⇧⌘N = type chooser, ⌥⌘N = New Client…, Add Note has no key, Record Payment = ⌘R (R in focused lists), and the P binding is dropped. |
+| F4 | White text on the #8076FF prominent fill is 3.53:1 | **Applied** (merged with F54). Dark is now #6A5FF5 (white text 4.60:1; 3.63:1 vs #1E1E1E as a non-text fill). Increased-contrast dark is #5F54E8 (5.36:1). ds §4.2 explains that AccentColor is a fill, and links use linkColor. Same values in App/FA/DesignSystem/DesignTokens.swift. |
+| F5 | The two shortcut maps disagree (⇧⌘N, ⌥⌘N, R/⌘R, P) | **Applied** (merged with F36). sf §3.1 is now the one authoritative map. ds §8.11a points to it. The values are ⇧⌘N = New Advance Invoice, ⌥⌘N = New Client…, Add Note has no key, Record Payment = ⌘R (R in focused lists), and the P binding is dropped. |
 | F6 | ⌘⌫ = Move to Trash, and a menu key fires inside text fields | **Applied.** Delete Line and Move Line have no shortcut in v0.1; they live in the Document menu and the row's context menu. ⌘⌫ is unbound. Source: Apple Support 102650 [S106]. |
 | F7 | Single-letter keys may be eaten by type-select | **Applied.** `allowsTypeSelect` defaults to true [S110]. Whether SwiftUI Table is NSTableView-backed is marked UNVERIFIED. sf §3.2 rule 5 says to prototype first, with menu and palette fallbacks. A checklist line was added. |
 | F8 | Column minimums are wider than the window minimum | **Applied.** Content min is 360 and detail min is 520. The window minimum is 1080×640, and the inspector breakpoint is the sum of the minimums plus the inspector, 1320. The Swift Layout computes it. |
@@ -34,7 +34,7 @@ Duplicates merged into one edit: F5 + F36 (shortcut map), F4 + F54 (dark accent)
 | F22 | The UNVERIFIED notes can be settled from the docs | **Applied.** Visibility priorities, onDropSessionUpdated/DropSession, KeyPress.Result, the Announcement inits, Increase Contrast and the bookmark entitlement are now facts with citations [S101][S102][S104]. |
 | F23 | The primary action of `contextMenu(forSelectionType:)` is double-click only | **Applied.** ↩ is implemented with `onKeyPress(.return)` on the focused Table, and double-click uses the primaryAction [S69]. |
 | F24 | The clause is capitalised as "Daň odvede zákazník" | **Applied.** It is now the lowercase "daň odvede zákazník" everywhere, from the one legal-strings table in ds §9. |
-| F25 | `Brand.accent` is a computed var, with a Swift 6 isolation risk | **Applied.** It is now `nonisolated static let accent`, and the provider and `srgb(_:)` are nonisolated. The isolation risk itself stays PLAUSIBLE: not compiled here (no Swift toolchain). |
+| F25 | `Brand.accent` is a computed var, with a Swift 6 isolation risk | **Applied.** It is now `static let accent` on the plain enum `Brand` (App/FA/DesignSystem/DesignTokens.swift). `Brand` has no actor isolation and the target sets no default actor isolation, so `accent`, its provider closure and `srgb(_:)` are nonisolated without annotations. If the target ever sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, mark them `nonisolated` explicitly. The isolation risk itself stays PLAUSIBLE: not compiled here (no Swift toolchain). |
 | F26 | Fixed sheet widths conflict with `.form` | **Applied.** Sheets use `.form` with no fixed widths. The import review is `.fitted` with a min/ideal frame (560/640 × 400/480), and the palette is `.fitted` at 560 [S63]. |
 | F27 | The Xero bulk-OK status may be out of date | **Applied.** Re-checked: "In development" since 17 Nov 2025, 248 votes, not shipped. So "one OK per line" stays and the status sentence is updated in sf §4. |
 | F28 | onExitCommand may not fire while editing | **Applied.** Marked UNVERIFIED, with an `onKeyPress(.escape)` fallback and a checklist prototype. |
@@ -80,3 +80,35 @@ Duplicates merged into one edit: F5 + F36 (shortcut map), F4 + F54 (dark accent)
 | F68 | Small inconsistencies | **Applied.** Status badges are sentence case (ds §9 and Swift). VS 120260042 everywhere. The iPhone banner is orange with a symbol. The log is "Aktivita" everywhere. There is one toolbar table, ds §8.10 points to the sf §2j checklist, and the toast is v0.2 in both files. |
 
 Late fixes in this pass: `fractionLength(_:)` verified and added to [S107]. `safeAreaInset(edge:…)` with VerticalEdge verified as macOS 12.0 [S111], so its "verify" note is gone. The last "dashboard" in sf §4 now says "Overview".
+
+## 2026-11-05 — Code review of the design-system pull request
+
+Four independent reviewers (toolchain, behaviour, localisation and accessibility, docs) read `App/FA/DesignSystem/` and
+these docs; a separate skeptic tried to refute each finding. 41 findings: 29 confirmed (about 20 after merging
+duplicates), 12 refuted.
+
+| Finding | Result |
+| --- | --- |
+| An advance with money received but no tax document showed the warning only when paid exactly | **Fixed.** New state "Částečně uhrazeno – chybí daňový doklad / Partly paid – tax document missing"; an overpaid advance without its DDPP shows "Uhrazeno – chybí daňový doklad". Both win over Overdue. ds §4.3, sf §2a, §2d, §5. |
+| View ▸ Bigger could not reach `MoneyText` or `StatusBadge` | **Fixed.** One `textScale` environment value, read by `textRole(_:scale:)` and the badge. |
+| `backgroundProminence` read at a table cell's top level may miss the row | **Fixed.** Resolved in a private `ShapeStyle`, as Apple's docs recommend. |
+| `fixedSize()` let a long badge overflow a narrow column | **Fixed.** `ViewThatFits` falls back to word only, then symbol only. |
+| The badge word and its tooltip/VoiceOver text could resolve in different locales | **Fixed.** One string in the view's locale for all three. |
+| The label order was not written down | **Fixed.** ds §4.3 "Label order". |
+| Overdue text said the settlement word stays | **Fixed.** Overdue takes the word, tone and symbol; the detail keeps days and balance. ds §4.3, sf §2b, §2d. |
+| "Zúčtováno ve FV …" left in the specs | **Fixed.** "Zúčtováno v konečné faktuře" everywhere, marked ACCT. |
+| Already recorded missing from the bank match table and §8.14 | **Fixed.** |
+| Spacing table swapped `xxs` and `xs` against the code | **Fixed** in the docs; the code was right. |
+| `help(_:)` Text overload given as macOS 13.0 | **Fixed:** macOS 11.0. |
+| Czech VoiceOver example "korun českých" | **Fixed:** "české koruny" (CLDR plural for decimals). |
+| README examples did not compile (`Text` of an optional; column width on the split view) | **Fixed.** |
+| §2 decision gate contradicted the interim macOS 14.0 target | **Fixed.** |
+| §8.1 sketch passed `Document.status` to the badge | **Fixed.** |
+| File menu table broken by a paragraph | **Fixed.** |
+| F5 above said ⇧⌘N is a type chooser; F25 claimed `nonisolated` annotations | **Fixed** in this log. |
+| Stale names ("Layout widths", "the Swift file"), a research path in [S147] | **Fixed.** |
+
+Refuted, among others: rounding in `MoneyText` (the core rounds every displayed amount to two decimals, half away
+from zero, before it reaches the view), marking the ACCT strings `needs_review` (the catalog's "translated" only means
+a translation exists; the ship gate is the legal-strings table in ds §9), and a README gating rule that would break a
+macOS 27 API (it covered only the macOS 26 glass call; the wording now names the API's own version anyway).
