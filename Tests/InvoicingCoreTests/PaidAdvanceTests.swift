@@ -87,7 +87,7 @@ import Testing
         #expect(issue?.severity == .warning)
         // An unknown treatment (an advance from before the app) is not reported.
         #expect(issue?.detail == "ZF-2026-003")
-        #expect(!issues.contains(where: \.isError))
+        #expect(!issues.contains { $0.isError })
     }
 
     @Test func advancesAboveTheTotalAreAWarning() throws {
@@ -96,7 +96,7 @@ import Testing
         let issues = DocumentValidator.validate(document)
         #expect(issues.contains { $0.code == .paidInAdvanceExceedsTotal && $0.severity == .warning })
         #expect(!issues.contains { $0.code == .advancesExceedSupply })
-        #expect(!issues.contains(where: \.isError))
+        #expect(!issues.contains { $0.isError })
     }
 
     @Test func theAdvanceTreatmentFollowsTheLines() {
