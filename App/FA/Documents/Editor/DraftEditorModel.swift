@@ -418,10 +418,12 @@ struct NumberCell: Hashable {
         let chosen = customers.first { $0.id == id }
         update { doc in
             // Deductions and advances paid belong to the previous client's advances; the store would refuse them
-            // at issue.
+            // at issue. So does the advance the draft was made from: the editor no longer edits that number, and
+            // keeping it would tie this client's draft to the other client's advance chain.
             if chosen?.id != doc.customerID {
                 doc.advanceDeductions = []
                 doc.paidAdvances = nil
+                doc.relatedDocumentNumber = nil
             }
             doc.customerID = chosen?.id
             doc.customer = chosen?.party
@@ -705,7 +707,9 @@ struct NumberCell: Hashable {
     // MARK: Discount column (docs-22)
 
     /// Add Discount: the line whose Discount % cell takes focus. The column shows while this is set, a line
-    /// has a discount or a discount cell holds text that is not a number.
+    /// has a discount or a discount cell holds text that is not a number. A focused discount cell holds it
+    /// too, so clearing the only discount does not remove the cell being typed in; it ends when focus
+    /// leaves the discount cells.
     private(set) var discountRequestLineID: String?
     private(set) var discountRequestVersion = 0
 
@@ -715,11 +719,17 @@ struct NumberCell: Hashable {
             || invalidCells.keys.contains { $0.column == .discount }
     }
 
-    /// The given line, else the focused one, else the first.
+    /// The given line, else the focused one (Document ▸ Add Discount needs the cursor in a line, §1.4).
     func requestDiscount(on lineID: String?) {
-        guard let id = lineID ?? focusedLineID ?? document?.lines.first?.id else { return }
+        guard let id = lineID ?? focusedLineID else { return }
         discountRequestLineID = id
         discountRequestVersion += 1
+    }
+
+    /// A discount cell took focus: the column stays while the cursor is in it, even when its value becomes
+    /// 0 mid-edit. Moves no focus.
+    func holdDiscountColumn(on lineID: String) {
+        if discountRequestLineID == nil { discountRequestLineID = lineID }
     }
 
     func endDiscountRequest() {

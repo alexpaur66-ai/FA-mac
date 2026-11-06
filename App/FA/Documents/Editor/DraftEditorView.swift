@@ -66,6 +66,8 @@ struct DraftEditorView: View {
     /// The advance chain of a payment tax document or final invoice draft (docs-10), read from the store.
     @State private var chain: AdvanceChain?
     @State private var notesExpanded = false
+    /// The width the line grid fills when its columns need less (it scrolls sideways when they need more).
+    @State private var gridViewportWidth: CGFloat = 0
 
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
     private static let markerWidth: CGFloat = 20
@@ -124,6 +126,10 @@ struct DraftEditorView: View {
                     applyFocusRequest()
                     // Enter Rate… chosen while the preview was shown: the editor is back and takes it.
                     if model.takeRateFocusRequest() { focusRate() }
+                    // Likewise Add Discount: its column shows, so its cell takes the focus.
+                    if let id = model.discountRequestLineID {
+                        Task { @MainActor in focus = .discount(id) }
+                    }
                 }
                 .onChange(of: model.focusRequestVersion) { _, _ in applyFocusRequest() }
                 .onChange(of: model.rateFocusRequest) { _, _ in
@@ -132,8 +138,11 @@ struct DraftEditorView: View {
                 .onChange(of: focus) { oldValue, newValue in
                     model.focusedLineID = newValue?.lineID
                     // Add Discount showed the column for one line; it stays only while a line has a discount.
-                    if case .discount? = oldValue {
-                        if case .discount? = newValue {} else { model.endDiscountRequest() }
+                    // A focused discount cell keeps it, so a value typed down to 0 keeps its cell.
+                    if case .discount(let id)? = newValue {
+                        model.holdDiscountColumn(on: id)
+                    } else if case .discount? = oldValue {
+                        model.endDiscountRequest()
                     }
                 }
                 .onChange(of: model.discountRequestVersion) { _, _ in
@@ -610,13 +619,21 @@ struct DraftEditorView: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.linesTitle).textRole(.sectionTitle)
             // The columns need about 800 pt; a narrower detail column scrolls the grid sideways instead of
-            // clipping the rate and the line total.
-            ViewThatFits(in: .horizontal) {
+            // clipping the rate and the line total. One grid in one scroll view, at least as wide as the
+            // column: the Discount column coming and going while the user edits keeps the cells and the focus
+            // (a ViewThatFits switch between two grids would rebuild them).
+            ScrollView(.horizontal) {
                 lineGrid(document)
-                ScrollView(.horizontal) {
-                    lineGrid(document)
+                    .frame(minWidth: gridViewportWidth, alignment: .leading)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { gridViewportWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, width in gridViewportWidth = width }
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             // ⌘L lives in the Document menu, which reaches the editor through the focused scene.
             Button { model.addLineAndFocus() } label: {
