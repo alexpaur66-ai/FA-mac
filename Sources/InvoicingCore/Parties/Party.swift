@@ -35,7 +35,8 @@ public enum CustomerVATStatus: String, Sendable, Codable, CaseIterable {
     /// Czech customer without VAT registration: Czech VAT is charged all the same.
     case czechNonPayer
     /// Business in another EU member state with a VAT ID that buys goods dispatched to another member
-    /// state: the supply is exempt under § 64 odst. 1 ZDPH. The status an EU VAT ID implies.
+    /// state: the supply is exempt under § 64 odst. 1 ZDPH. The status an EU VAT ID implies, and an EU country
+    /// without one (the ID is missing; Issue waits for it).
     case euBusinessGoods
     /// Business in another EU member state with a VAT ID that buys services: reverse charge, the customer
     /// accounts for VAT (§ 9 odst. 1 ZDPH). Stored as "euBusiness", the one EU business status before goods.
@@ -65,8 +66,10 @@ public enum CustomerVATStatus: String, Sendable, Codable, CaseIterable {
     /// True for a business in another EU member state, whether it buys goods or services.
     public var isEUBusiness: Bool { self == .euBusinessGoods || self == .euBusinessServices }
 
-    /// The status implied by a VAT identifier and the country of the customer's seat; a customer with no
-    /// identifier is a consumer or a non-payer by country.
+    /// The status implied by a VAT identifier and the country of the customer's seat. Without an identifier:
+    /// a Czech non-payer in CZ, an EU business buying goods in another EU country (Saša sells to businesses
+    /// only for now, 6 Nov 2026: the VAT ID just isn't typed in yet, and Issue waits for it), else a consumer
+    /// outside the EU. An EU consumer is only picked by hand.
     public static func inferred(vatIdentifier: VATIdentifier?, countryCode: String) -> CustomerVATStatus {
         let country = countryCode.uppercased()
         if let vatIdentifier {
@@ -74,7 +77,7 @@ public enum CustomerVATStatus: String, Sendable, Codable, CaseIterable {
             return vatIdentifier.isEU ? .euBusinessGoods : .nonEUBusiness
         }
         if country == "CZ" { return .czechNonPayer }
-        return VATIdentifier.euPrefixes.contains(country == "GR" ? "EL" : country) ? .euConsumer : .nonEUConsumer
+        return VATIdentifier.euPrefixes.contains(country == "GR" ? "EL" : country) ? .euBusinessGoods : .nonEUConsumer
     }
 }
 

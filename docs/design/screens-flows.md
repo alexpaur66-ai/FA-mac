@@ -943,7 +943,7 @@ The default sort is Name A–Z.
 - **Client type with a VAT ID:** the VAT ID's prefix decides, as InvoicingCore `CustomerVATStatus.inferred` does. A CZ VAT ID → Czech VAT payer; another EU VAT ID → **EU business, goods**, so documents start on "EU goods, exempt (§ 64)"; any other → Business outside the EU, services. Sasa: "99% EU-EU" and "90% goods". "EU business, services" is only picked by hand.
 - **Client type without a VAT ID:**
   - CZ → Czech business, not a VAT payer.
-  - Another EU country → **EU business, goods; Issue waits for the VAT ID** (Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026); ACCT). This needs `CustomerVATStatus.inferred` changed, because main still gives EU consumer (Party.swift:77). EU consumer stays in the Client type pop-up for a consumer sale picked by hand.
+  - Another EU country → **EU business, goods; Issue waits for the VAT ID** (Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026); ACCT). `CustomerVATStatus.inferred` gives this (as built, PR 38). EU consumer stays in the Client type pop-up for a consumer sale picked by hand.
   - Outside the EU → Consumer outside the EU (§ 10h is ACCT; the § 66 export of goods comes later, with the accountant).
 - **With no country yet:** Client type "EU business, goods", currency EUR, and no hint.
 - **Currency:** CZ → CZK, any other → EUR; USD is picked by hand. Sasa: "for start its enough, you can add dollar". The app sets the currency explicitly, because the core's own default is CZK.

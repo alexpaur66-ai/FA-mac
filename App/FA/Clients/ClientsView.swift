@@ -489,14 +489,13 @@ struct ClientFormSheet: View {
     static let otherTypes: [CustomerVATStatus] = [.czechVATPayer, .czechNonPayer, .euConsumer, .nonEUBusiness, .nonEUConsumer]
 
     /// The client type a VAT ID and a country imply (other-08, shell-23): with no country yet, an EU
-    /// business buying goods; otherwise the core's country rule (CustomerVATStatus.inferred), except that an
-    /// EU client without a VAT ID yet is taken as an EU business buying goods, with the warning below.
+    /// business buying goods; otherwise the core's country rule (CustomerVATStatus.inferred), which takes an
+    /// EU client without a VAT ID yet as an EU business buying goods, with the warning below.
     static func inferredStatus(vatID: String, countryCode: String) -> CustomerVATStatus {
         let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
         let parsed = VATIdentifier(vatID.trimmingCharacters(in: .whitespaces))
         guard parsed != nil || !country.isEmpty else { return .euBusinessGoods }
-        let status = CustomerVATStatus.inferred(vatIdentifier: parsed, countryCode: country)
-        return status == .euConsumer ? .euBusinessGoods : status
+        return CustomerVATStatus.inferred(vatIdentifier: parsed, countryCode: country)
     }
 
     /// CZK for a Czech client, EUR otherwise and while no country is set; USD only by hand.

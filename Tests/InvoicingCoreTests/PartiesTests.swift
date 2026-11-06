@@ -240,8 +240,9 @@ import Testing
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("CZ45274649"), countryCode: "CZ") == .czechVATPayer)
         #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "CZ") == .czechNonPayer)
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("DE123456789"), countryCode: "DE") == .euBusinessGoods)
-        #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "DE") == .euConsumer)
-        #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "gr") == .euConsumer)
+        // Saša sells to businesses only (6 Nov 2026): an EU client without a VAT ID is a business whose ID is missing.
+        #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "DE") == .euBusinessGoods)
+        #expect(CustomerVATStatus.inferred(vatIdentifier: nil, countryCode: "gr") == .euBusinessGoods)
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("GR123456789"), countryCode: "GR") == .euBusinessGoods)
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("EL123456789"), countryCode: "GR") == .euBusinessGoods)
         #expect(CustomerVATStatus.inferred(vatIdentifier: VATIdentifier("CHE123456789"), countryCode: "CH") == .nonEUBusiness)
