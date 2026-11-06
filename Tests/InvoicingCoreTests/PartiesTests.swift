@@ -155,6 +155,19 @@ import Testing
 }
 
 @Suite struct RegistryEntryTests {
+    @Test func parsesTheFileNumberField() throws {
+        let entry = try #require(RegistryEntry(court: .prague, fileNumber: " c 12345 "))
+        #expect(entry.section == "C")
+        #expect(entry.insert == "12345")
+        #expect(entry.fileNumber == "C 12345")
+        #expect(RegistryEntry(court: .brno, fileNumber: "Dr1234")?.fileNumber == "Dr 1234")
+        #expect(RegistryEntry(court: .brno, fileNumber: "B/77")?.fileNumber == "B 77")
+        #expect(RegistryEntry(court: .brno, fileNumber: "C") == nil)
+        #expect(RegistryEntry(court: .brno, fileNumber: "12345") == nil)
+        #expect(RegistryEntry(court: .brno, fileNumber: "C 123 45") == nil)
+        #expect(RegistryEntry(court: .brno, fileNumber: "") == nil)
+    }
+
     @Test func sentences() throws {
         let entry = try #require(RegistryEntry(court: .prague, section: " c ", insert: " 123456 "))
         #expect(entry.section == "C")

@@ -546,10 +546,11 @@ struct MainSplitView: View {
             let today = CalendarDay(Date(), in: .current)
             let customerParty = customer?.party
                 ?? Party(name: "", address: PostalAddress(street: "", city: "", postalCode: "", countryCode: "CZ"))
+            // Without a client the draft starts in EUR with the fixed 14-day term (set-06, set-07).
             let document = Document(
                 kind: kind, supplier: profile.supplier, customer: customerParty, customerID: customer?.id,
-                language: customer?.language ?? .czech, currency: customer?.currency ?? profile.defaultCurrency,
-                issueDate: today, taxPointDate: kind.isTaxDocument ? today : nil, dueDate: today.adding(days: customer?.paymentTermDays ?? profile.defaultPaymentTermDays),
+                language: customer?.language ?? .czech, currency: customer?.currency ?? .eur,
+                issueDate: today, taxPointDate: kind.isTaxDocument ? today : nil, dueDate: today.adding(days: customer?.paymentTermDays ?? 14),
                 footer: profile.footer)
             try stores.documents.saveDraft(document)
             openDraft(document.id, focus: customer == nil ? .client : .firstLineText)
@@ -699,7 +700,7 @@ struct MainSplitView: View {
             let profile = try stores.profile.load()
             let customer = try advance.customerID.flatMap { try stores.customers.customer(id: $0) }
             let today = CalendarDay(Date(), in: .current)
-            let term = customer?.paymentTermDays ?? profile?.defaultPaymentTermDays ?? 14
+            let term = customer?.paymentTermDays ?? 14
             var deductions: [AdvanceDeduction] = []
             for payment in try stores.documents.payments(for: advanceID) where payment.isIncoming && payment.receiptIssued {
                 guard let receiptID = payment.receiptDocumentID,

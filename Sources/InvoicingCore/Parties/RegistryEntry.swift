@@ -19,6 +19,22 @@ public struct RegistryEntry: Hashable, Sendable {
         self.insert = insert
     }
 
+    /// Parses the file number as Settings ▸ Company takes it, in one field: the section's letters and the
+    /// insert's digits, "C 12345", "C12345" or "C/12345". Nil when either part is missing or anything else is
+    /// in the text.
+    public init?(court: RegistryCourt, fileNumber: String) {
+        let text = fileNumber.trimmingWhitespace()
+        let letters = text.prefix { $0.isLetter }
+        var rest = text.dropFirst(letters.count)
+        rest = rest.drop { $0 == " " || $0 == "/" || $0 == "," || $0 == "\u{00A0}" }
+        guard !letters.isEmpty, letters.count <= 3, !rest.isEmpty,
+              rest.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        self.init(court: court, section: String(letters), insert: String(rest))
+    }
+
+    /// "C 12345", the file number as the Company pane shows it.
+    public var fileNumber: String { "\(section) \(insert)" }
+
     /// Trims and capitalises the first letter only: "c" becomes "C", "Dr" stays "Dr" (the register writes
     /// two-letter sections in mixed case), "dr" becomes "Dr".
     static func normalizeSection(_ raw: String) -> String {
