@@ -8,6 +8,8 @@ import SwiftUI
 struct PaymentRow: Identifiable, Hashable {
     let payment: DocumentPayment
     let state: DocumentState
+    /// The final invoice that settled this payment as paid in advance (§ 64 goods, ADR 0012); nil otherwise.
+    var settledIn: String? = nil
 
     var id: String { payment.id }
     var date: CalendarDay { payment.paidOn }
@@ -16,6 +18,9 @@ struct PaymentRow: Identifiable, Hashable {
     var documentNumber: String { state.summary.number ?? "" }
     var customerName: String { state.summary.customerName }
     var note: String { payment.note ?? "" }
+    /// An issued tax document rests on it, or a final invoice settled it as paid in advance (other-09).
+    var isLocked: Bool { payment.receiptIssued || settledIn != nil }
+    var canBeDeleted: Bool { payment.canBeDeleted && settledIn == nil }
 
     /// Plain search: client, document number, note and amount (screens-flows.md §2f).
     func matches(search: String) -> Bool {
@@ -105,12 +110,13 @@ struct PaymentsView: View {
             TableColumn(Text(L.colAmount), value: \.amount) { row in
                 HStack(spacing: Spacing.xs) {
                     MoneyText(amount: row.amount, currency: row.currencyCode, locale: locale)
-                    if row.payment.receiptIssued {
-                        // The basis of an issued tax document: locked (screens-flows.md §2f).
+                    if row.isLocked {
+                        // The basis of an issued tax document, or settled in a final invoice: locked (other-09).
                         Image(systemName: "lock.fill")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
-                            .accessibilityLabel(Text(L.paymentLocked))
+                            .accessibilityLabel(Text(row.payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
+                            .help(Text(row.payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
                     }
                 }
             }
@@ -121,12 +127,12 @@ struct PaymentsView: View {
             }
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            if ids.count == 1, let id = ids.first, let row = visibleRows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+            if ids.count == 1, let id = ids.first, let row = visibleRows.first(where: { $0.id == id }), row.canBeDeleted {
                 Button(role: .destructive) { requestDeletion(row.payment) } label: { Text(L.deletePayment) }
             }
         }
         .onDeleteCommand {
-            if let id = selection, let row = visibleRows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+            if let id = selection, let row = visibleRows.first(where: { $0.id == id }), row.canBeDeleted {
                 requestDeletion(row.payment)
             }
         }
@@ -166,8 +172,17 @@ struct PaymentsView: View {
         var collected: [PaymentRow] = []
         do {
             for state in documents.states where state.summary.status == .issued {
+                // Payments of a § 64 advance a final invoice settled as paid in advance are locked too. Every
+                // issued advance is read: one with a pre-v3 payment tax document requires tax documents, yet
+                // its other payments can still be listed (DocumentLinks.paidAdvanceLinks reads them the same way).
+                var settled: [String: String] = [:]
+                if state.summary.kind == .advanceRequest {
+                    for link in try stores.documents.paidAdvances(ofAdvanceRequest: state.id) {
+                        settled[link.paymentID] = link.finalInvoiceNumber
+                    }
+                }
                 for payment in try stores.documents.payments(for: state.id) {
-                    collected.append(PaymentRow(payment: payment, state: state))
+                    collected.append(PaymentRow(payment: payment, state: state, settledIn: settled[payment.id]))
                 }
             }
             rows = collected

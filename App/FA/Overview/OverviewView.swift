@@ -1,5 +1,6 @@
-// Overview (screens-flows.md §2a): the month bar, four tiles, the attention queue, and the
-// Getting started card on a fresh database (§2j). Everything is computed from the live document states.
+// Overview (screens-flows.md §2a, lean pass other-01..04, other-15): the two tiles for today, the
+// "Needs attention" queue, then the month with its two tiles; the Getting started card while setup is
+// incomplete (§2j). Everything is computed from the live document states.
 
 import AppKit
 import Combine
@@ -17,15 +18,17 @@ struct OverviewView: View {
     /// The Overdue tile: Unpaid sorted by due date, oldest first (screens-flows.md §2a).
     let showOverdue: @MainActor () -> Void
     let newDocument: @MainActor (DocumentKind) -> Void
-    let newClient: @MainActor () -> Void
-    let importRates: @MainActor () -> Void
+    /// ↩ on a queue row: Record Payment… for an overdue document, Create Tax Document for a payment
+    /// without one (other-03). False when the row has no action, so ↩ is not swallowed.
+    let runQueueAction: @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool
 
     @State private var month: CalendarDay
     /// Nil until the first load, so a set-up database never shows the card for a moment.
     @State private var setup: SetupStatus?
-    /// The highlighted queue row, by item: a document in two groups (overdue, and its tax document
-    /// missing) highlights the row that was clicked, not both.
+    /// The selected queue row, by item: a document in two groups (overdue, and its tax document missing)
+    /// selects the row that was clicked, not both.
     @State private var selectedQueueItem: String?
+    @FocusState private var queueFocused: Bool
     /// Per advance in the queue's "tax document missing" group: the received money without an issued tax
     /// document. The states carry only the paid total, which also counts the payments already documented.
     @State private var untaxedReceived: [String: Money] = [:]
@@ -36,7 +39,7 @@ struct OverviewView: View {
     init(stores: Stores, documents: DocumentListModel, selection: Binding<String?>, forced: Binding<Bool>,
          show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
          newDocument: @escaping @MainActor (DocumentKind) -> Void,
-         newClient: @escaping @MainActor () -> Void, importRates: @escaping @MainActor () -> Void) {
+         runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
@@ -44,32 +47,49 @@ struct OverviewView: View {
         self.show = show
         self.showOverdue = showOverdue
         self.newDocument = newDocument
-        self.newClient = newClient
-        self.importRates = importRates
+        self.runQueueAction = runQueueAction
         _month = State(initialValue: CalendarDay(Date(), in: .current).startOfMonth)
     }
 
     var body: some View {
         let figures = OverviewFigures(states: documents.states, month: month, today: documents.today)
         let placeholder = documents.loaded ? RedactionReasons() : RedactionReasons.placeholder
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.section) {
-                if let setup, forced || !setup.isComplete {
-                    gettingStarted(setup)
+        let setupIncomplete = setup.map { !$0.isComplete } ?? false
+        let noDocuments = documents.loaded && documents.states.isEmpty
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.section) {
+                    // One state at a time (other-15): the data error wins over everything, the card included.
+                    if let error = documents.error {
+                        dataError(error)
+                    } else {
+                        if let setup, setupIncomplete || forced {
+                            gettingStarted(setup)
+                        }
+                        if setupIncomplete && noDocuments {
+                            // First run: the card alone.
+                            EmptyView()
+                        } else if noDocuments {
+                            // Undecided until the setup check ran, so a first run never shows this for a moment.
+                            if setup != nil {
+                                noDocumentsView
+                            }
+                        } else {
+                            // Placeholder tiles until the first states arrive (screens-flows.md §2a, Loading).
+                            todayTiles(figures).redacted(reason: placeholder)
+                            queue(figures).redacted(reason: placeholder)
+                            monthBar
+                            monthTiles(figures).redacted(reason: placeholder)
+                        }
+                    }
                 }
-                if let error = documents.error {
-                    dataError(error)
-                } else if documents.loaded && documents.states.isEmpty {
-                    noDocuments
-                } else {
-                    monthBar
-                    // Placeholder tiles until the first states arrive (screens-flows.md §2a, Loading).
-                    tiles(figures).redacted(reason: placeholder)
-                    queue(figures).redacted(reason: placeholder)
-                }
+                .padding(Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Spacing.xl)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // ↑↓ in the queue keep the selected row visible; without an anchor it scrolls only when needed.
+            .onChange(of: selectedQueueItem) { _, id in
+                if let id { proxy.scrollTo(id) }
+            }
         }
         .navigationTitle(Text(L.overview))
         .task(id: documents.states) {
@@ -114,15 +134,16 @@ struct OverviewView: View {
         untaxedReceived = amounts
     }
 
-    // MARK: Getting started (screens-flows.md §2j)
+    // MARK: Getting started (screens-flows.md §2j, other-04)
 
+    /// Three steps and one button that opens the first unfinished pane. Shown again by Help ▸ Getting
+    /// Started once everything is done: all ✓, with a close button and without Open Settings….
     private func gettingStarted(_ setup: SetupStatus) -> some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             HStack(alignment: .firstTextBaseline) {
                 Text(L.gettingStarted).textRole(.sectionTitle)
                 Spacer()
                 if setup.isComplete {
-                    // Shown again by Help ▸ Getting Started: the close button puts it away.
                     Button { forced = false } label: { Image(systemName: "xmark") }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(Text(L.close))
@@ -130,46 +151,29 @@ struct OverviewView: View {
                 }
             }
             Text(L.setupIntro).textRole(.body)
-            step(done: setup.hasProfile, title: L.stepCompany) {
-                Button { open(.company) } label: { Text(L.openSettings) }
-            }
-            step(done: setup.hasBankAccount, title: L.stepBank) {
-                Button { open(.bank) } label: { Text(L.openSettings) }
-            }
-            step(done: setup.hasSeries, title: L.stepSeries) {
-                Button { open(.numbering) } label: { Text(L.openSettings) }
-            }
-            // Optional: rates are typed per document (decision of 5 Nov 2026); the import fills the table.
-            step(done: setup.hasRates, title: L.stepRates, actionsStay: true) {
-                Button { importRates() } label: { Text(L.importRates) }
-            }
-            step(done: setup.hasClient || !documents.states.isEmpty, title: L.stepFirstDocuments, actionsStay: true) {
-                Button { newClient() } label: { Text(L.newClient) }
-                Button { newDocument(.invoice) } label: { Text(L.newInvoice) }
+            step(done: setup.hasProfile, title: L.stepCompany)
+            step(done: setup.hasBankAccount, title: L.stepBank)
+            step(done: setup.hasSeries, title: L.stepSeries)
+            if let pane = setup.firstUnfinishedPane {
+                Button { open(pane) } label: { Text(L.openSettings) }
+                    .buttonStyle(.borderedProminent)
             }
         }
         .padding(Spacing.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tileSurface()
     }
 
-    /// One step: the state as symbol + word for VoiceOver (design-system.md §4.3), the title, and its
-    /// buttons. The buttons of a required step go once it is done; an optional step keeps them.
-    private func step<Actions: View>(done: Bool, title: LocalizedStringResource, actionsStay: Bool = false,
-                                     @ViewBuilder actions: () -> Actions) -> some View {
+    /// One step: the state as symbol + word for VoiceOver (design-system.md §4.3) and the title.
+    private func step(done: Bool, title: LocalizedStringResource) -> some View {
         HStack(spacing: Spacing.m) {
-            HStack(spacing: Spacing.m) {
-                Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(Color.secondary)
-                    .accessibilityHidden(true)
-                Text(title).textRole(.body)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityValue(Text(done ? L.done : L.notDone))
-            Spacer()
-            if !done || actionsStay {
-                actions()
-            }
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(Color.secondary)
+                .accessibilityHidden(true)
+            Text(title).textRole(.body)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Text(done ? L.done : L.notDone))
     }
 
     /// Opens Settings on the step's pane (screens-flows.md §2j): the pane is stored first, the window reads it.
@@ -178,7 +182,47 @@ struct OverviewView: View {
         openSettings()
     }
 
-    // MARK: Month and tiles
+    // MARK: Tiles (other-02)
+
+    /// Unpaid and Overdue: the open balances of invoices and final invoices today.
+    private func todayTiles(_ figures: OverviewFigures) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.xxl, alignment: .top)],
+                  alignment: .leading, spacing: Spacing.xxl) {
+            Tile(title: L.tileUnpaid, action: { show(.filter(.unpaid)) }) {
+                KPIMoney(monies: figures.unpaid, locale: locale)
+            } lines: {
+                Text(verbatim: Count.documents(figures.unpaidCount)).textRole(.rowSecondary)
+            } footer: {
+                // Its own button, never inside the tile's: it opens Documents ▸ Open advances.
+                if figures.unpaidAdvancesCount > 0 {
+                    Button { show(.filter(.openAdvances)) } label: {
+                        Text(unpaidAdvancesLine(figures)).textRole(.rowSecondary).multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Tile(title: L.tileOverdue, action: { showOverdue() }) {
+                KPIMoney(monies: figures.overdue, locale: locale)
+            } lines: {
+                if figures.overdueCount > 0 {
+                    let oldest = figures.oldestOverdueDays == 1 ? L.oldestOverdueOne : L.oldestOverdue(figures.oldestOverdueDays)
+                    Text(L.overdueTileLine(Count.documents(figures.overdueCount), String(localized: oldest)))
+                        .textRole(.rowSecondary)
+                }
+            }
+        }
+    }
+
+    /// "Unpaid advances: 2 · 3 000,00 € · 1 overdue": one sentence; the overdue part only above 0.
+    private func unpaidAdvancesLine(_ figures: OverviewFigures) -> LocalizedStringResource {
+        let amounts = figures.unpaidAdvances
+            .map { MoneyText.format($0.amount, currency: $0.currency.code, locale: locale) }
+            .joined(separator: " + ")
+        if figures.overdueAdvancesCount > 0 {
+            return L.unpaidAdvancesLineOverdue(figures.unpaidAdvancesCount, amounts, figures.overdueAdvancesCount)
+        }
+        return L.unpaidAdvancesLine(figures.unpaidAdvancesCount, amounts)
+    }
 
     private var monthBar: some View {
         HStack(spacing: Spacing.m) {
@@ -187,7 +231,7 @@ struct OverviewView: View {
             }
             .labelStyle(.iconOnly)
             .help(Text(L.previousMonth))
-            Text(verbatim: monthName(month)).textRole(.screenTitle).frame(minWidth: 160)
+            Text(verbatim: monthAndYear(month)).textRole(.screenTitle).frame(minWidth: 160)
             Button { month = month.adding(months: 1).startOfMonth } label: {
                 Label { Text(L.nextMonth) } icon: { Image(systemName: "chevron.right") }
             }
@@ -196,79 +240,111 @@ struct OverviewView: View {
         }
     }
 
-    private func monthName(_ day: CalendarDay) -> String {
+    private func monthAndYear(_ day: CalendarDay) -> String {
         day.midnight(in: .current).formatted(Date.FormatStyle(locale: locale).month(.wide).year())
     }
 
-    private func tiles(_ figures: OverviewFigures) -> some View {
-        let name = monthName(month)
-        // The This month filter is the month of today; for another month the tile has no list to open.
-        let isCurrentMonth = month.year == documents.today.year && month.month == documents.today.month
-        var issuedAction: (@MainActor () -> Void)?
-        if isCurrentMonth { issuedAction = { show(.filter(.all)) } }
+    private func monthOnly(_ day: CalendarDay) -> String {
+        day.midnight(in: .current).formatted(Date.FormatStyle(locale: locale).month(.wide))
+    }
+
+    /// Issued in ‹month› (the revenue from tax documents by issue date) and VAT by DUZP; neither is a button,
+    /// because no list is filtered to a month.
+    private func monthTiles(_ figures: OverviewFigures) -> some View {
+        let name = monthOnly(month)
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.xxl, alignment: .top)],
                          alignment: .leading, spacing: Spacing.xxl) {
-            Tile(symbol: "clock", title: L.tileUnpaid, action: { show(.filter(.unpaid)) }) {
-                KPIMoney(monies: figures.unpaid, locale: locale)
+            Tile(title: L.tileIssued(name), action: nil) {
+                KPIMoney(monies: figures.revenue, locale: locale)
             } lines: {
-                Text(verbatim: Count.documents(figures.unpaidCount)).textRole(.rowSecondary)
-                HStack(spacing: Spacing.xs) {
-                    Text(L.unpaidAdvancesCount(figures.unpaidAdvancesCount)).textRole(.rowSecondary)
-                    MoneyListText(monies: figures.unpaidAdvances, locale: locale, role: .amountSecondary)
+                if figures.issuedTotal > 0 {
+                    Text(verbatim: Count.documents(figures.issuedTotal)).textRole(.rowSecondary)
                 }
             }
-            Tile(symbol: "exclamationmark.circle", title: L.tileOverdue, action: { showOverdue() }) {
-                KPIMoney(monies: figures.overdue, locale: locale)
-            } lines: {
-                HStack(spacing: Spacing.xs) {
-                    Text(verbatim: Count.documents(figures.overdueCount)).textRole(.rowSecondary)
-                    if figures.oldestOverdueDays > 0 {
-                        Text(verbatim: "·").textRole(.rowSecondary).accessibilityHidden(true)
-                        Text(figures.oldestOverdueDays == 1 ? L.oldestOverdueOne : L.oldestOverdue(figures.oldestOverdueDays))
-                            .textRole(.rowSecondary)
-                    }
-                }
-                Text(L.overdueAdvancesCount(figures.overdueAdvancesCount)).textRole(.rowSecondary)
-            }
-            Tile(symbol: Symbols.document, title: L.tileIssued(name), action: issuedAction) {
-                Text(verbatim: String(figures.issuedTotal)).textRole(.kpi)
-            } lines: {
-                Text(verbatim: figures.issuedCountsText).textRole(.rowSecondary)
-                HStack(spacing: Spacing.xs) {
-                    Text(L.revenueTaxDocuments).textRole(.rowSecondary)
-                    MoneyListText(monies: figures.revenue, locale: locale, role: .amountSecondary)
-                }
-            }
-            // By tax point, not by issue date, so no document filter matches it; the tile opens nothing.
-            Tile(symbol: "percent", title: L.tileVAT(name), action: nil) {
+            Tile(title: L.tileVAT(name), action: nil) {
                 MoneyText(amount: figures.vatCZK, currency: "CZK", locale: locale, role: .kpi)
             } lines: {
-                Text(L.vatTileNote).textRole(.rowSecondary)
+                EmptyView()
             }
         }
     }
 
-    // MARK: Queue
+    // MARK: Queue (other-03)
 
+    /// A keyboard list: ↑↓ select, ↩ runs the selected row's action; no other key acts. Selecting a row
+    /// shows its document in the detail column, so ⌘R and the Document menu work on it.
     private func queue(_ figures: OverviewFigures) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.needsAttention).textRole(.sectionTitle)
             if figures.queue.isEmpty {
-                Label { Text(L.allCaughtUp) } icon: { Image(systemName: "checkmark.circle") }
-                    .textRole(.body)
-            }
-            ForEach(figures.queue) { item in
-                let selected = selectedQueueItem == item.id
-                Button {
-                    selectedQueueItem = item.id
-                    selection = item.state.id
-                } label: {
-                    QueueRow(item: item, amount: amount(of: item), selected: selected)
+                Label {
+                    Text(L.allCaughtUp)
+                } icon: {
+                    Image(systemName: "checkmark.circle").foregroundStyle(Color.secondary)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? AccessibilityTraits.isSelected : AccessibilityTraits())
+                .textRole(.body)
+            } else {
+                let current = currentQueueItem(in: figures.queue)?.id
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(figures.queue) { item in
+                        let selected = current == item.id
+                        QueueRow(item: item, amount: amount(of: item), selected: selected, focused: queueFocused)
+                            .id(item.id)
+                            .onTapGesture {
+                                select(item)
+                                queueFocused = true
+                            }
+                            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+                            .accessibilityAction { select(item) }
+                    }
+                }
+                .focusable()
+                // The selected row shows the focus in the accent colour; no ring around the whole queue.
+                .focusEffectDisabled()
+                .focused($queueFocused)
+                .onKeyPress(.downArrow) {
+                    move(by: 1, in: figures.queue)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    move(by: -1, in: figures.queue)
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    guard let item = currentQueueItem(in: figures.queue) else { return .ignored }
+                    return runQueueAction(item.kind, item.state.id) ? .handled : .ignored
+                }
             }
         }
+    }
+
+    /// The selected queue row, derived from the selected document: the row that was clicked while it still
+    /// shows that document, else the document's first row (a restored selection, or one made elsewhere).
+    private func currentQueueItem(in items: [OverviewFigures.QueueItem]) -> OverviewFigures.QueueItem? {
+        guard let selection else { return nil }
+        if let selectedQueueItem, let clicked = items.first(where: { $0.id == selectedQueueItem }),
+           clicked.state.id == selection {
+            return clicked
+        }
+        return items.first { $0.state.id == selection }
+    }
+
+    private func select(_ item: OverviewFigures.QueueItem) {
+        selectedQueueItem = item.id
+        selection = item.state.id
+    }
+
+    private func move(by step: Int, in items: [OverviewFigures.QueueItem]) {
+        guard !items.isEmpty else { return }
+        let currentID = currentQueueItem(in: items)?.id
+        let current = items.firstIndex { $0.id == currentID }
+        let next: Int
+        if let current {
+            next = min(max(current + step, 0), items.count - 1)
+        } else {
+            next = step > 0 ? 0 : items.count - 1
+        }
+        select(items[next])
     }
 
     /// The row's amount; for a missing tax document the received money without one, once loaded.
@@ -279,16 +355,17 @@ struct OverviewView: View {
         return item.amount
     }
 
-    // MARK: States
+    // MARK: States (other-15)
 
-    /// The observation stopped (screens-flows.md §2a, Error): the banner with the text, Try again, the data
-    /// folder, and Restore from Backup… (disabled until backups exist).
+    /// The observation stopped (screens-flows.md §2a, Error): the banner alone, with the text, Try Again,
+    /// the data folder and Restore from Backup… (disabled until backups exist). The icon is orange: red is
+    /// only for Overdue.
     private func dataError(_ error: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Label {
                 Text(L.dbCannotOpen).textRole(.sectionTitle)
             } icon: {
-                Image(systemName: "externaldrive.badge.exclamationmark").foregroundStyle(.red)
+                Image(systemName: "externaldrive.badge.exclamationmark").foregroundStyle(StatusTone.caution.tint)
             }
             Text(verbatim: error)
                 .textRole(.body)
@@ -308,8 +385,8 @@ struct OverviewView: View {
         .tileSurface()
     }
 
-    /// First run (screens-flows.md §2a, Empty): under the Getting started card, instead of empty tiles.
-    private var noDocuments: some View {
+    /// Setup complete and no document yet (screens-flows.md §2a, Empty).
+    private var noDocumentsView: some View {
         ContentUnavailableView {
             Label { Text(L.noDocuments) } icon: { Image(systemName: Symbols.document) }
         } description: {
@@ -321,43 +398,56 @@ struct OverviewView: View {
     }
 }
 
-/// One number tile: symbol, label, the figure in the KPI role and up to two secondary lines. Clicking opens
-/// the matching filter; a tile without an action is not a button.
-private struct Tile<Value: View, Lines: View>: View {
-    let symbol: String
+/// One tile: a text label, the figure in the KPI role and its secondary lines, as one VoiceOver element.
+/// Clicking opens the matching list; a tile without an action is not a button. The footer sits inside the
+/// tile but outside its button (the Unpaid advances link).
+private struct Tile<Value: View, Lines: View, Footer: View>: View {
     let title: LocalizedStringResource
     let action: (@MainActor () -> Void)?
     let value: Value
     let lines: Lines
+    let footer: Footer
 
-    init(symbol: String, title: LocalizedStringResource, action: (@MainActor () -> Void)?,
-         @ViewBuilder value: () -> Value, @ViewBuilder lines: () -> Lines) {
-        self.symbol = symbol
+    init(title: LocalizedStringResource, action: (@MainActor () -> Void)?,
+         @ViewBuilder value: () -> Value, @ViewBuilder lines: () -> Lines, @ViewBuilder footer: () -> Footer) {
         self.title = title
         self.action = action
         self.value = value()
         self.lines = lines()
+        self.footer = footer()
     }
 
     var body: some View {
-        if let action {
-            Button(action: action) { card }
-                .buttonStyle(.plain)
-        } else {
-            card
-        }
-    }
-
-    private var card: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
-            Label { Text(title) } icon: { Image(systemName: symbol) }
-                .textRole(.label)
-            value
-            lines
+            if let action {
+                Button(action: action) { main }
+                    .buttonStyle(.plain)
+            } else {
+                main
+            }
+            footer
         }
         .padding(Spacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tileSurface()
+    }
+
+    private var main: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text(title).textRole(.label)
+            value
+            lines
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension Tile where Footer == EmptyView {
+    init(title: LocalizedStringResource, action: (@MainActor () -> Void)?,
+         @ViewBuilder value: () -> Value, @ViewBuilder lines: () -> Lines) {
+        self.init(title: title, action: action, value: value, lines: lines, footer: { EmptyView() })
     }
 }
 
@@ -384,6 +474,8 @@ private struct QueueRow: View {
     let item: OverviewFigures.QueueItem
     let amount: Money?
     let selected: Bool
+    /// The list has keyboard focus: the selection shows in the accent colour, else in the inactive grey.
+    let focused: Bool
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -393,8 +485,7 @@ private struct QueueRow: View {
                 .foregroundStyle(item.tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(verbatim: [summary.number ?? String(localized: L.draftTitle), summary.customerName]
-                    .filter { !$0.isEmpty }.joined(separator: " · "))
+                Text(L.numberAndClient(summary.number ?? String(localized: L.draftTitle), summary.customerName))
                     .textRole(.body)
                 Text(verbatim: item.detail).textRole(.rowSecondary)
             }
@@ -405,17 +496,23 @@ private struct QueueRow: View {
         }
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.s)
-        .background(selected ? AnyShapeStyle(SelectionShapeStyle()) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: Radius.m))
+        .background(background, in: RoundedRectangle(cornerRadius: Radius.m))
         .contentShape(RoundedRectangle(cornerRadius: Radius.m))
         .accessibilityElement(children: .combine)
+    }
+
+    private var background: AnyShapeStyle {
+        guard selected else { return AnyShapeStyle(Color.clear) }
+        return focused ? AnyShapeStyle(SelectionShapeStyle()) : AnyShapeStyle(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
     }
 }
 
 /// The figures of the Overview, computed from the states by the aggregation rules of screens-flows.md §2a.
 struct OverviewFigures {
     struct QueueItem: Identifiable, Hashable {
+        /// The v0.1 groups (other-03); a stale draft is not queued (the sidebar's Drafts badge counts drafts).
         enum Kind: Hashable {
-            case overdue, taxDocumentMissing, oldDraft
+            case overdue, taxDocumentMissing
         }
 
         let kind: Kind
@@ -423,14 +520,12 @@ struct OverviewFigures {
 
         var id: String { state.id + "/" + String(describing: kind) }
 
-        /// The amount the row shows: the open balance of an overdue document, the received money (the
-        /// Overview replaces it by the part without a tax document once the payments are loaded), or a
-        /// draft's total. Nil for a draft whose totals cannot be computed yet.
+        /// The amount the row shows: the open balance of an overdue document, or the received money (the
+        /// Overview replaces it by the part without a tax document once the payments are loaded).
         var amount: Money? {
             switch kind {
             case .overdue: state.outstanding
             case .taxDocumentMissing: state.paid
-            case .oldDraft: state.summary.totalGross
             }
         }
 
@@ -438,16 +533,14 @@ struct OverviewFigures {
             switch kind {
             case .overdue: "exclamationmark.circle.fill"
             case .taxDocumentMissing: "checkmark.circle.trianglebadge.exclamationmark"
-            case .oldDraft: "pencil.circle"
             }
         }
 
-        /// The tone of the matching status (design-system.md §4.3): a stale draft stays neutral.
+        /// The tone of the matching status (design-system.md §4.3): red only for Overdue.
         var tint: Color {
             switch kind {
             case .overdue: DocumentStateLabel.overdue.style.tone.tint
             case .taxDocumentMissing: DocumentStateLabel.paidTaxDocumentMissing.style.tone.tint
-            case .oldDraft: DocumentStateLabel.draft.style.tone.tint
             }
         }
 
@@ -455,7 +548,6 @@ struct OverviewFigures {
             switch kind {
             case .overdue: Count.daysOverdue(state.daysOverdue)
             case .taxDocumentMissing: String(localized: L.queueTaxDocumentMissing)
-            case .oldDraft: String(localized: L.queueOldDraft)
             }
         }
     }
@@ -479,7 +571,7 @@ struct OverviewFigures {
         var unpaidCount = 0, unpaidAdvancesCount = 0, overdueCount = 0, oldest = 0, overdueAdvancesCount = 0
         var issuedCounts: [DocumentKind: Int] = [:]
         var vat = Decimal(0)
-        var overdueItems: [QueueItem] = [], taxItems: [QueueItem] = [], draftItems: [QueueItem] = []
+        var overdueItems: [QueueItem] = [], taxItems: [QueueItem] = []
 
         for state in states {
             let summary = state.summary
@@ -517,8 +609,6 @@ struct OverviewFigures {
                     && (state.settlement == .partlyPaid || state.settlement == .paid || state.settlement == .overpaid) {
                     taxItems.append(QueueItem(kind: .taxDocumentMissing, state: state))
                 }
-            } else if summary.issueDate.adding(days: 7) < today {
-                draftItems.append(QueueItem(kind: .oldDraft, state: state))
             }
         }
 
@@ -535,7 +625,6 @@ struct OverviewFigures {
         self.vatCZK = vat
         self.queue = overdueItems.sorted { $0.state.daysOverdue > $1.state.daysOverdue }
             + taxItems.sorted { $0.state.summary.issueDate < $1.state.summary.issueDate }
-            + draftItems.sorted { $0.state.summary.issueDate < $1.state.summary.issueDate }
     }
 
     /// What an issued document adds to the month's revenue: tax documents only, and a final invoice net of
@@ -561,18 +650,9 @@ struct OverviewFigures {
     var issuedTotal: Int {
         issuedCounts.values.reduce(0, +)
     }
-
-    /// "Invoice 6 · Advance 2 · Tax doc (payment) 1", or "0".
-    var issuedCountsText: String {
-        let parts = DocumentKind.allCases.compactMap { kind -> String? in
-            guard let count = issuedCounts[kind], count > 0 else { return nil }
-            return String(localized: kind.shortTitle) + " " + String(count)
-        }
-        return parts.isEmpty ? "0" : parts.joined(separator: " · ")
-    }
 }
 
-/// The setup steps (screens-flows.md §2j): three required, the rates and the first client optional.
+/// The setup steps (screens-flows.md §2j, other-04): company profile, bank account and number series.
 struct SetupStatus: Equatable {
     /// The user default Help ▸ Getting Started sets, so the card shows again once it has hidden itself.
     static let forcedKey = "gettingStartedForced"
@@ -580,11 +660,17 @@ struct SetupStatus: Equatable {
     var hasProfile = false
     var hasBankAccount = false
     var hasSeries = false
-    var hasRates = false
-    var hasClient = false
 
     /// Company, bank account and series; rates are typed per document and never block (decision of 5 Nov 2026).
     var isComplete: Bool { hasProfile && hasBankAccount && hasSeries }
+
+    /// Open Settings… opens the first unfinished pane: Company, then Bank accounts, then Numbering.
+    var firstUnfinishedPane: SettingsPane? {
+        if !hasProfile { return .company }
+        if !hasBankAccount { return .bank }
+        if !hasSeries { return .numbering }
+        return nil
+    }
 
     static func load(_ stores: Stores) -> SetupStatus {
         var status = SetupStatus()
@@ -593,8 +679,6 @@ struct SetupStatus: Equatable {
             status.hasBankAccount = !profile.bankConnections.isEmpty
         }
         status.hasSeries = !((try? stores.series.all()) ?? []).isEmpty
-        status.hasRates = (try? stores.rates.latestDay(for: .eur)) != nil
-        status.hasClient = !((try? stores.customers.all()) ?? []).isEmpty
         return status
     }
 }

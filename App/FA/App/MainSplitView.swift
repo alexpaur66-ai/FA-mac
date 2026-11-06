@@ -175,7 +175,7 @@ struct MainSplitView: View {
         case .overview:
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
-                show: show, showOverdue: showOverdue, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
+                show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) })
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
@@ -488,6 +488,30 @@ struct MainSplitView: View {
             if let editor, editor.documentID == id { editor.requestFocus(.firstLineQuantity) }
         } else {
             detailFocusRequest = true
+        }
+    }
+
+    /// ↩ on an Overview queue row (other-03): Record Payment… on an overdue document, Create Tax Document
+    /// for the oldest payment without one on an advance, else Open Tax Document on the oldest payment whose
+    /// tax document is still a draft (as the payment row offers). False when the row has no action, so the
+    /// key is not swallowed.
+    private func runQueueAction(_ kind: OverviewFigures.QueueItem.Kind, documentID: String) -> Bool {
+        let actions = documentActions(for: documentID)
+        switch kind {
+        case .overdue:
+            guard let action = actions.paymentAction else { return false }
+            action()
+            return true
+        case .taxDocumentMissing:
+            if let action = actions.createTaxDocument {
+                action()
+                return true
+            }
+            guard let payments = try? stores.documents.payments(for: documentID) else { return false }
+            let drafts = payments.filter { $0.kind == .received && !$0.receiptIssued && $0.receiptDocumentID != nil }
+            guard let receiptID = drafts.min(by: { $0.paidOn < $1.paidOn })?.receiptDocumentID else { return false }
+            openDraft(receiptID)
+            return true
         }
     }
 

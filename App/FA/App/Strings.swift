@@ -98,6 +98,7 @@ enum L {
     static let paymentCreditIn = r("payment.creditIn", "Credit applied")
     static let paymentCreditOut = r("payment.creditOut", "Credit moved out")
     static let paymentLocked = r("payment.locked", "A tax document rests on this payment; it cannot change.")
+    static let paymentSettledLocked = r("payment.settledLocked", "A final invoice settled this payment as paid in advance; it cannot change.")
 
     // MARK: Empty states and placeholders
 
@@ -118,29 +119,24 @@ enum L {
     static let tileUnpaid = r("overview.tileUnpaid", "Unpaid")
     static let tileOverdue = r("overview.tileOverdue", "Overdue")
     static func tileIssued(_ month: String) -> LocalizedStringResource { r("overview.tileIssued", "Issued in \(month)") }
-    static func tileVAT(_ month: String) -> LocalizedStringResource { r("overview.tileVAT", "VAT for \(month) (CZK)") }
+    static func tileVAT(_ month: String) -> LocalizedStringResource { r("overview.tileVAT", "VAT for \(month) by DUZP (CZK)") }
     static func documentsCount(_ count: Int) -> LocalizedStringResource { r("overview.documentsCount", "\(count) documents") }
     static let documentCountOne = r("overview.documentCountOne", "1 document")
     static func oldestOverdue(_ days: Int) -> LocalizedStringResource { r("overview.oldestOverdue", "oldest \(days) days") }
     static let oldestOverdueOne = r("overview.oldestOverdueOne", "oldest 1 day")
-    static let vatTileNote = r("overview.vatNote", "Tax documents by the month of their date of taxable supply. Rule for the accountant to confirm.")
-    static let revenueTaxDocuments = r("overview.revenueTaxDocuments", "Revenue from tax documents")
     static let needsAttention = r("overview.needsAttention", "Needs attention")
     static func daysOverdue(_ days: Int) -> LocalizedStringResource { r("queue.daysOverdue", "\(days) days overdue") }
     static let dayOverdueOne = r("queue.dayOverdueOne", "1 day overdue")
     static let queueTaxDocumentMissing = r("queue.taxDocumentMissing", "Payment received, tax document missing")
-    static let queueOldDraft = r("queue.oldDraft", "Draft waiting for more than a week")
     static let previousMonth = r("overview.previousMonth", "Previous month")
     static let nextMonth = r("overview.nextMonth", "Next month")
 
     static let gettingStarted = r("setup.title", "Getting started")
-    static let setupIntro = r("setup.intro", "Three steps before the first document can be issued. Each opens the matching settings.")
+    static let setupIntro = r("setup.intro", "Three steps before you can issue the first document.")
     static let stepCompany = r("setup.company", "Company profile")
     static let stepBank = r("setup.bank", "Bank accounts")
     static let stepSeries = r("setup.series", "Continue your number series")
-    static let stepRates = r("setup.rates", "ČNB rates (optional): rates are typed per document; the import fills the table")
-    static let stepFirstDocuments = r("setup.firstDocuments", "First client or first invoice (optional)")
-    static let noDocumentsDescription = r("empty.noDocumentsDescription", "Invoices, advance invoices and tax documents appear here. ⌘N creates a new invoice.")
+    static let noDocumentsDescription = r("empty.noDocumentsDescription", "Press ⌘N to create your first invoice.")
     static let noDraftsDescription = r("empty.noDraftsDescription", "New Invoice (⌘N) and New Advance Invoice (⇧⌘N) create drafts.")
     static let noUnpaidDescription = r("empty.noUnpaidDescription", "Every issued invoice is paid.")
     static let noOpenAdvancesDescription = r("empty.noOpenAdvancesDescription", "No advance invoice is waiting for a payment or its final invoice.")
@@ -168,7 +164,7 @@ enum L {
     static let advancesDeducted = r("document.advancesDeducted", "Advances deducted")
     /// The inline error of the document list when its live observation stopped (ADR 0008).
     static let listStopped = r("document.listStopped", "The document list stopped updating.")
-    static let retry = r("action.retry", "Try again")
+    static let retry = r("action.retry", "Try Again")
     static func selectedCount(_ count: Int) -> LocalizedStringResource { r("document.selectedCount", "\(count) selected") }
     static let totalsPerCurrency = r("document.totalsPerCurrency", "Totals per currency")
     static let activity = r("document.activity", "Activity")
@@ -662,8 +658,17 @@ enum L {
     // Follow-ups (PR 18): the setup card, the tiles, the detail banners, the client header, the series sheet
     static let done = r("setup.done", "Done")
     static let notDone = r("setup.notDone", "Not done")
-    static func unpaidAdvancesCount(_ count: Int) -> LocalizedStringResource { r("overview.unpaidAdvancesCount", "Unpaid advances: \(count) ·") }
-    static func overdueAdvancesCount(_ count: Int) -> LocalizedStringResource { r("overview.overdueAdvancesCount", "Overdue advances: \(count)") }
+    /// The Unpaid tile's advances line (other-02): one sentence; the overdue part only above 0.
+    static func unpaidAdvancesLine(_ count: Int, _ amounts: String) -> LocalizedStringResource {
+        r("overview.unpaidAdvancesLine", "Unpaid advances: \(count) · \(amounts)")
+    }
+    static func unpaidAdvancesLineOverdue(_ count: Int, _ amounts: String, _ overdue: Int) -> LocalizedStringResource {
+        r("overview.unpaidAdvancesLineOverdue", "Unpaid advances: \(count) · \(amounts) · \(overdue) overdue")
+    }
+    /// The Overdue tile's line: "3 documents · oldest 23 days".
+    static func overdueTileLine(_ documents: String, _ oldest: String) -> LocalizedStringResource {
+        r("overview.overdueTileLine", "\(documents) · \(oldest)")
+    }
     static let menuKindInvoice = r("menu.kind.invoice", "Invoice")
     static let menuKindAdvance = r("menu.kind.advance", "Advance Invoice")
     static let menuKindFinal = r("menu.kind.final", "Final Invoice")
