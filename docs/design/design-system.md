@@ -23,10 +23,10 @@ Sasa's brief for the design: *"useful, nice and comfortable and swift and quick 
 |---|---|---|---|
 | P1 | **Money is content, never decoration** | Amounts sit on opaque surfaces and use tabular digits (`monospacedDigit`). The currency is always shown. On EUR and USD documents the CZK equivalents are shown wherever the VAT law needs them. Glass never covers amounts, tables or the invoice preview: the HIG says "Don't use Liquid Glass in the content layer" [S2]. | trustworthy |
 | P2 | **Commit is deliberate; everything else is undoable** | **Issuing** is the only irreversible action: it assigns the number and locks the document. It gets one confirmation sheet that shows exactly what will be locked. Everything else (draft edits, deleting a draft, unmatching, notes) happens immediately and can be undone by name, with no alert. This follows the HIG: no alerts for common undoable actions, an alert for an uncommon one that can't be undone [S15], and named, multi-level undo [S16]. **The one exception is Repair mode** (v0.1.x, §8.18). Behind Touch ID or the password it unlocks every record, issued documents included. Every repair change is written to the audit log, which never leaves the Mac. There is no trace-free mode. The normal fix for a wrong issued document stays a corrective document (Phase 2). | trustworthy, fast |
-| P3 | **Keyboard first, never keyboard only** | Every daily action is two keystrokes or fewer from anywhere: ⌘N, ⌘D, ⌘R, ⌘K, ⌘Return, plus single keys in a focused list. Every command also appears in the menu bar, because the HIG asks for the menu bar to list all commands and every toolbar item [S14][S8]. The palette repeats the menus; it never replaces them. The one authoritative keyboard map is screens-flows §3.1. | swift and quick |
+| P3 | **Keyboard first, never keyboard only** | Every daily action is two keystrokes or fewer from anywhere: ⌘N, ⌘D, ⌘R, ⌘F, ⌘Return, plus ↩, ⌫ and ⎋ in a focused list, where letters type-select. Every command also appears in the menu bar, because the HIG asks for the menu bar to list all commands and every toolbar item [S14][S8]. ⌘K stays free for a later command palette, which would repeat the menus, never replace them. The one authoritative keyboard map is screens-flows §3.1. | swift and quick |
 | P4 | **Calm surface, loud only when money needs Sasa** | Chrome stays neutral. There is one accent colour and one prominent action per context [S8][S35]. Red appears only for Overdue. The Overview is a queue of what needs attention, not a gallery of charts. | comfortable, calm |
-| P5 | **Native first, custom last** | Use standard `NavigationSplitView`, `Table`, `inspector`, `toolbar`, `Form`, sheets and menus. They pick up Liquid Glass and the macOS 27 refinements automatically [S1][S44]. Add no custom backgrounds to bars or the sidebar [S1]. v0.1 has **no** custom glass element; the one planned custom glass element (the Undo toast) arrives with the v0.2 bulk actions (§6). | modern, 2027 ready |
-| P6 | **Every number shows where it came from** | Each CZK figure carries its rate, the rate's date and its source ("Typed" or "ČNB file"), and is labelled when the rate is a weekend or holiday fallback. Each bank match carries a reason label, an idea taken from Xero's labels and hover reasoning [S89]. Issued documents show a lock glyph. | trustworthy |
+| P5 | **Native first, custom last** | Use standard `NavigationSplitView`, `Table`, `toolbar`, `Form`, sheets and menus; v0.1 has no inspector column. They pick up Liquid Glass and the macOS 27 refinements automatically [S1][S44]. Add no custom backgrounds to bars or the sidebar [S1]. There is **no** custom glass element in any version (§6). | modern, 2027 ready |
+| P6 | **Every number shows where it came from** | Each CZK figure carries its rate, the rate's date and its source ("Typed" or "ČNB file"), and is labelled when the rate is a weekend or holiday fallback. Each bank match carries a reason label, an idea taken from Xero's labels and hover reasoning [S89]. Issued documents show a lock glyph once, in the issued view's lock line. | trustworthy |
 | P7 | **English UI, exact Czech on documents** | The app UI is English only (Sasa's answer in the proposal doc, 5 Nov 2026: "en"). Czech legal terms stay exact on documents, which print in Czech, or in Czech and then English (§9). Where the UI quotes a printed legal string, it shows it exactly as printed, from the §9 legal-strings table. All numbers, dates and currencies go through `FormatStyle` with an explicit locale; none are built by hand. The UI uses the system locale; documents and their preview use the document's locale, which is Czech formatting in both document languages (§9). | trustworthy, comfortable |
 
 The HIG design principles page backs the spirit of these: Agency ("Help people recover from mistakes"), Responsibility ("Only collect what your product needs", which fits offline-only), and "Simplicity isn't minimalism" [S36].
@@ -49,13 +49,13 @@ The HIG design principles page backs the spirit of these: Agency ("Help people r
 
 | Situation on Sasa's Mac | Deployment target | What changes in the design |
 |---|---|---|
-| **macOS 27.x** (Sasa's Mac: 27.2) | **macOS 27.0** | Nothing; this document assumes it. There are no `#available` branches. The app uses `TextFieldStyle.bordered`, the `.tabs` picker in inspectors, `reorderable()` for line items and `concentricCornerRadii`, and it avoids every API deprecated in 27.3. The macOS 27 design refinements come for free: the uniform toolbar under scrolled content, edge-to-edge sidebars, sidebar icons coloured with the accent, and the tighter window radius [S44]. 27.0 is enough because nothing in 27.1 or 27.2 is needed. |
-| **Fallback A: macOS Tahoe 26.x.** Not needed for Sasa's Mac, which runs 27.2. It stays as the list of macOS 27.0 `#available` branches. The macOS 14.0 build target needs more: every API above 14.0 is gated. That includes the macOS 26 APIs in Facts above, plus `presentationSizing(_:)` (15.0 [S63]), `textInputSuggestions(_:)` (15.0 [S58]), `visibilityPriority(_:)` (26.1 [S74]) and `onDropSessionUpdated(_:)` (26.0 [S101]). The §7 symbols marked 15.0, 15.2 or 26.0 also need a macOS 14 fallback symbol. | **macOS 26.1** (not 26.0, so that `visibilityPriority(_:)`, macOS 26.1 [S74], needs no gate) | Same layout and tokens. Every API below is macOS 27.0 in the docs and needs an `if #available(macOS 27, *)` branch (or a `@available` wrapper view):<br>- `TextFieldStyle.bordered` / `textInputBorderShape(_:)` [S73]: fall back to the default style, without the deprecated `.roundedBorder`<br>- `reorderable()` + `reorderContainer(for:isEnabled:move:)` [S46][S99]: line items reorder through menu commands only, with no drag<br>- `PickerStyle.tabs` [S75]: the inspector tabs use `.segmented`<br>- `GeometryProxy.concentricCornerRadii` [S53]: compute the radius with `Radius.concentric(outer:inset:)`<br>- `presentationPlacement(_:)` / `PresentationPlacement` [S100]: the command palette uses the default sheet placement<br>- `NSMenuItem.preferredImageVisibility` [S45]: menus keep the 26 icon behaviour<br>If Fallback A has to target 26.0 after all, `visibilityPriority(_:)` also needs an `if #available(macOS 26.1, *)` gate.<br>The app looks "Tahoe", not "Golden Gate". To build on that Mac with Xcode 27.2 it must run 26.6 or later [S41]. |
-| **Fallback B: macOS 14 or 15** | Does not apply: Sasa's Mac runs 27.2. | No Liquid Glass APIs are available [S52], so the one custom glass element becomes an opaque surface (§6). `ToolbarSpacer` groups become plain items, and the drop zone uses the drop API that is deprecated in 27.3. Xcode 27.2 can't run on that Mac [S41], so builds happen on another Apple-silicon Mac. |
+| **macOS 27.x** (Sasa's Mac: 27.2) | **macOS 27.0** | Nothing; this document assumes it. There are no `#available` branches. The app uses `TextFieldStyle.bordered`, the `.tabs` picker on the client page, `reorderable()` for line items and `concentricCornerRadii`, and it avoids every API deprecated in 27.3. The macOS 27 design refinements come for free: the uniform toolbar under scrolled content, edge-to-edge sidebars, sidebar icons coloured with the accent, and the tighter window radius [S44]. 27.0 is enough because nothing in 27.1 or 27.2 is needed. |
+| **Fallback A: macOS Tahoe 26.x.** Not needed for Sasa's Mac, which runs 27.2. It stays as the list of macOS 27.0 `#available` branches. The macOS 14.0 build target needs more: every API above 14.0 is gated. That includes the macOS 26 APIs in Facts above, plus `presentationSizing(_:)` (15.0 [S63]), `textInputSuggestions(_:)` (15.0 [S58]), `visibilityPriority(_:)` (26.1 [S74]) and `onDropSessionUpdated(_:)` (26.0 [S101]). The §7 symbols marked 15.0, 15.2 or 26.0 also need a macOS 14 fallback symbol. | **macOS 26.1** (not 26.0, so that `visibilityPriority(_:)`, macOS 26.1 [S74], needs no gate) | Same layout and tokens. Every API below is macOS 27.0 in the docs and needs an `if #available(macOS 27, *)` branch (or a `@available` wrapper view):<br>- `TextFieldStyle.bordered` / `textInputBorderShape(_:)` [S73]: fall back to the default style, without the deprecated `.roundedBorder`<br>- `reorderable()` + `reorderContainer(for:isEnabled:move:)` [S46][S99]: line items reorder through menu commands only, with no drag<br>- `PickerStyle.tabs` [S75]: the client page uses a `TabView`<br>- `GeometryProxy.concentricCornerRadii` [S53]: compute the radius with `Radius.concentric(outer:inset:)`<br>- `NSMenuItem.preferredImageVisibility` [S45]: menus keep the 26 icon behaviour<br>If Fallback A has to target 26.0 after all, `visibilityPriority(_:)` also needs an `if #available(macOS 26.1, *)` gate.<br>The app looks "Tahoe", not "Golden Gate". To build on that Mac with Xcode 27.2 it must run 26.6 or later [S41]. |
+| **Fallback B: macOS 14 or 15** | Does not apply: Sasa's Mac runs 27.2. | No Liquid Glass APIs are available [S52]. `ToolbarSpacer` groups become plain items, and the v0.2 drop zone uses the drop API that is deprecated in 27.3. Xcode 27.2 can't run on that Mac [S41], so builds happen on another Apple-silicon Mac. |
 
 **Baseline statement (used in screens-flows §0.1 and Q1):** the design targets macOS 27.0, because Sasa's Mac runs macOS 27.2. The app builds for macOS 14.0 until CI builds with Xcode 26 or later.
 
-**Build decision (agreed with the build thread):** the app keeps targeting **macOS 14.0**, with `#if compiler(>=6.2)` and `if #available` gates. The reason is CI: it runs on the `macos-15` runner with Xcode 16.4, which has the macOS 15 SDK ([README.md](README.md), Platform policy; `.github/workflows/ci.yml`). The minimum rises once CI builds with Xcode 26 or later. 27.0 stays the design recommendation for that later raise. The macOS 27.0 APIs in the first row need the macOS 27 SDK, which ships with Xcode 27 [S41]. So a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1). Sasa's Mac is not in Fallback B, but on macOS 14 and 15 the gated fallbacks are the ones the Fallback B row lists.
+**Build decision (agreed with the build thread):** the app keeps targeting **macOS 14.0**, with `#if compiler(>=6.2)` and `if #available` gates. CI runs on the `macos-15` runner and has built with Xcode 26.3 (the macOS 26 SDK) since the build's PR 20 ([README.md](README.md), Platform policy; `.github/workflows/ci.yml`). The target is still macOS 14.0 on main; when to raise it is the build's call. 27.0 stays the design recommendation for that raise. The macOS 27.0 APIs in the first row need the macOS 27 SDK, which ships with Xcode 27 [S41]. So a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1). Sasa's Mac is not in Fallback B, but on macOS 14 and 15 the gated fallbacks are the ones the Fallback B row lists.
 
 ---
 
@@ -92,25 +92,25 @@ Every font is a SwiftUI `Font` static or method, verified [S55]: `.largeTitle`, 
 | Window title, subtitle | (system) | `navigationTitle` / `navigationSubtitle`; don't style | system | — | system |
 | Screen header in content (client name, "Overview") | `.screenTitle` | `.title2.bold()` | 17 / 22 Bold | — | primary |
 | Section headers in content (Overview groups) | `.sectionTitle` | `.headline` | 13 / 16 Bold | — | primary |
-| Form and inspector section headers | (system) | `Section` header; title case, not all caps [S1] | system | — | system |
-| Document number in editor header ("FV-2026-0042") | `.documentNumber` | `.title3.weight(.semibold).monospacedDigit()` | 15 / 20 Semibold | tabular | primary, selectable |
+| Form and sheet section headers | (system) | `Section` header; title case, not all caps [S1] | system | — | system |
+| Document number in the issued view header ("FV 2026-0042") | `.documentNumber` | `.title3.weight(.semibold).monospacedDigit()` | 15 / 20 Semibold | tabular | primary, selectable |
 | Table cells, form values, labels | `.body` / `.label` | `.body` | 13 / 16 | — | primary |
 | Amounts in table cells | `.amount` | `.body.monospacedDigit()` | 13 / 16 | tabular, trailing | primary |
 | Invoice number, VS and IBAN cells | `.amount` | `.body.monospacedDigit()` | 13 / 16 | tabular | primary |
 | Emphasised amount (open balance in a row) | `.amountStrong` | `.body.weight(.semibold).monospacedDigit()` | 13 / 16 Semibold | tabular | primary |
-| Second line in a row (IČO, client city, "due in 5 days") | `.rowSecondary` | `.subheadline` | 11 / 14 | — | secondary |
+| Second line in a row (IČO, client city, "due in 5 days"); the client defaults line, the closing reason line, Stock's "Counted 3 weeks ago" | `.rowSecondary` | `.subheadline` | 11 / 14 | — | secondary |
 | CZK equivalent under an EUR or USD amount | `.amountSecondary` | `.subheadline.monospacedDigit()` | 11 / 14 | tabular | secondary |
-| Totals rows (base, VAT per rate) | `.amount` | `.body.monospacedDigit()` | 13 / 16 | tabular | primary |
+| Totals rows (base, VAT per rate); Stock quantity cells (On Hand, history) and the Numbering "Next number" line | `.amount` | `.body.monospacedDigit()` | 13 / 16 | tabular | primary |
 | Grand total ("Amount due"; the PDF prints "K úhradě") | `.total` | `.title3.weight(.semibold).monospacedDigit()` | 15 / 20 Semibold | tabular | primary |
-| Overview KPI figure | `.kpi` | `.largeTitle.bold().monospacedDigit()` | 26 / 32 Bold | tabular | primary |
+| Overview KPI figure; Stock's on-hand figure in the item header | `.kpi` | `.largeTitle.bold().monospacedDigit()` | 26 / 32 Bold | tabular | primary |
 | Status badge text | `.badge` | `.callout.weight(.medium)` | 12 / 15 Medium | — | primary |
-| In-app legal notices (the printed clauses, quoted exactly: "daň odvede zákazník", the not-a-tax-document note on an advance; strings from the §9 legal-strings table) | `.legalNote` | `.callout` | 12 / 15 | — | primary, never secondary |
+| In-app legal notices (the printed clauses, quoted exactly: "daň odvede zákazník", the not-a-tax-document note on an advance; strings from the §9 legal-strings table); the issued view's lock line | `.legalNote` | `.callout` | 12 / 15 | — | primary, never secondary |
 | Captions: rate source, timestamps, hints | `.caption` | `.caption` | 10 / 13 | — | secondary |
 
 ### Notes
 
 - **Floor.** 10 pt is the on-screen minimum [S3]. Legal notices are never set below Callout (12 pt) in the app.
-- **Text enlargement.** The HIG asks that people can enlarge text by at least 200 % [S5], and macOS has no Dynamic Type, so the app does it itself (RECOMMENDATION). Add View ▸ Bigger (⇧⌘=, which the keyboard table lists as "Increase the size of the selection") and View ▸ Smaller (⌘−) [S13], plus Actual Size (⌘0; see screens-flows §3.1). They scale **every content surface** from 100 % to 200 % in steps, from one app-wide scale value: the Table, the editor, the inspector, the Overview, `TotalsPanel` and sheet content. The amounts Sasa most needs to read live in the inspector, the totals and the Overview, so none of them stays at 100 %. System chrome (toolbar, sidebar, menus) keeps the system sizes. The mechanism is `Font.system(size:weight:design:)` (macOS 13.0 [S55]), fed with the HIG sizes above times the scale. The one app-wide scale value is the SwiftUI environment value `textScale` (1 to 2, `DesignTokens.swift`): the app sets `.environment(\.textScale, …)` once at the scene root, and `textRole(_:)`, `MoneyText` and `StatusBadge` read it, so callers never pass a scale by hand. Whether system-size text keeps the text-style tracking is UNVERIFIED; compare it on device. When the scale isn't 1, table row height follows the scaled line height plus padding (§5.3), so text never clips. Test 200 % in the minimum window (§5.3).
+- **Text enlargement.** The HIG asks that people can enlarge text by at least 200 % [S5], and macOS has no Dynamic Type, so the app does it itself (RECOMMENDATION). Add View ▸ Bigger (⇧⌘=, which the keyboard table lists as "Increase the size of the selection") and View ▸ Smaller (⌘−) [S13], plus Actual Size (⌘0; see screens-flows §3.1). They scale **every content surface** from 100 % to 200 % in steps, from one app-wide scale value: the Table, the editor, the issued view, the Overview, `TotalsPanel` and sheet content. The amounts Sasa most needs to read live in the issued view, the totals and the Overview, so none of them stays at 100 %. System chrome (toolbar, sidebar, menus) keeps the system sizes. The mechanism is `Font.system(size:weight:design:)` (macOS 13.0 [S55]), fed with the HIG sizes above times the scale. The one app-wide scale value is the SwiftUI environment value `textScale` (1 to 2, `DesignTokens.swift`): the app sets `.environment(\.textScale, …)` once at the scene root, and `textRole(_:)`, `MoneyText` and `StatusBadge` read it, so callers never pass a scale by hand. Whether system-size text keeps the text-style tracking is UNVERIFIED; compare it on device. When the scale isn't 1, table row height follows the scaled line height plus padding (§5.3), so text never clips. Test 200 % in the minimum window (§5.3).
 - **PDF typography is out of scope.** The PDF is drawn with Core Graphics and has its own A4 sizes. HIG tracking values matter only for custom PDF text [S3].
 
 ---
@@ -155,16 +155,16 @@ The PDF page is **always shown as white paper**, in Light and in Dark Mode, beca
 \* `#1E1E1E` is only a stand-in for a dark window surface in this calculation. It is not an Apple value. Measure the real surfaces with Accessibility Inspector, which uses the same WCAG ratios as the HIG table [S5]. All ratios computed with the WCAG formula on 2026-11-05.
 
 **Why the dark variants are darker than a "readable on dark" indigo.** The HIG Color page says the system "applies the app accent color to the background in prominent buttons" [S4], so the accent is a **fill under a white label** (the prominent Issue button, and selected rows when the person's accent setting is multicolor). The HIG minimum for text up to 17 pt is 4.5 : 1; 3 : 1 applies only to bold text or 18 pt and up [S5]. The previous dark value `#8076FF` gave white text only 3.53 : 1, and whether the system button label is bold enough for the 3 : 1 rule is UNVERIFIED. No single indigo gives both ≥ 4.5 : 1 under white text and ≥ 4.5 : 1 as text on a dark surface, so the tokens split (RECOMMENDATION):
-- **AccentColor (fill)**: the table above. Used for the prominent action, selection and the drop-zone highlight.
+- **AccentColor (fill)**: the table above. Used for the prominent action, selection and, from v0.2, the drop-zone highlight.
 - **Links and any accent-coloured text**: system `linkColor` (§4.1), never the AccentColor.
 - **Check on device first.** If the system turns out not to draw white text on the raw accent, re-measure with Accessibility Inspector before changing anything else.
 
 **Why ink indigo**
-- It is clearly separate from the status hues: red, orange and green, plus neutral grey. That keeps "one colour, one meaning" [S4].
+- It is clearly separate from the status hues: red and orange, plus neutral grey. The app UI has no green. That keeps "one colour, one meaning" [S4].
 - It avoids the default blue that most apps use.
 - It reads as calm and trustworthy for a money app.
 
-**Where it appears.** The system applies the app accent to buttons, selection highlights and sidebar icons, but only when the person's General ▸ Accent colour setting is *multicolor*; otherwise the person's choice wins [S4]. On macOS 27, sidebar icons use the accent colour again [S44]. The app adds accent in only three places: the one prominent action (Issue), the drop-zone highlight, and the app icon. Links use `linkColor`.
+**Where it appears.** The system applies the app accent to buttons, selection highlights and sidebar icons, but only when the person's General ▸ Accent colour setting is *multicolor*; otherwise the person's choice wins [S4]. On macOS 27, sidebar icons use the accent colour again [S44]. In v0.1 the app adds accent in two places: the one prominent action per context, and the app icon (from v0.2 also the drop-zone highlight). Links use `linkColor`.
 
 **How to define it**
 - Preferred: an `AccentColor` colour set in the asset catalog with Any, Dark and High Contrast variants, so the system supplies the variants. Asset-catalog high-contrast slots are UNVERIFIED; check them in Xcode 27.2.
@@ -177,54 +177,58 @@ The PDF page is **always shown as white paper**, in Light and in Dark Mode, beca
 
 **Rule: status is always symbol + word, and colour only reinforces it.** The HIG says not to rely on colour alone and to consider what colours mean in different cultures [S4][S5]. The status word is drawn in the label colour, not the hue, for the contrast reasons in §4.4.
 
-The tone colours are SwiftUI system colours: `Color.red`, `.orange` and `.green` (macOS 10.15), plus `.primary` and `.secondary`. The HIG says system colours "already define variants" for light, dark and increased-contrast contexts, and the system colour table lists the increased-contrast values [S4]. Still check on device that the SwiftUI `Color` statics resolve to those values under Increase Contrast.
+**Three tones** (RECOMMENDATION): neutral (`.secondary`), caution (`.orange`) and danger (`.red`, Overdue only). The tone colours are SwiftUI system colours: `Color.red` and `.orange` (macOS 10.15), plus `.secondary`. **The app UI has no green**: the Getting started ticks, the result line's done symbol, "Bank account removed" and the sheet confirmations use `.secondary`. **Red appears in three places, all for Overdue**: the badge, the Unpaid sidebar row's fixed red tint (screens-flows §1.2), and the Overview queue's Overdue row. The "Data can't be opened" banner uses the caution tone (screens-flows §2a). The HIG says system colours "already define variants" for light, dark and increased-contrast contexts, and the system colour table lists the increased-contrast values [S4]. Still check on device that the SwiftUI `Color` statics resolve to those values under Increase Contrast.
 
 **Document state: two axes.** The model owns the state; the UI only displays it. It is computed from the document **kind**, the lifecycle (Draft → Issued) and the payments, on two independent axes (RECOMMENDATION):
 - **Settlement**: `draft`, `open` (issued, nothing paid), `partlyPaid`, `paid`, `overpaid`, `settledByAdvances` (final invoice whose amount due is 0), `closedUnpaid` (advance closed without payment, screens-flows §2d).
 - **`isOverdue`**: past the due date and not settled. It never replaces the settlement; it adds to it.
-- Document facts that are not states: `markedForCreditNote` (screens-flows §2d) and, for advances, whether every received payment has its tax document, whether the client's advances need one at all (Q5, ACCT), and which final invoice deducted it.
+- Document facts that are not states: `markedForCreditNote` (screens-flows §2d) and, for advances, whether every received payment has its tax document, whether the advance needs one at all (not for EU goods, the build's ADR 0012; other treatments Q5, ACCT), and which final invoice deducted it or settled it as "Paid in advance".
 
 **Precedence.** When `isOverdue` is true and the settlement is `open` or `partlyPaid`, the badge is Overdue: **word, tone and symbol** (danger), unless it is an advance whose received payment still lacks its tax document (see Label order). Its detail keeps the days overdue and the open balance, so a partly paid overdue invoice never hides what is left. **One detail format in both spec files:** "+12 days · 1 000,00 € left". The days are counted from the due date; the remainder is the open balance in the document currency.
 
-**Label order.** A badge shows one label, chosen in this order: Draft; Marked for credit note (it outranks every settlement word, because the whole document is to be corrected); Closed unpaid; Settled in final invoice; Issued (paid) for a DDPP; an advance's missing tax document (Partly paid – / Paid – tax document missing), which outranks Overdue because the § 28 deadline is the supplier's; Overdue (open or partly paid only); then the settlement label from the table below.
+**Label order.** A badge shows one label, chosen in this order: Draft; Marked for credit note (it outranks every settlement word, because the whole document is to be corrected); Closed unpaid; Settled in final invoice; Paid for a DDPP; an advance's missing tax document (Partly paid – / Paid – tax document missing), which outranks Overdue because the § 28 deadline is the supplier's; Overdue (open or partly paid only); then the settlement label from the table below. That gives **13 labels** in all.
 
 **Labels derived from kind + settlement** (status badges use sentence case in English, §9). The **UI label** is the English word; it is the `defaultValue` in `App/FA/DesignSystem/StatusStyles.swift`. The **Catalog cs (bonus)** column is the `cs` entry that `DesignSystem.xcstrings` keeps. Czech UI is not in scope (§9), so nothing depends on that column.
 
 | Kind | Settlement / fact | Tone | Symbol (macOS since [S85]) | UI label | Catalog cs (bonus) | Detail |
 |---|---|---|---|---|---|---|
 | any | draft | neutral (`.secondary`) | `pencil.circle` (10.15) | Draft | Koncept | — |
-| Invoice, Final | open, not overdue | pending (`.primary`) | `clock` (10.15) | Issued | Vystaveno | "due in 5 days" |
-| Advance | open, not overdue | pending (`.primary`) | `clock` (10.15) | Awaiting payment | Čeká na platbu | "due in 5 days" |
-| Invoice, Final; Advance with every payment's tax document | partlyPaid | caution (`.orange`) | `circle.lefthalf.filled` (12.0) | Partly paid | Částečně uhrazeno | "1 000,00 € left" |
-| Invoice, Final | paid | success (`.green`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | payment date |
+| Invoice, Final | open, not overdue | neutral (`.secondary`) | `clock` (10.15) | Issued | Vystaveno | "due in 5 days" |
+| Advance | open, not overdue | neutral (`.secondary`) | `clock` (10.15) | Awaiting payment | Čeká na platbu | "due in 5 days" |
+| Invoice, Final; Advance with every payment's tax document, or needing none | partlyPaid | caution (`.orange`) | `circle.lefthalf.filled` (12.0) | Partly paid | Částečně uhrazeno | "1 000,00 € left" |
+| Invoice, Final | paid | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | payment date |
+| Final | settledByAdvances | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | "by advances" |
+| DDPP | (always paid by definition) | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | the advance number |
+| Advance | paid, needs no tax document (EU goods, the build's ADR 0012; other treatments Q5, ACCT) | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | payment date |
 | Advance | partlyPaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Partly paid – tax document missing | Částečně uhrazeno – chybí daňový doklad | "paid 3 days ago · 700,00 € left" |
 | Advance | paid or overpaid, a received payment has no tax document yet | caution (`.orange`) | `checkmark.circle.trianglebadge.exclamationmark` (12.0) | Paid – tax document missing | Uhrazeno – chybí daňový doklad | "paid 3 days ago" |
-| Advance | paid, tax document issued, not yet deducted | success (`.green`) | `checkmark.circle.fill` (10.15) | Tax document issued | Daňový doklad vystaven | the DDPP number |
-| Advance | paid, the client's advances need no tax document (Q5, ACCT) | success (`.green`) | `checkmark.circle.fill` (10.15) | Paid | Uhrazeno | payment date |
-| Advance | deducted by an issued final invoice | neutral (`.secondary`) | `checkmark.seal` (10.15) | Settled in final invoice | Zúčtováno v konečné faktuře (wording ACCT, follows "Konečná faktura") | the final invoice number |
+| Advance | paid, tax document issued, not yet deducted | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Tax document issued | Daňový doklad vystaven | the DDPP number |
+| Advance | deducted, or settled as "Paid in advance", by an issued final invoice | neutral (`.secondary`) | `checkmark.seal` (10.15) | Settled in final invoice | Zúčtováno v konečné faktuře (wording ACCT, follows "Konečná faktura") | the final invoice number |
 | Advance | closedUnpaid | neutral (`.secondary`) | `xmark.circle` (10.15) | Closed unpaid | Uzavřeno – neuhrazeno | the reason (ACCT wording) |
-| DDPP | (always paid by definition) | success (`.green`) | `checkmark.circle.fill` (10.15) | Issued (paid) | Vystaveno (uhrazeno) | the advance number |
-| Final | settledByAdvances | success (`.green`) | `checkmark.circle.fill` (10.15) | Paid (by advances) | Uhrazeno (zálohami) | — |
 | any issued | overpaid | caution (`.orange`) | `plus.circle.fill` (10.15) | Overpaid | Přeplaceno | surplus |
 | any issued | `isOverdue` | danger (`.red`) | `exclamationmark.circle.fill` (10.15) | Overdue | Po splatnosti | "+12 days · 1 000,00 € left" |
 | Invoice, Final | `markedForCreditNote` (fact) | neutral (`.secondary`) | `flag` (10.15) | Marked for credit note | K opravě dobropisem (ACCT) | the reason; wording ACCT |
+
+On main the DDPP reads "Issued (paid)" and the settled final invoice "Paid (by advances)" (`StatusStyles.swift`); both become Paid, with the detail above, so the labels go from 15 to 13.
+
+**Stock (when Stock ships, screens-flows §2n).** One more badge, not a document state: **Low**, caution (`.orange`), `arrow.down.circle` (10.15 [S85]), only on the On Hand cell of an item at or below its reorder level. The Stock sidebar badge is a plain, untinted count. A quantity below zero ("−5 ks") is `.secondary` text, never red, and "Counted 3 weeks ago" is plain `.rowSecondary` text, never a tone.
 
 Kinds: Invoice = Faktura – daňový doklad; Advance = Zálohová faktura; DDPP = Daňový doklad k přijaté platbě; Final = Konečná faktura (ACCT; §9 glossary).
 
 - **Where the states come from.** The core states follow iDoklad's five, which include *Přeplaceno* (Overpaid), plus Draft [S88]. The brief requires partial payments and overpayments. The advance states come from the advance chain in screens-flows §2d.
 - **Overdue and the two "closing" facts.** A `closedUnpaid` advance and a document `markedForCreditNote` are never overdue: they leave the Unpaid and Overdue figures and the attention queue (screens-flows §2a aggregation rules).
 - **Orange means "the amount doesn't match, or a step is missing; decide something".** That is why Partly paid, Overpaid, both "tax document missing" states and a Suggested match share it. They are told apart by symbol and word. The Repair mode banner (v0.1.x, §8.18) also uses the caution tone, because every change it allows needs care.
-- **Lock glyph.** Every issued document also shows `lock.fill` (10.15) beside its number. This is a fact about the document, not a status, so it is never coloured. While Repair mode is on (v0.1.x), the glyph is `lock.open.fill` (10.15 [S85]) instead, also uncoloured (§8.18).
+- **Lock glyph.** The issued view's lock line carries `lock.fill` (10.15), once per issued document; the tables, the issued view header, the totals and the frozen fields show no lock (§8.18). This is a fact about the document, not a status, so it is never coloured. While Repair mode is on (v0.1.x), the glyph is `lock.open.fill` (10.15 [S85]) instead, also uncoloured (§8.18).
 - Symbol names come from data up to macOS 26 [S85]; check them in the SF Symbols 27 app.
 
-**Bank match state (v0.2)**
+**Bank match state (v0.2; used only in the gallery for now)**
 
 | State | Tone | Symbol (macOS since [S85]) | UI label | Catalog cs (bonus) | Extra text |
 |---|---|---|---|---|---|
-| **Already recorded** | success (`.green`) | `checkmark.circle` (10.15) | Already recorded | Už zaznamenáno | the payment recorded by hand that the line confirms |
-| **Matched** | success (`.green`) | `checkmark.circle.fill` (10.15) | Matched | Spárováno | reason: "VS + amount", "Known IBAN", "Manual" |
+| **Already recorded** | neutral (`.secondary`) | `checkmark.circle` (10.15) | Already recorded | Už zaznamenáno | the payment recorded by hand that the line confirms |
+| **Matched** | neutral (`.secondary`) | `checkmark.circle.fill` (10.15) | Matched | Spárováno | reason: "VS + amount", "Known IBAN", "Manual" |
 | **Suggested** | caution (`.orange`) | `checkmark.circle.badge.questionmark` (13.0) | Suggested | Návrh | reason and difference |
-| **Unmatched** | pending (`.primary`) | `circle.dashed` (11.0) | Unmatched | Nespárováno | — |
+| **Unmatched** | neutral (`.secondary`) | `circle.dashed` (11.0) | Unmatched | Nespárováno | — |
 | **Ignored** ("not an invoice") | neutral (`.secondary`) | `minus.circle` (10.15) | Not an invoice | Není faktura | category: Fees, Software, Rent, Tax, Owner |
 
 Already recorded uses the outline `checkmark.circle`, so it is told apart from Matched (`checkmark.circle.fill`) by symbol as well as by word.
@@ -245,8 +249,8 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 
 **Consequences** (RECOMMENDATION, based on the HIG minimum of 4.5 : 1 for text up to 17 pt and 3 : 1 for bold or 18 pt+ [S5]):
 
-1. **Never set status words or amounts in a system hue in Light Mode.** The default orange, green, blue and red all fall below 4.5 : 1 on white. Hue is reserved for the symbol and a 14 % tinted capsule; the word stays `.primary`.
-2. **Orange and green symbols fall below 3 : 1 on white.** That is acceptable only because the word carries the meaning. Never show a symbol-only badge without a tooltip and a VoiceOver label (§8.1).
+1. **Never set status words or amounts in a system hue in Light Mode.** The default orange, blue and red all fall below 4.5 : 1 on white. Hue is reserved for the symbol and a 14 % tinted capsule; the word stays `.primary`.
+2. **Orange symbols fall below 3 : 1 on white.** That is acceptable only because the word carries the meaning. Never show a symbol-only badge without a tooltip and a VoiceOver label (§8.1).
 3. **Yellow is not used for anything** in the app UI.
 4. **Under Increase Contrast** every system hue reaches about 4.5 : 1 or more. The badge also adds a 1 pt border (§8.1).
 5. **Selected rows.** When a selected, focused row is filled with the accent, the badge drops its tint and goes monochrome. Apple's docs say foreground content "should be adjusted" on increased-prominence backgrounds, such as selected rows in a `List` or `Table` (`backgroundProminence`, macOS 14.0) [S54].
@@ -259,26 +263,23 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 ### 5.1 Window structure
 
 ```
-┌ Sidebar ──────────┬ Content: Table ──────────┬ Detail: draft editor / issued view ─┬ Inspector ──────┐
-│ Overview          │ Number  Client  Total  … │ totals bar (TotalsPanel, compact)   │ Details|Payments│
-│ Documents ▾       │ ───────────────────────  │ header grid: Client · Type ·        │ |Activity       │
-│   All · Drafts    │ selection drives detail  │   dates · Currency · Document       │ (derived info:  │
-│   Unpaid          │                          │   language · VAT treatment ·        │  rate, VAT recap│
-│   Overdue         │                          │   Account · QR · VS                 │  CZK, QR, chain,│
-│   This month      │                          │ LineItemsEditor                     │  history)       │
-│   Open advances   │                          │ (or the PDF preview: View ▸ Preview)│                 │
-│ Clients           │                          │                                     │                 │
-│ Payments & Bank ▾ │                          │                                     │                 │
-│ Exchange rates    │                          │                                     │                 │
-│ Exports & Backup  │                          │                                     │                 │
-└───────────────────┴──────────────────────────┴─────────────────────────────────────┴─────────────────┘
+┌ Sidebar ──────────┬ Content: Table ──────────┬ Detail: draft editor / issued view ─────┐
+│ Overview          │ Number  Client  Total  … │ chain line (in an advance chain)        │
+│ Documents         │ ───────────────────────  │ header grid: Client · Issue date ·      │
+│   Drafts          │ selection drives detail  │   (Period) · DUZP · Due · Currency ·    │
+│   Unpaid          │                          │   VAT treatment · Bank account          │
+│   Open advances   │                          │ LineItemsEditor                         │
+│ Clients           │                          │ totals bar (TotalsPanel, compact)       │
+│ Payments          │                          │ (or the PDF preview: View ▸ Preview)    │
+│ Stock (later)     │                          │                                         │
+└───────────────────┴──────────────────────────┴─────────────────────────────────────────┘
 ```
 
-- **Columns.** One three-column `NavigationSplitView` for every section, plus a trailing `.inspector`. The HIG recommends showing more content "in fewer nested levels" [S29], putting the inspector "on the trailing side of a split view" [S32], and keeping the sidebar to at most two levels [S9]. **On macOS the content column is always displayed** [S61], so no section can drop it. Every section therefore fills the content column, and the detail column shows the selected item (screens-flows §1.2 lists what each section puts where). Overview, for example, puts its tiles and queue in the content column and the selected queue item's document in the detail; with nothing selected, the detail shows a calm `ContentUnavailableView` placeholder.
-- **The sidebar** is the one in screens-flows §1.2 (six rows, ⌘1–⌘6). This document does not repeat it.
-- **Drafts are edited in place** in the detail column (RECOMMENDATION, given Sasa's few documents a month and the HIG advice to "avoid opening new windows as default behavior unless it benefits your user experience" while offering the option [S32]). Document ▸ Open in New Window and the context menu open the same editor in its own window, which shows editor and live preview side by side.
-- **Header fields live in one place:** the editor's header grid, where Tab reaches them. The inspector holds only derived information (rate and source, VAT recap with CZK, payment and QR preview, the document chain, PDF file, activity).
-- **Totals placement.** Totals appear in the editor's totals bar and in the inspector, not only at the bottom. The HIG says "Avoid placing controls or critical information at the bottom of a window" [S7].
+- **Columns.** One three-column `NavigationSplitView` for every section, with **no inspector** in any section (screens-flows §1.2). The HIG recommends showing more content "in fewer nested levels" [S29] and keeping the sidebar to at most two levels [S9]. **On macOS the content column is always displayed** [S61], so no section can drop it. Every section therefore fills the content column, and the detail column shows the selected item (screens-flows §1.2 lists what each section puts where). Overview, for example, puts its tiles and queue in the content column and the selected queue item's document in the detail; with nothing selected, the detail shows a title-only `ContentUnavailableView` placeholder ("Select a document"), with no symbol. Real empty states keep their symbol and their one action.
+- **The sidebar** is the one in screens-flows §1.2: Overview ⌘1, Documents ⌘2 (one selectable row, with Drafts, Unpaid and Open advances indented under it), Clients ⌘3, Payments ⌘4, and Stock ⌘5 once it ships; ⌘6 is unassigned. This document does not repeat it.
+- **Drafts are edited in place** in the detail column (RECOMMENDATION, given Sasa's few documents a month and the HIG advice to "avoid opening new windows as default behavior unless it benefits your user experience" [S32]). v0.1 has one main window and no document window (screens-flows §1.1).
+- **Header fields live in one place:** the editor's header grid, where Tab reaches them (screens-flows §2c). Type and document language change through the Document menu, the VS is assigned at Issue, and the QR follows the currency, so none of them is a header row. An issued document shows its frozen values (DUZP, rate with date and source, VAT in CZK, account and VS, the language · treatment line) as selectable figures in the issued view (screens-flows §2b).
+- **Totals placement.** Totals appear in the editor's totals bar and in the issued view's figures, not only at the bottom. The HIG says "Avoid placing controls or critical information at the bottom of a window" [S7].
 - **No sidebar footer.** The sidebar bottom holds nothing: no backup button, no licence text [S9].
 
 ### 5.2 Spacing scale (4-pt base)
@@ -288,12 +289,12 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 | `Spacing.xxs` | 2 | Half-step: vertical badge padding; tight two-line stacks (amount over its CZK line, caption under a value) |
 | `Spacing.xs` | 4 | Icon-to-label gap, including the badge's symbol-to-word and word-to-detail gaps; compact-badge horizontal padding |
 | `Spacing.s` | 8 | Gap between related controls; horizontal badge padding; grid cell spacing |
-| `Spacing.m` | 12 | **Padding around bezeled elements** (≈12 pt in the HIG [S5]); inspector row groups |
-| `Spacing.l` | 16 | Inspector insets; card padding; space between form groups |
+| `Spacing.m` | 12 | **Padding around bezeled elements** (≈12 pt in the HIG [S5]); row groups in the issued view's figures |
+| `Spacing.l` | 16 | Card padding; space between form groups |
 | `Spacing.xl` | 20 | Content-pane margins (editor, Overview) — RECOMMENDATION |
 | `Spacing.xxl` | 24 | **Padding around elements without a bezel** (≈24 pt in the HIG [S5]); Overview tile gaps |
 | `Spacing.section` | 32 | Between major sections (editor header ↔ line items ↔ notes) |
-| `Spacing.page` | 40 | Empty-state block padding; drop-zone inner padding |
+| `Spacing.page` | 40 | Empty-state block padding; the v0.2 drop zone's inner padding |
 
 ### 5.3 Sizes (RECOMMENDATION; tune them on Sasa's display)
 
@@ -302,19 +303,18 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 | Sidebar column | min 180, ideal 210, max 280 | `navigationSplitViewColumnWidth(min:ideal:max:)` 13.0 [S61] |
 | Content (Table) column | min 360, ideal 560, max 900. Narrow widths hide the optional columns first (screens-flows §2b). | same |
 | Detail column | min 520 (the draft editor's minimum). An A4 page is 595 pt wide at 100 %, so the preview fits it to the width. | same |
-| Inspector | min 260, ideal 300, max 400 | `inspectorColumnWidth(min:ideal:max:)` 14.0 [S60] |
 | Window | default 1360 × 860, **minimum 1080 × 640**. The column minimums add up to 180 + 360 + 520 = 1060 pt, so at the window minimum all three columns and their dividers still fit. | `defaultSize(width:height:)` 13.0 |
-| Narrow windows | **Breakpoint = sum of column minimums + inspector minimum = 1060 + 260 = 1320 pt.** Below it the app closes the inspector (it stays one ⌥⌘I away); the default 1360 pt still shows it. The HIG suggests auto-collapsing the sidebar when the window shrinks [S9], and asks for minimum sizes that keep every divider visible [S10]. Whether SwiftUI closes the inspector by itself at narrow widths is UNVERIFIED, so the app drives it from the window width (RECOMMENDATION). | — |
+| Narrow windows | No breakpoint of its own: with no inspector, the window minimum already fits all three columns. The HIG suggests auto-collapsing the sidebar when the window shrinks [S9], and asks for minimum sizes that keep every divider visible [S10]. | — |
 | Table row height | **The system default at 100 % text; don't override it.** On 26+, lists and tables have "a larger row height and padding" [S1]. The documents table uses single-line rows; the clients list uses two-line rows (name, plus IČO and city). When View ▸ Bigger is above 100 %, the row height follows the scaled line height plus padding (§3 Notes). `defaultMinListRowHeight` exists for `List` (macOS 10.15) [S71]; whether `Table` honours it is UNVERIFIED, so test the scaled rows early. | — |
-| Controls | The macOS default control size is 28 × 28 pt and the minimum is 20 × 20 pt [S5]. On a touch-capable Mac, keep control sizes and enlarge only the tap targets [S30]. | `controlSize(_:)` for dense inspectors (RECOMMENDATION; not from [S1]) |
-| Sheets | **One approach: `.form` for form sheets, `.fitted` plus an explicit frame where a size matters.** Record Payment, Issue confirmation and New Client use `presentationSizing(.form)` ("appropriate for forms") and size to their content, with no fixed widths. The ČNB import review uses `.fitted` with `frame(minWidth: 560, idealWidth: 640, minHeight: 400, idealHeight: 480)`, so it stays user-resizable; `.fitted` sheets are resizable by default on macOS and a fixed frame makes them non-resizable [S63]. The command palette uses `.fitted` with a fixed 560 pt width. | `presentationSizing(_:)` 15.0 [S63] |
+| Controls | The macOS default control size is 28 × 28 pt and the minimum is 20 × 20 pt [S5]. On a touch-capable Mac, keep control sizes and enlarge only the tap targets [S30]. | `controlSize(_:)` only where a dense area needs it (RECOMMENDATION; not from [S1]) |
+| Sheets | **One approach: `.form` for form sheets, `.fitted` plus an explicit frame where a size matters.** Record Payment, Issue confirmation, New Client, the Stock sheets and Export for Accountant use `presentationSizing(.form)` ("appropriate for forms") and size to their content, with no fixed widths. The Exchange Rates sheet uses `.fitted` with `frame(minWidth: 560, idealWidth: 640, minHeight: 400, idealHeight: 480)`, so it stays user-resizable; `.fitted` sheets are resizable by default on macOS and a fixed frame makes them non-resizable [S63]. On macOS 14 the frame alone applies. The ČNB import review is deferred (screens-flows §2g); it would use the same frame. | `presentationSizing(_:)` 15.0 [S63] |
 | QR code on the PDF | about 30 mm side, error correction M | QR Platba standard: 29.6–32.8 mm for typical content [S94] |
 
 ### 5.4 Corner radii and concentricity
 
-1. **Never set radii on system containers**: windows, sheets, popovers, menus, toolbar glass, the sidebar or the inspector. Window and sheet corner radii changed with macOS 26 [S1], and macOS 27 gave every window "the same tighter corner radius" [S44]. A hard-coded number would be wrong on at least one of those releases.
+1. **Never set radii on system containers**: windows, sheets, popovers, menus, toolbar glass or the sidebar. Window and sheet corner radii changed with macOS 26 [S1], and macOS 27 gave every window "the same tighter corner radius" [S44]. A hard-coded number would be wrong on at least one of those releases.
 2. **Shapes nested in a rounded container are concentric.** Use `ConcentricRectangle` or `containerShape(_:)` (both macOS 26.0) [S53]. On 27, `GeometryProxy.concentricCornerRadii` (macOS 27.0) gives the radii [S53]. If you have to compute it: inner radius = max(outer radius − inset, 4).
-3. **Standalone content shapes use tokens**: `Radius.s` 4 (inline chips, the QR frame), `Radius.m` 8 (drop zone, small tiles), `Radius.l` 12 (Overview tiles, empty-state cards). Badges are `Capsule`.
+3. **Standalone content shapes use tokens**: `Radius.s` 4 (small inline shapes), `Radius.m` 8 (small tiles; the v0.2 drop zone), `Radius.l` 12 (Overview tiles, empty-state cards). Badges and the problems chip are `Capsule`.
 4. **Style.** Use `RoundedRectangle(cornerRadius:style:)` with the default `.continuous` style (macOS 10.15).
 
 ---
@@ -325,26 +325,24 @@ Computed with the WCAG formula from the HIG's default system colour values [S4],
 
 Standard components pick up Liquid Glass when built with the latest SDK [S1]:
 - toolbar and title bar, including the uniform toolbar on 27 when content scrolls under it [S44]
-- sidebar and inspector
+- the sidebar
 - sheets, popovers, menus and alerts
 - the search field, which sits trailing in the toolbar [S27]
 - standard buttons inside bars
 
 On 27 the system also tunes glass diffusion and highlights and offers a Settings slider from "ultra clear" to "fully tinted". Apps get these rendering improvements without recompiling [S44]. New in macOS 27, glass can also "subtly bounce" when clicked, and Apple's advice is that "a little goes a long way" [S47].
 
-### Custom glass: none in v0.1, one element in v0.2 (RECOMMENDATION)
+### Custom glass: none (RECOMMENDATION)
 
-- **v0.1 has no custom glass.** Undoable actions confirm with an **inline result line** (§8.17): plain opaque text plus a borderless "Undo" button at the top of the content pane. Edit ▸ Undo (⌘Z) stays the primary undo.
-- **v0.2: the Undo toast (§8.17).** It arrives with the bulk actions (bulk accept, import), where a floating confirmation earns its cost. It is a transient control floating above content, which is the role the HIG gives Liquid Glass: "a functional layer for controls and navigation that floats above content" [S2]. It uses `glassEffect(.regular, in: Capsule())` (macOS 26.0) [S52].
-- **Grouping.** Group any future custom glass in a `GlassEffectContainer` for performance [S1][S52].
-- **v0.2 adds no other glass.** The "Accept Exact Matches (N)" control is a toolbar item, not a floating bar. That keeps controls out of the window's bottom edge [S7].
+- **The app has no custom glass in any version.** Undoable actions confirm with the **inline result line** (§8.17): plain opaque text plus a borderless "Undo" button at the top of the content pane. Edit ▸ Undo (⌘Z) stays the primary undo. The v0.2 bulk results (bulk accept, import) use the same line; there is no Undo toast and no `FloatingSurface`.
+- **v0.2 adds no glass.** The "Accept Exact Matches (N)" control is a toolbar item, not a floating bar. That keeps controls out of the window's bottom edge [S7].
 
 ### Never glass
 
 - the Table and all its rows
 - the line-item editor, `TotalsPanel` and any `MoneyText`
 - the PDF preview and the QR code
-- status badges, KPI tiles, the VAT table, drop zones, the activity log and the v0.1 inline result line
+- status badges, KPI tiles, the v0.2 drop zone, the activity log and the inline result line
 - the Repair mode banner (v0.1.x, §8.18)
 
 The HIG says: "Don't use Liquid Glass in the content layer" [S2]. Also never use:
@@ -360,21 +358,27 @@ The HIG says: "Don't use Liquid Glass in the content layer" [S2]. Also never use
 
 ### Prominence
 
-Only one prominent control per context, on the trailing side [S8]:
-- Draft editor: **Issue…**
-- Unpaid issued document: **Record Payment…**
+One prominent control per context, text only (no symbol), on the trailing side [S8]:
+- draft editor: **Issue…**
+- unpaid issued document: **Record Payment…** (**Record Refund…** on an overpaid one)
+- first-run Overview: **Open Settings…**
+- an empty state: its one action (New Invoice, New Client). Import ČNB Rates… stays `.bordered`, because importing is the secondary path.
+- Settings ▸ Numbering: **Save** (the one pane with a Save button, screens-flows §2i)
+- Stock item detail (when Stock ships): **Count…**, with Receive… beside it as `.bordered`
 - v0.2 queue: **Accept Exact Matches**
+
+The Repair mode bar's End Repair Mode stays `.bordered`. Custom lists highlight with the system selection style (`SelectionShapeStyle`), as the Overview queue already does; that applies to the client suggestion list too, which on main uses the accent at 15 %. How that style resolves, and whether the row text then turns white, is UNVERIFIED; check it on device.
 
 ### Accessibility behaviour
 
 | Setting | System chrome | Custom parts of this app (RECOMMENDATION) |
 |---|---|---|
-| Reduce Transparency | adapts automatically [S1][S5] | v0.2: the Undo toast switches to an opaque `windowBackgroundColor` capsule with a `separatorColor` border (`FloatingSurface` in `App/FA/DesignSystem/FloatingSurface.swift`). Whether system glass already goes opaque for a custom `glassEffect` is UNVERIFIED; keep the fallback until it's checked. v0.1 has no custom glass. |
-| Increase Contrast | adapts automatically | Status badges and the Repair mode banner (v0.1.x) add a 1 pt tone border; the accent switches to its high-contrast variant; tiles and the drop zone get a `separatorColor` border. |
-| Show Borders (macOS 27) | supported [S44] | When `accessibilityShowBorders` is on (back-deployed, macOS 11.0 listing [S67]), borderless custom buttons (the inline result line's "Undo", inline "Change…", the v0.2 toast) get a border. |
+| Reduce Transparency | adapts automatically [S1][S5] | none: the app has no custom glass |
+| Increase Contrast | adapts automatically | Status badges and the Repair mode banner (v0.1.x) add a 1 pt tone border; the accent switches to its high-contrast variant; tiles and the v0.2 drop zone get a `separatorColor` border. |
+| Show Borders (macOS 27) | supported [S44] | When `accessibilityShowBorders` is on (back-deployed, macOS 11.0 listing [S67]), borderless custom buttons (the inline result line's "Undo" and close, inline "Change…") draw `.bordered`. |
 | Liquid Glass slider (27) | — | Test at both ends: ultra clear and fully tinted [S44]. |
 | Reduce Motion | — | Fades instead of slides; no animated blur [S5]. |
-| Inactive window | — | Custom glass dims through `appearsActive` [S83][S84]. |
+| Inactive window | — | none: the app has no custom glass |
 
 ---
 
@@ -389,23 +393,16 @@ All symbols are SF Symbols, monochrome by default. Use hierarchical rendering on
 | **Sidebar** (rows and labels: screens-flows §1.2 and §5) | | | |
 | Overview | `square.grid.2x2` | 10.15 | data |
 | Documents | `text.document` | 15.0 | data |
+| Filters under Documents: Drafts / Unpaid / Open advances | `pencil.circle` / `clock`, which becomes `exclamationmark.circle` with a fixed red tint (`listItemTint`, macOS 11.0 [S66]) while something is overdue / `document.badge.clock` (15.0) | 10.15 unless noted | data |
 | Clients | `person.2` | 10.15 | data |
-| Payments & Bank | `banknote` | 11.0 | data |
+| Payments | `banknote` | 11.0 | data |
 | v0.2 child row: one per bank account | `building.columns` | 11.0 | data |
-| Exchange rates | `arrow.left.arrow.right` | 11.0 | data |
-| Exports & Backup | `externaldrive` | 11.0 | data |
-| Filters under Documents: All / Drafts / Unpaid / Overdue / This month / Open advances | `tray.full` (10.15) / `pencil.circle` / `clock` / `exclamationmark.circle` (fixed red tint via `listItemTint`, macOS 11.0 [S66]) / `calendar` (HIG Date) / `document.badge.clock` (15.0, the advance type symbol) | 10.15 unless noted | data |
-| **Document types** (printed Czech title in brackets) | | | |
-| Invoice – tax document (Faktura – daňový doklad) | `text.document` | 15.0 | data |
-| Advance invoice (Zálohová faktura) | `document.badge.clock` | 15.0 | data |
-| Tax document for received payment, DDPP (Daňový doklad k přijaté platbě) | `receipt` | **15.2** | data |
-| Final invoice, deducts advances (Faktura – daňový doklad (vyúčtování záloh); type name Konečná faktura, ACCT) | `checkmark.seal.text.page` | 15.0 | data |
-| Credit note (Phase 2; Czech term ACCT) | to be chosen; must not reuse `arrow.uturn.backward` (Undo) | — | — |
+| Stock (when it ships) | `shippingbox` | 11.0 | data |
 | **Actions** | | | |
-| New (pull-down) | `plus` | — | HIG (Add) |
-| Issue | `lock.document` | 15.0 | data |
-| Record payment | `banknote` | 11.0 | data |
+| New Invoice, New Stock Item (toolbar) | `plus` | — | HIG (Add) |
+| New Client (toolbar) | `person.badge.plus` | 10.15 | data |
 | Duplicate as draft | `plus.square.on.square` | — | HIG (Duplicate) |
+| Edit client (toolbar) | `pencil` | 10.15 | data |
 | Print | `printer` | — | HIG |
 | Save PDF / Export | `square.and.arrow.up` | — | HIG (Share/Export) |
 | Show PDF in Finder | `folder` | 10.15 | data. The HIG Icons page maps `folder` to "Move to / Folder", not to Reveal in Finder [S20]; RECOMMENDATION. |
@@ -413,30 +410,26 @@ All symbols are SF Symbols, monochrome by default. Use hierarchical rendering on
 | Undo / Redo | `arrow.uturn.backward` / `arrow.uturn.forward` | — | HIG |
 | Search | `magnifyingglass` | — | HIG |
 | Filter | `line.3.horizontal.decrease` | — | HIG |
-| Show inspector | `sidebar.right` | 10.15 | data |
-| Import file (CNB, statement) | `tray.and.arrow.down` | 10.15 | data |
-| Drop target glyph | `arrow.down.document` | 15.0 | data |
-| Drop not allowed | `circle.slash` | 12.0 | data; the HIG drag-and-drop page names it [S23] |
+| Import file (ČNB) | `tray.and.arrow.down` | 10.15 | data |
+| v0.2: drop target glyph / drop not allowed | `arrow.down.document` (15.0) / `circle.slash` (12.0) | as noted | data; the HIG drag-and-drop page names `circle.slash` [S23] |
 | More | `ellipsis` | — | HIG |
-| Keyboard shortcuts help | `keyboard` | 10.15 | data |
 | **Objects and metadata** | | | |
-| Locked / issued | `lock.fill` | 10.15 | data |
+| Locked / issued (the issued view's lock line, and the Payments table's locked payments) | `lock.fill` | 10.15 | data |
 | Issued, unlocked in Repair mode (v0.1.x, §8.18) | `lock.open.fill` | 10.15 | data |
-| Repair mode banner (v0.1.x, §8.18) | `wrench.and.screwdriver.fill` | 11.0 | data |
-| Payment QR | `qrcode` | 10.15 | data |
-| Exchange rate | `arrow.left.arrow.right` | 11.0 | data |
+| Repair mode bar and repair events (v0.1.x, §8.18) | `wrench.and.screwdriver.fill` | 11.0 | data |
 | Fallback rate (weekend/holiday) | `calendar.badge.exclamationmark` | 11.0 | data |
 | Date | `calendar` | — | HIG |
-| Contact person | `person.crop.circle` | — | HIG (Account) |
-| Activity note | `text.pad.header` | **26.0** (replaces `note.text`, deprecated in 26) | data |
-| Activity (log) | `clock.arrow.trianglehead.counterclockwise.rotate.90` | 15.0 | data |
 | Closed advance / marked for credit note | `xmark.circle` / `flag` | 10.15 | data (§4.3) |
-| Blocking issue (in the Issue sheet) | `exclamationmark.triangle` | 10.15 | data; the HIG alerts page says to use it sparingly |
-| VAT rate | `percent` | 10.15 | data |
+| Problem (inline messages, result line, Issue sheet, readiness chip) | `exclamationmark.triangle.fill` | 10.15 | data; the HIG alerts page says to use it sparingly |
+| Information (inline messages, result line) / done (result line) | `info.circle` / `checkmark.circle` | 10.15 | data |
+| Stock-linked line in the editor (when Stock ships) | `shippingbox` (one concept, one symbol with the sidebar row) | 11.0 | data |
+| Stock running low (when Stock ships) | `arrow.down.circle` | 10.15 | data (§4.3) |
 | **Status glyphs** | see §4.3 | | data |
 
-- **VAT treatments** (21 %, reverse charge, outside EU) are **text chips without symbols**. No symbol was clear enough, and the HIG prefers text in lists and tables [S12].
-- **Menus on macOS 27.** SwiftUI hides menu item symbol images in most contexts by default. Show icons only for object or concept items with `.labelStyle(.titleAndIcon)`, and treat a group uniformly: icons for all items or none [S45][S25]. RECOMMENDATION: action menus (Document, Edit) get no icons; the New ▸ submenu shows the four document-type symbols, because those items are objects.
+- **No symbol where it carries no state or action** (RECOMMENDATION). Activity events are a sentence plus a timestamp, with no kind symbol; only Repair mode changes keep `wrench.and.screwdriver.fill`. Overview tiles have no label symbols. The "Select a document" and "Select a client" placeholders are title only. The rate line has no leading symbol; `calendar.badge.exclamationmark` stays on a fallback rate. The prominent Record Payment… and Record Refund… are text only, like Issue…. The issued view's payment rows show no lock; the payment caption says why a payment can't change (screens-flows §2f).
+- **Document types** are text everywhere (§8.1; screens-flows §5 short names), so they have no symbols. The type symbols on main (`text.document`, `document.badge.clock`, `receipt`, `checkmark.seal.text.page`) go with the type chip and the New ▸ submenu; `text.document` stays for the Documents sidebar row and `document.badge.clock` for Open advances.
+- **VAT treatments** are plain text in the goods short forms ("EU goods, exempt", "EU services, reverse charge", "Czech VAT", "Outside EU, services", "Other exemption"), never a chip and never with a symbol. No symbol was clear enough, and the HIG prefers text in lists and tables [S12].
+- **Menus on macOS 27.** SwiftUI hides menu item symbol images in most contexts by default. Show icons only for object or concept items with `.labelStyle(.titleAndIcon)`, and treat a group uniformly: icons for all items or none [S45][S25]. RECOMMENDATION: the menus get no icons. File ▸ New holds New Invoice, New Advance Invoice and New Client… as text items, with no New ▸ submenu (screens-flows §1.4).
 
 ### App icon concept: "List a pečeť" (sheet and seal). RECOMMENDATION
 
@@ -462,7 +455,8 @@ The concept is original and copies no brand.
 
 Every component follows the same rules:
 - built only from standard controls
-- no glass (the v0.2 Undo toast is the one exception)
+- no glass
+- the document type is text everywhere: the screens-flows §5 short names in tables (Invoice · Advance · Tax doc (payment) · Final, long title as tooltip), the long English name with the Czech title in the issued view header and the Issue sheet, and the editor subtitle ("Invoice · Draft · Saved") in a draft. There is no type chip; Document ▸ Change Type ▸ changes a draft's type.
 - all UI strings in English, through the String Catalog (§9); legal and tax strings come only from the §9 legal-strings table
 - all numbers formatted through `FormatStyle`
 
@@ -470,12 +464,12 @@ The sketches are illustrative. The basic views they use (`Text`, `Button`, `Text
 
 ### 8.1 StatusBadge
 
-- **Purpose:** show one document or match state (§4.3) as symbol + word + optional detail.
+- **Purpose:** show one document or match state (§4.3), or Stock's Low (§4.3), as symbol + word + optional detail.
 - **Anatomy:**
   - `Capsule` filled with the tone colour at 14 % opacity
   - an SF Symbol in the tone colour, hierarchical rendering
   - the word in `.primary`, `TextRole.badge`
-  - optional detail ("+12 days · 1 000,00 € left") in `.secondary`
+  - optional detail ("+12 days · 1 000,00 € left") in `.secondary`. The detail follows the label shown (§4.3). In the issued view's header a closing event (Closed unpaid, Marked for credit note) shows no detail; its reason is one selectable `.rowSecondary` line under the header. The Documents table keeps the reason as the badge detail.
 - **States:**
   - *regular*
   - *in a selected, focused row* (`backgroundProminence == .increased`, macOS 14.0 [S54]): no tint fill, monochrome symbol. The prominence is read in a custom `ShapeStyle`, as Apple recommends, because a table cell's top-level view may not see the row's value
@@ -512,7 +506,7 @@ TableColumn("Status") { row in StatusBadge(row.stateInputs, detail: row.statusDe
 - **Anatomy:**
   - a trailing-aligned `TextField` with tabular digits
   - a currency code suffix label ("EUR", "CZK" or "USD", the three v0.1 currencies) outside the text, so Sasa types digits only
-  - an inline error line below, in `.callout`
+  - an inline problem line below (`InlineMessage`, problem kind: `exclamationmark.triangle.fill` in orange, words in `.primary`)
 - **Parsing:**
   - `TextField(_:value:format:prompt:)` (macOS 12.0). "If the format style can't parse the input, the bound value remains unchanged" [S57].
   - Whether the value commits on every keystroke or on submit or focus loss is UNVERIFIED; test it.
@@ -522,13 +516,13 @@ TableColumn("Status") { row in StatusBadge(row.stateInputs, detail: row.statusDe
     - When both "," and "." occur, the last one is the decimal mark and the other is grouping.
     - When only one of them occurs, once, it is the decimal mark, unless it is the UI locale's grouping separator and exactly three digits follow it. So in an English locale that groups with commas, "1,234" is 1234 and "36,5" is 36.5.
     - A mark that occurs more than once is grouping only when every group after it has exactly three digits. Anything else, such as "1.5." or two decimal marks, is invalid and shows the error state.
-    - **Rate fields** (every field that takes an exchange rate: the inline rate form and Change…, §8.9, and the rate sheet behind Add Rate… and Enter Rate…, screens-flows §2g) always read a single "," or "." as the decimal mark. A ČNB rate for EUR or USD is quoted with three decimals and is far below 1 000, so "24,315" is always 24.315.
+    - **Rate fields** (every field that takes an exchange rate: the inline rate form and Change…, §8.9) always read a single "," or "." as the decimal mark. A ČNB rate for EUR or USD is quoted with three decimals and is far below 1 000, so "24,315" is always 24.315.
 - **Locale:** typing follows the **UI locale**, Sasa's habit (the §8.2 rule). The PDF locale applies only to the preview and PDF.
 - **Format:** the field binds with a plain **number** format, `Decimal.FormatStyle(locale:)` (macOS 12.0 [S107]) with two fraction digits via `precision(_:)` (macOS 12.0 [S107]). It does **not** use `Decimal.FormatStyle.Currency`: a currency style puts the symbol or code into the field text, so the currency would show twice next to the suffix label, and parsing could require the symbol. `Currency` is for read-only display (`MoneyText`).
 - **States:**
   - empty (placeholder: zero in the UI locale, such as "0.00" or "0,00")
   - valid
-  - invalid: an error next to the field that says how to fix it: "Enter an amount, such as 1 234,50" (the example in the UI locale) [S19][S28]
+  - invalid: the orange problem line next to the field, with no red outline, saying how to fix it: "Enter an amount, such as 1 234,50" (the example in the UI locale) when the text is not a number, and "Enter an amount greater than zero." for 0 or less in Record Payment and Record Refund [S19][S28]
   - read-only: Issued documents show `LabeledContent` + `MoneyText`, never a disabled field. In Repair mode (v0.1.x, §8.18) they show the normal field.
   - focused
 - **Keyboard:**
@@ -554,49 +548,54 @@ HStack(spacing: Spacing.xs) {
 - **Purpose:** choose the client first; selecting one prefills the draft.
 - **Anatomy:**
   - a text field with the app's own suggestion list drawn under it, on every macOS version (v0.1; ADR 0009 amendments). `textInputSuggestions(_:)` and `textInputCompletion(_:)` (macOS 15.0 [S58]) are not used for the client: they have no room for the final New Client row
-  - each suggestion shows the name, then "IČO · country · default currency · document language · VAT treatment" in `.secondary`
-  - caution chips on suggestions with gaps that would block Issue later: "VAT ID missing", "Address missing"
+  - each suggestion shows the name, then "IČO · country · default currency · document language · VAT treatment" in `.secondary`, with the treatment in its short form ("EUR · 14 days · EU goods, exempt")
+  - problem lines (`InlineMessage`, problem kind) instead of chips, under the field and in the suggestion row: "VAT ID missing" (under either EU treatment, "EU goods, exempt (§ 64)" or "EU services, reverse charge"), "Address missing". The Issue sheet's ⛔ rows still block.
+  - the highlighted suggestion uses the system selection style (`SelectionShapeStyle`), not an accent tint (§6 Prominence)
   - a final suggestion "New Client "…"…", which opens the New Client sheet (screens-flows §2e)
 - **Matching:** name, IČO and VAT ID; insensitive to diacritics and case (RECOMMENDATION; the exact folding API is UNVERIFIED). Sort with `.localizedStandard`, the default comparator of `TableColumn.init(_:value:comparator:)` (macOS 13.5) [S81].
 - **States:**
   - empty: recent clients first
   - typing: filtered
   - no match: "create" option
-  - chosen: the name with the defaults line underneath
+  - chosen: the name with the defaults line underneath. Picking a client applies all of its defaults at once, including its default treatment: "EU business, goods" gives "EU goods, exempt (§ 64)", "EU business, services" gives "EU services, reverse charge" (screens-flows §2c)
   - locked (Issued): plain text
 - **Keyboard:**
   - Focus lands here first in a new draft (`defaultFocus`, macOS 13.0).
   - ↓ and ↑ move the highlight through the list; Return takes the highlighted client (the top one until the highlight moves); Tab accepts and moves to the first line's Description.
   - Esc reverts the field to the chosen client, or empties it when none is chosen.
 - **VoiceOver** (RECOMMENDATION): the highlighted row carries the selected trait, and moving the highlight announces the client's name and defaults line, so the list is usable without sight.
-- **Undo:** "Undo Apply Client Defaults" restores the fields that the client's defaults overwrote [S16].
+- **Undo:** picking a client is one undoable change, like any edit [S16]. A separate "Undo Apply Client Defaults" is deferred with the defaults banner (screens-flows §2c).
 
 ### 8.5 LineItemsEditor
 
 - **Purpose:** fast, spreadsheet-like entry of invoice lines.
 - **Anatomy:**
   - a `Grid` (macOS 13.0) [S78] with a header row
-  - columns: # · Description · Qty · Unit · Unit price · Discount · VAT rate · Total
-  - **Total** is computed, read-only and trailing (`gridColumnAlignment(.trailing)`)
-  - **No currency suffix in the grid cells** (RECOMMENDATION). The document's currency is set once in the header and shows in the totals bar, so the Unit price and Total cells are plain numbers with tabular digits and two decimals ("85,00" in a Czech-format locale). The MoneyField suffix (§8.3) is for standalone amount fields.
+  - columns: Description · Qty · Unit · Unit price · [Discount %] · [VAT rate] · Line total, then the row's problem marker. Five columns show by default.
+  - **Line total** is computed, read-only and trailing (`gridColumnAlignment(.trailing)`)
+  - **No currency suffix in the grid cells** (RECOMMENDATION). The document's currency is set once in the header and shows in the totals bar, so the Unit price and Line total cells are plain numbers with tabular digits and two decimals ("85,00" in a Czech-format locale). The MoneyField suffix (§8.3) is for standalone amount fields.
   - **VAT rate follows the document's VAT treatment** (document-level rule, RECOMMENDATION; the same rule as screens-flows §2c):
-    - *Czech 21 %* (the screens-flows §5 label; printed "Tuzemsko 21 %", §9 table): a text field with suggestions "21", "12" and "0" (keyboard-only, no pop-up to Tab past). Neither reverse charge nor exempt is offered per line: both are document-level treatments (ADR 0009).
-    - *EU reverse charge* (printed "EU – přenesená daňová povinnost", §9 table; the default for a new client, §8.12): every line is locked to "RC" (tooltip "EU reverse charge"; RECOMMENDATION, screens-flows §2c); VAT amounts are hidden.
-    - *Outside EU* and *Exempt*: ACCT.
-    - Mixed documents (some lines reverse charge, some not) only if the accountant confirms them; then TotalsPanel gains a reverse-charge base row.
+    - *Czech VAT (rate per line)*: the VAT rate column shows, a text field with suggestions "21", "12" and "0" (keyboard-only, no pop-up to Tab past). Neither reverse charge nor an exemption is offered per line: all are document-level treatments (ADR 0009).
+    - *EU goods, exempt (§ 64)* (the build's ADR 0011; the usual treatment for a new EU business client, §8.12): the VAT rate column and the VAT amounts are hidden. The printed treatment text and clause are ACCT (§9 table).
+    - *EU services, reverse charge* (printed "daň odvede zákazník", §9 table): the VAT rate column and the VAT amounts are hidden.
+    - *Outside EU, services* and *Other exemption*: the same; their printed texts are ACCT.
+    - The header and the totals bar state the treatment once; no line carries an "RC" or other marker.
+    - Mixed documents (some lines under one treatment, some under another) only if the accountant confirms them.
     - All rate and treatment labels are ACCT strings (§9 legal-strings table).
-  - Unit offers suggestions (ks, hod, den, MD, km) plus free text. The unit is document text and prints as typed.
-- **Suggestions:** the description cell suggests earlier items with their last unit, price, VAT rate and discount, via `textInputSuggestions` [S58]. Accepting one fills the row.
+  - **Discount %** is hidden until a line has a discount. It is added with the line's context menu Add Discount or Document ▸ Add Discount, and it disappears when no line has one.
+  - **Unit** is a text field. On macOS 15 and later (behind the version check) it offers ks, hod, den, MD and km as `textInputSuggestions` [S58]; on macOS 14 it is plain text. There is no chevron menu. The unit is document text and prints as typed.
+  - **Stock link** (when Stock ships, screens-flows §2n): a linked line shows `shippingbox` (§7) at the trailing edge of its Description cell, with the tooltip and VoiceOver label "Takes from stock: Bolt M8 (120 ks on hand)"; on an advance, which takes nothing, "Bolt M8 (120 ks on hand) leaves stock with the final invoice". There is no stock column.
+- **Suggestions:** the description cell suggests earlier items with their last unit, price, VAT rate and discount, via `textInputSuggestions` [S58]. Accepting one fills the row. When Stock ships, stock items whose name matches come first, each with its on-hand figure as secondary text ("120 ks in stock"), on Invoice, Advance invoice and Final invoice drafts, never on a DDPP; the list ends with "Add “‹typed text›” to Stock…" (screens-flows §2n).
 - **States:**
   - draft: editable
   - issued: read-only text, selectable
-  - row invalid: a trailing `exclamationmark.triangle` with a tooltip explaining the fix, and the Issue sheet lists it
+  - row invalid: the orange `exclamationmark.triangle.fill` beside the cell, with a tooltip, an accessibility label and a fix-it `accessibilityHint`, and no red outline; the Issue sheet lists it by line and column
   - empty: one blank row with placeholder text
   - **fully empty trailing lines** (e.g. after ↩ on the last row): exist on screen only. All of them are dropped on save and at issue, never counted as invalid and never printed.
 - **Keyboard** (RECOMMENDATION; the authoritative map is screens-flows §3.1):
   - **Tab / ⇧Tab** move to the next or previous cell. Tab on the last cell of the last row appends a row. Whether the system Tab order follows `Grid` row order is UNVERIFIED; drive it with `@FocusState` and `focused(_:equals:)` (macOS 12.0) [S65] if not.
   - **Return** moves down one row in the same column. On the last row it appends a new row and focuses its description (`onSubmit`).
-  - **Delete Line and Move Line Up / Down have no shortcut in v0.1.** They live in Document ▸ and in the row's context menu. A grid of text fields has no "row focused" state for ⌫, and a menu key equivalent such as ⌘⌫ fires even while a cell's text field is being edited (in Finder ⌘⌫ means "Move the selected item to the Trash" [S106]; what it does inside a text field is UNVERIFIED). Deleting a line can be undone and shows no alert [S15].
+  - **Delete Line and Move Line Up / Down have no shortcut in v0.1.** They live in Document ▸ and in the row's context menu (Insert Line Below · Move Up · Move Down · Add Discount · Don't Take from Stock | Delete Line). A grid of text fields has no "row focused" state for ⌫, and a menu key equivalent such as ⌘⌫ fires even while a cell's text field is being edited (in Finder ⌘⌫ means "Move the selected item to the Trash" [S106]; what it does inside a text field is UNVERIFIED). Deleting a line can be undone and shows no alert [S15].
   - Reorder by drag with `reorderable()` on the `ForEach`, inside a container that declares `reorderContainer(for:isEnabled:move:)` (both macOS 27.0) [S46][S99]. Fallback A: menu commands only.
   - **No hover-only delete buttons.** The HIG asks for touch-Mac equivalents for hover-only actions [S30]. Use the context menu and the menu bar instead.
 
@@ -616,7 +615,7 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
                 .monospacedDigit()
                 .gridColumnAlignment(.trailing)
         }
-        .contextMenu { lineMenu(line.id) }                 // Delete Line, Move Up, Move Down
+        .contextMenu { lineMenu(line.id) }                 // Insert Line Below · Move Up · Move Down · Add Discount · Don't Take from Stock | Delete Line
     }
     .reorderable()                                         // DynamicViewContent, macOS 27.0
 }
@@ -629,33 +628,39 @@ Grid(alignment: .leading, horizontalSpacing: Spacing.s, verticalSpacing: Spacing
 ### 8.6 TotalsPanel
 
 - **Purpose:** show every legally relevant total, always visible.
-- **Placement:** the top of the inspector, plus the compact totals bar at the top of the editor [S7].
+- **Placement:** the compact totals bar pinned at the top of the draft editor (`safeAreaInset`, edge `.top`, as built), and the issued view's figures [S7].
 - **Which blocks appear depends on the document kind** (RECOMMENDATION, matching screens-flows §2d):
 
   | Block | Invoice | Advance | DDPP | Final |
   |---|---|---|---|---|
   | Per-rate block, Rate · Base · VAT | ✓ | ACCT (whether the advance shows a VAT breakdown) | ✓ | ✓ |
   | VAT in CZK + rate line (EUR and USD documents) | ✓ | **never** (no DUZP, no rate) | ✓, rate for the payment date (ACCT) | ✓ |
-  | Advances deducted, as negative amounts, with the VAT already taxed in CZK | — | — | — | ✓ |
-  | Amount due (printed "K úhradě") | ✓ | ✓ | — (nothing payable) | ✓ |
-  | Legal note | "daň odvede zákazník" when the document treatment is EU reverse charge | the not-a-tax-document clause (`DocumentClause.notATaxDocument`, §9 table, ACCT) | — | as Invoice |
+  | Advances deducted, as negative amounts, with the VAT already taxed in CZK; or Paid in advance (EU goods, no VAT columns) | — | — | — | ✓ |
+  | Amount due (printed "K úhradě") | on the PDF ✓; in the bar only when something is deducted | on the PDF ✓; in the bar only when something is deducted | — (nothing payable) | ✓ |
+  | Legal note | "daň odvede zákazník" when the document treatment is EU services, reverse charge; the § 64 clause under EU goods, exempt (ACCT) | the not-a-tax-document clause (`DocumentClause.notATaxDocument`, §9 table, ACCT) | — | as Invoice |
 
-- **Anatomy:**
-  - **Per-rate block** (`Grid`, trailing columns): Rate · Base · VAT, with a CZK column on EUR and USD tax documents.
-  - **Totals:** Base; VAT; **VAT in CZK** (EUR and USD tax documents; the rate line from 8.9 sits right under it); Total.
-  - **Final invoice only:** one deduction line per advance, labelled with the advance and DDPP numbers ("Advances deducted"); the printed wording ("Odečet zálohy …") is ACCT.
+- **The editor's totals bar** (screens-flows §2c) shows one figure per fact:
+  - Czech VAT: "Base 4 000,00 € · VAT 840,00 € · Total 4 840,00 €", plus "VAT in CZK 20 424,60 Kč" on EUR and USD documents.
+  - No-VAT treatments: one figure with the treatment, "Total 3 142,50 € · Exempt (§ 64)" (EU goods), "Total 3 142,50 € · Reverse charge" (EU services), "Total … · Outside EU, services" or "Total … · Other exemption".
+  - Amount due only when something is deducted. A final invoice adds the deduction and "Amount due", and under Czech VAT keeps the VAT after advances. An EU-goods final invoice reads "Total 10 000,00 € · Exempt (§ 64)" / "Paid in advance −4 000,00 €" / "Amount due 6 000,00 €"; the § 64 value is never reduced.
+  - On EUR and USD tax documents, the rate line (§8.9) under the figures.
+- **Anatomy** (the PDF and the issued view's figures keep every printed total, VAT per rate included):
+  - **Per-rate block** (`Grid`, trailing columns): Rate · Base · VAT, with a CZK column on EUR and USD tax documents; Czech VAT only.
+  - **Totals:** Base; VAT; **VAT in CZK** (when Czech VAT is charged on an EUR or USD tax document; the rate line from §8.9 sits right under it); Total.
+  - **Final invoice only:** one deduction line per advance, labelled with the advance and DDPP numbers ("Advances deducted"), or, for EU goods, "Paid in advance" with one row per payment (advance number · day paid · amount paid) and no VAT columns. The printed wording ("Odečet zálohy …", "Uhrazené zálohy / Advances paid") is ACCT.
   - **Amount due**, in `TextRole.total`.
-  - **Legal notes** (`TextRole.legalNote`, with a symbol), from the §9 legal-strings table, never typed inline:
-    - "daň odvede zákazník", exactly the brief's lowercase string, when the **document's** VAT treatment is EU reverse charge. Whether it may be capitalised at the start of a printed line is ACCT.
-    - the not-a-tax-document clause from the §9 table (InvoicingCore `DocumentClause.notATaxDocument`: "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby.", ACCT), on an advance invoice
+  - **Legal notes** (`TextRole.legalNote`), from the §9 legal-strings table, never typed inline:
+    - "daň odvede zákazník", exactly the brief's lowercase string, when the **document's** VAT treatment is EU services, reverse charge. Whether it may be capitalised at the start of a printed line is ACCT.
+    - the § 64 clause and § 29 odst. 2 písm. a) reference under EU goods, exempt (§9 table, ACCT)
+    - the not-a-tax-document clause from the §9 table on an advance invoice: "Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby." (InvoicingCore `DocumentClause.notATaxDocument`), or only "Toto není daňový doklad." on a goods-only EU advance, which gets no payment tax document (the build's ADR 0012; ACCT)
 - **States:**
   - draft: live recalculation
-  - issued: the lock glyph, values frozen (in Repair mode, v0.1.x: the open lock, values editable, §8.18)
-  - missing rate (tax documents only): the CZK cells show "—" and an **inline rate form** "EUR rate for 30. 10. 2026 missing" with a rate field, the needed publication date prefilled, and ↩ to save (the same form as in the Issue sheet, §8.16). Typing the rate here is the v0.1 primary path (§8.9).
+  - issued: values frozen; the issued view's lock line says so, and the panel draws no lock of its own (§8.18). In Repair mode (v0.1.x) the values are editable (§8.18).
+  - missing rate (tax documents only): the CZK cells show "—" and the **inline rate form** (§8.9) takes the rate line's place, the same form as in the Issue sheet (§8.16). Typing the rate here is the v0.1 primary path.
   - mismatch: a VAT rounding note
 - **Keyboard:** read-only. The values are selectable. Tab skips the panel.
 - **Never glass, never colour-coded** (P1).
-- **Sums across documents** (Overview tiles, the VAT table, selection totals, the CSV) never add up TotalsPanel values naively. They follow the **aggregation rules** in screens-flows §2a: VAT only from tax documents, advances never as revenue, Unpaid split from unpaid advances.
+- **Sums across documents** (Overview tiles, the multi-selection summary, the CSV) never add up TotalsPanel values naively. They follow the **aggregation rules** in screens-flows §2a: VAT only from tax documents, advances never as revenue, Unpaid split from unpaid advances, and a final invoice's revenue net only of the advances it deducts through issued DDPPs (a "Paid in advance" deduction doesn't reduce it).
 
 ```swift
 Grid(horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
@@ -672,70 +677,41 @@ Grid(horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
 }
 ```
 
-### 8.7 DocumentTypeChip
+### 8.7 Document type (no component)
 
-- **Purpose:** show the document type in the editor header, the table and the Issue sheet.
-- **Anatomy:**
-  - the type symbol (§7)
-  - a short name, from the screens-flows §5 label table: Invoice · Advance · Tax doc (payment) · Final. If Czech names are ever added (a bonus, not in scope), never use a bare "Záloha", which also means backup.
-  - an outline capsule in `separatorColor`
-  - **No tint**: a type is not a status (P4).
-- **States:**
-  - draft: a `Menu` that switches between Invoice, Advance and Final (screens-flows §1.4). Switching is undoable and keeps the lines. A tax document for a received payment is never offered, and on its own draft the chip is static, as when issued (ADR 0009).
-  - issued: static, because the type is immutable after issue
-  - in the table: symbol only, with a tooltip
-- **Keyboard:** in a draft the menu is focusable, and Space opens it. Whether Tab reaches it with Full Keyboard Access off is UNVERIFIED, so Document ▸ Change Type ▸ (with a checkmark on the current type) and the palette offer the same choice without Tab.
+There is no `DocumentTypeChip`. The type is text everywhere (the §8 rule above): the short name in tables, the long English name with the Czech title in the issued view header and the Issue sheet, and the editor subtitle in a draft. Document ▸ Change Type ▸ (checkmarked items) changes a draft's type between Invoice, Advance invoice and Final invoice; a tax document for a received payment keeps its type (ADR 0009). If Czech names are ever added (a bonus, not in scope), never use a bare "Záloha", which also means backup.
 
-```swift
-Menu {
-    ForEach(DocumentKind.allCases.filter { $0 != .paymentTaxDocument }) { k in Button { kind = k } label: { Label { Text(k.title) } icon: { Image(systemName: k.symbol) } } }
-} label: { Label { Text(kind.shortTitle) } icon: { Image(systemName: kind.symbol) } }
-.menuIndicator(isDraft && kind != .paymentTaxDocument ? .visible : .hidden)   // menuIndicator macOS 12.0
-.disabled(!isDraft || kind == .paymentTaxDocument)
-```
+### 8.8 The printed QR (no in-app component)
 
-### 8.8 QRPreview
-
-- **Purpose:** preview the payment QR exactly as it will print, with the same data in plain text beside it.
-- **Why the plain text:** the EPC guideline assumes the data is "also shown at the same time in plain text" [S95].
-- **Anatomy:**
-  - a square QR image, black on white in both appearances, because it is content
-  - a caption with the standard's name: "QR Platba" or "EPC QR (SEPA)"
-  - the data block: IBAN, BIC, amount, currency, VS or reference, due date, all selectable
-  - a type pop-up, defaulting from the client: QR Platba / EPC QR (SEPA) / None. Build note (v0.1): the client model has no QR-type field and the editor no type pop-up yet; the QR type follows the currency (`PaymentInstructions.standard`) until they exist (screens-flows §2c)
-- **Defaults and sizing:**
-  - Czech client paying in CZK gets QR Platba; EU client paying in EUR gets EPC (RECOMMENDATION).
-  - USD (the third v0.1 currency): which QR standard, if any, fits a USD payment is UNVERIFIED. Until it is checked, a USD document defaults to None (RECOMMENDATION).
-  - Error correction M and about 30 mm at print size [S94][S95].
-  - The caption wording is not required by either standard (HEURISTIC). Use one name everywhere, in the UI and printed under the code: **"QR Platba"** and **"EPC QR (SEPA)"**.
-- **States:**
-  - valid (issued documents only)
-  - **draft:** no scannable QR, in the app **and in print or Quick Look**. A placeholder box of the same size takes its place, because a draft has no number and no VS yet, so a payment made from its QR could never be matched. In the app's QRPreview (inspector) the placeholder reads "QR after issue" (UI label, screens-flows §5). On the draft PDF (the PDF preview, print and Quick Look) it is document text: "QR po vystavení / QR after issue", or "QR po vystavení" alone on a Czech document (screens-flows §2c, §5).
-  - not payable (balance 0, or a DDPP): "No QR – nothing to pay"
-  - missing data (no IBAN, BIC or VS): a reason plus "Add Account…", which opens Settings ▸ Bank accounts
-  - payload too long: EPC allows at most 331 bytes, and unstructured remittance at most 140 characters [S95]
-  - code unavailable on an issued document (the core refuses the payload, or the code can't be generated from it): the PDF prints "QR kód není k dispozici" (with " / QR code unavailable" on a bilingual document) in the code's place, never a silent gap, and the payment details beside it still let the customer pay (ADR 0010)
-- **Keyboard:** the type pop-up is focusable. ⌘C on the data block copies the IBAN.
-- **VoiceOver:** "QR code for a payment of 1 234,50 euros to account CZ65 …, variable symbol 120260042" (the series-prefixed VS, screens-flows §2i).
-- **SwiftUI:** a Core Image QR rendered into an `Image`. The bridging initialiser and `interpolation(.none)` are not in the research, so they're marked `// verify`.
+v0.1 has no in-app QR image and no QR choice: no pop-up in the editor, no Document ▸ QR ▸, no client QR field. The QR exists only on the issued PDF (the issued view's PDF pages and print).
+- **Type by currency** (as built, `PaymentInstructions.standard`): CZK gets **QR Platba**, EUR gets **EPC QR (SEPA)**, USD gets none. The Issue sheet's Payment row names the type with the account and the predicted VS.
+- **Why the payment details print beside it:** the EPC guideline assumes the data is "also shown at the same time in plain text" [S95]. In the app the payment details are selectable text (IBAN and VS).
+- **Sizing:** error correction M and about 30 mm at print size [S94][S95], black on white.
+- **Caption:** one name everywhere, printed under the code: **"QR Platba"** and **"EPC QR (SEPA)"**. The wording is not required by either standard (HEURISTIC).
+- **Draft:** no scannable QR, in the preview **and in print**. A placeholder box of the same size takes its place, because a draft has no number and no VS yet, so a payment made from its QR could never be matched. It is document text: "QR po vystavení / QR after issue", or "QR po vystavení" alone on a Czech document (screens-flows §2c, §5).
+- **Nothing to pay** (a DDPP, or a final invoice with an amount due of 0 or less): no QR and no payment block.
+- **Payload limits:** EPC allows at most 331 bytes, and unstructured remittance at most 140 characters [S95].
+- **Code unavailable** on an issued document (the core refuses the payload, or the code can't be generated from it): the PDF prints "QR kód není k dispozici" (with " / QR code unavailable" on a bilingual document) in the code's place, never a silent gap, and the payment details beside it still let the customer pay (ADR 0010).
+- **No account for the currency:** the Issue sheet's ⛔ row "The document has no bank details." with Fill in…, which opens Settings ▸ Bank Accounts, blocks Issue; no QR surface shows it.
+- **VoiceOver:** the PDF page that carries the code gets the description as its accessibility value, "QR code for a payment of 1 234,50 euros to account CZ65 …, variable symbol 120260042" (the series-prefixed VS, screens-flows §2i); a draft's page reads "QR after issue". The renderer (`Sources/InvoicingPDF/DocumentPDF.swift`), which draws the code, hands the description and the page index to the PDF page view. On main every page reads only "Page 1 of 2".
 
 ### 8.9 ExchangeRateRow
 
 - **Purpose:** show where every CZK figure comes from (P6), and take the rate Sasa types.
-- **v0.1: typing the rate is the primary path.** Sasa's answer in the proposal doc, 5 Nov 2026: "for start everything that nmeeds to be online i willů do manualy, s ill type current cnb rate for each invoice". So Sasa types the ČNB rate on the document, in the draft editor. It is the rate for the DUZP; for a weekend or holiday, the last published rate. Importing a ČNB file is a secondary action in the Exchange rates section (§8.13).
+- **v0.1: typing the rate is the primary path.** Sasa's answer in the proposal doc, 5 Nov 2026: "for start everything that nmeeds to be online i willů do manualy, s ill type current cnb rate for each invoice". So Sasa types the ČNB rate on the document, in the draft editor. It is the rate for the rate day (the DUZP; for § 64 goods the § 22 odst. 1 day, `Document.exchangeRateDay`, the build's ADR 0011); for a weekend or holiday, the last published rate. Importing a ČNB file is secondary: File ▸ Import ČNB Rates…, the Exchange Rates sheet and the form's own button (screens-flows §2g).
 - **Anatomy:**
-  - `arrow.left.arrow.right`
-  - "1 EUR = 24,315 Kč" (or "1 USD = …") with tabular digits; illustrative values, formatted by the UI locale
-  - "ČNB · 30. 10. 2026": always the **rate's own publication date**, never the DUZP or the payment date it is used for. The date comes from `Date.FormatStyle`, never a fixed format string.
+  - one line, "1 EUR = 24,315 CZK · for 30. 10. 2026 · Typed" (or "· ČNB file"), with tabular digits and no leading symbol; illustrative values, formatted by the UI locale. In a draft, Change… follows it.
+  - the date is always the **rate's own publication date**, never the rate day or the payment date it is used for. The date comes from `Date.FormatStyle`, never a fixed format string.
   - a source tag: "Typed" or "ČNB file". A typed rate is saved to the same Exchange rates list as imported ones, with source "Typed" (InvoicingCore `ExchangeRateSource.manual`, saved by InvoicingData `RateStore.save`).
 - **States:**
-  - **missing** (the usual start in v0.1): an inline rate form "EUR rate for 30. 10. 2026 missing" (the document's currency, so "USD rate for …" on a USD document). The rate field takes focus, the needed publication date is prefilled, and ↩ saves. An optional **Open ČNB Rates Page** link may follow (RECOMMENDATION, still open as Q7; screens-flows §2g has its source and the UNVERIFIED sandbox note). A secondary "Import ČNB Rates…" button follows it, and the row also accepts a dropped ČNB file.
+  - **missing** (the usual start in v0.1): the inline rate form, "EUR rate for 30. 10. 2026 missing" (the document's currency, so "USD rate for …" on a USD document; the day is the rate day's publication day), one rate field, **Save Rate** (↩, source "Typed"; as built), then the secondary "Import ČNB Rates…" (`.bordered`, a file dialog). The rate field has initial focus in the Issue sheet; in the editor, Document ▸ Enter Rate… moves focus to it. There is no date picker and no drop target; a bad value shows the orange fix-it line ("Enter the rate as a number, such as 24,315"), with no red outline. An optional **Open ČNB Rates Page** link may follow (RECOMMENDATION, still open as Q7; screens-flows §2g has its source and the UNVERIFIED sandbox note).
   - typed: source "Typed"
   - imported: source "ČNB file"
   - **fallback:** `calendar.badge.exclamationmark` plus "last published rate (weekend/holiday)", for example "ČNB 30. 10., last published" on a DUZP of Saturday 31. 10. 2026.
-  - **stale:** the rate's date is more than 7 days before the DUZP (InvoicingCore `DocumentValidator.exchangeRateStaleAfterDays = 7`). This is a warning, not a blocker. The row shows the validator's text, "The exchange rate is from {detail}, more than a week before the date of supply; check that the rate table is complete." ({detail} is the rate's date), and the Issue sheet lists it as a ⚠ Check row (§8.16).
-  - issued: frozen, with a lock. In Repair mode (v0.1.x) it shows the open lock and "Change…" works again (§8.18).
-- **Which rate applies to a DUZP** (that day's rate, or the previous publication day's, depending on publication time) is a legal rule: ACCT. The resolver is one unit-tested function (screens-flows §2g).
+  - **after the rate day:** blocked, "The rate date cannot be after ‹day›, the day this document needs the rate for." (`exchangeRateAfterTaxPoint`, text from the build's PR 21).
+  - **stale:** the rate's date is more than 7 days before the rate day (InvoicingCore `DocumentValidator.exchangeRateStaleAfterDays = 7`). This is a warning, not a blocker. The row shows the validator's text, "The exchange rate is from {detail}, more than a week before the day the document needs the rate for; check that the rate table is complete." ({detail} is the rate's date; PR 21), and the Issue sheet lists it as a ⚠ Check row (§8.16).
+  - issued: a frozen row in the issued view's figures; the lock line covers it, and it draws no lock of its own. In Repair mode (v0.1.x) "Change…" works again (§8.18).
+- **Which rate applies to a rate day** (that day's rate, or the previous publication day's, depending on publication time) is a legal rule: ACCT. The resolver is one unit-tested function (screens-flows §2g).
 - **Keyboard:** in a draft, "Change…" opens a popover with the rate and date fields; Return saves, Esc cancels.
 
 ```swift
@@ -754,12 +730,14 @@ LabeledContent {
 ### 8.10 EmptyState
 
 - **Purpose:** say what is missing and offer the one next step [S19].
-- **SwiftUI:** `ContentUnavailableView(label:description:actions:)`, macOS 14.0 [S76], with one `.borderedProminent` button (macOS 12.0) and the shortcut shown in the description.
+- **SwiftUI:** `ContentUnavailableView(label:description:actions:)`, macOS 14.0 [S76], with one `.borderedProminent` button (macOS 12.0) and the shortcut shown in the description, where the command has one. Detail-column placeholders ("Select a document", "Select a client", "Select an item") are title only, with no symbol and no description.
 - **Examples:**
-  - Documents: "No documents yet" + "New Invoice (⌘N)"
+  - Documents: "No documents yet" + "Press ⌘N to create your first invoice." + New Invoice
   - Search: `ContentUnavailableView.search`
-  - Exchange rates: "No rates yet" + "Rates you type on a document appear here." The one action is "Import ČNB Rates…" as a plain `.bordered` button (macOS 10.15 [S114]), not the prominent style, because importing is the secondary path (§8.9). The FileDropZone sits under it.
-  - Overdue: "Nothing overdue" with `checkmark.circle`. This is the only positive empty state, and it is calm, not celebratory [S36].
+  - Clients: "No clients yet" + the built description + New Client (no shortcut in the description, because File ▸ New Client… has none)
+  - Exchange Rates sheet: "No rates yet" + "Rates you type on a document appear here." It has no button of its own, because the sheet's button row carries Import ČNB Rates… (`.bordered`, the secondary path, §8.9).
+  - Unpaid filter: "Nothing overdue" with `checkmark.circle` and "Every issued invoice is paid." This is the only positive empty state, and it is calm, not celebratory [S36].
+  - Stock (when it ships): "No stock items yet" + "Add the things you keep on the shelf to see what's running low." + New Stock Item…
 - **No blocking setup wizard at first launch.** The Overview shows the non-blocking "Getting started" checklist specified in screens-flows §2j. It has no import step: Sasa's current tool is a "poverty self made unsuccesful local app" (Sasa's answer in the proposal doc, 5 Nov 2026), so there is nothing to import. Missing company details are also listed as ⛔ in the Issue sheet [S31]. The HIG also says to avoid alerts at app launch [S15].
 
 ```swift
@@ -771,109 +749,81 @@ ContentUnavailableView {
 
 ### 8.11 Toolbar sets per screen
 
-Each screen has at most three groups and at most one prominent item, on the trailing side [S8]. Search sits trailing in the toolbar [S27]. Every item is also in the menu bar [S8]. **This is the one toolbar table**; screens-flows refers to it.
+Every toolbar is **fixed**: a plain `.toolbar {}` with no `toolbar(id:)`, so it can't be customised. Each screen has at most four items plus search, and at most one prominent item, text only, on the trailing side [S8]. Search sits trailing in the toolbar [S27]. Every item is also in the menu bar [S8]. **This is the one toolbar table**; screens-flows refers to it. Tooltips are sentence case, 60–75 characters at most, and don't repeat the label.
 
-| Screen | Leading (system) | Centre (customisable) | Trailing |
-|---|---|---|---|
-| Overview | sidebar toggle, "Overview" | New ▾ | search |
-| Documents list | toggle, "Documents", subtitle such as "12 unpaid" (`navigationSubtitle`, macOS 13.0) | New ▾ · Duplicate · Record Payment · Print | search · inspector |
-| Draft editor (main-window detail or its own window) | toggle; title: the client name, or "New Invoice" before a client is chosen; subtitle "Draft · Saved" (screens-flows §2c) | Preview toggle · Duplicate | inspector · **Issue…** (prominent) |
-| Issued, unpaid | toggle, number | Print · Save PDF · Duplicate | inspector · **Record Payment…** (prominent) |
-| Issued, paid | toggle, number | Print · Save PDF · Duplicate | inspector |
-| Clients | toggle, "Clients" | New Client · New Document for Client | search · inspector |
-| Payments & Bank | toggle, "Payments & Bank" | Record Payment · Filter | search |
-| Exchange rates | toggle, "Exchange rates" | Add Rate… · Import ČNB Rates… (secondary; typing on the document is the v0.1 primary path, §8.9) | search |
-| Bank statement triage (v0.2) | toggle, statement name | Import Statement… · Filter | search · **Accept Exact Matches (N)** (prominent; the only place for bulk accept) |
+| Screen | Title and subtitle (system, leading) | Items (leading to trailing) |
+|---|---|---|
+| Overview | "Overview" | New Invoice (`plus`, "Create a new invoice"). No search. |
+| Documents list | "Documents"; subtitle such as "Unpaid · 3" or "Unpaid · 7 · 3 overdue" (`navigationSubtitle`, macOS 13.0) | New Invoice (`plus`, "Create a new invoice") · search ("Search documents") |
+| Draft editor | the client name, or "New Invoice" before a client is chosen; subtitle "Invoice · Draft · Saved" (screens-flows §2c) | Preview toggle (View ▸ Show/Hide Preview, "Show or hide the PDF preview") · **Issue…** (prominent) |
+| Issued, accepts a payment | the number | Duplicate (`plus.square.on.square`, "Copy this document into a new draft") · **Record Payment…** (prominent) |
+| Issued, overpaid | the number | Duplicate · **Record Refund…** (prominent, "Record money returned to the client") |
+| Issued, settled (paid; a closed advance; an advance deducted or settled by a final invoice; marked for a credit note) | the number | Duplicate |
+| Tax document for a received payment | the number | no items; its commands are in the File and Document menus |
+| Clients list | "Clients" | New Client (`person.badge.plus`, "Add a client") · search ("Search clients") |
+| Client page | the client name | New Invoice (`plus`, "Create an invoice for Acme GmbH") · Duplicate (`plus.square.on.square`, "Duplicate FV 2026-0038 as a new draft"; disabled when the client has no invoice) · Edit… (`pencil`, "Edit this client's details") |
+| Payments | "Payments" | search ("Search payments"); a selected payment's document brings its issued-view items into the detail toolbar |
+| Stock list (when it ships) | "Stock" | New Stock Item (`plus`, "Add a stock item") · search ("Search stock") |
+| Stock item (when it ships) | the item name | Receive… (text, "Add goods that arrived") · **Count…** (prominent, "Set the number on hand after counting the shelf") |
+| Bank statement triage (v0.2) | statement name | Import Statement… · Filter · search · **Accept Exact Matches (N)** (prominent; the only place for bulk accept) |
 
-Bulk actions on a multi-selection (Save PDFs to Folder…, Export CSV…, Print) live in this toolbar, the menus, the context menu and the inspector's multi-selection view, never in the bottom status bar [S32].
+- **Not in any toolbar:** a New ▾ pull-down, Print, Save PDF (the issued view's PDF row has them, screens-flows §2b), an inspector toggle, Customize Toolbar…, and bulk items for a multi-selection. Bulk actions live in the menus and the context menu, never in a bottom status bar [S32].
+- **Issued advances.** The chain line's one `.bordered` next-step button (Create Tax Document or Create Final Invoice, screens-flows §2d) is the place for the next step, so the toolbar has no Create Final Invoice. Main shows it in the toolbar (`MainSplitView.swift`); it stays there until the chain line ships. An unpaid advance's next step is the prominent Record Payment….
+- **Sheets have no toolbar.**
 
 **Implementation**
-- **Placement.** Don't use `.primaryAction` for these items: on macOS "the location for the primary action is the leading edge of the toolbar" [S103], while the HIG puts the one prominent action on the trailing side [S8]. Use the default `.automatic` placement, which on macOS places items "in the current toolbar section in order of leading to trailing" [S103]. That the resulting items sit at the trailing edge, next to search and the inspector toggle, is UNVERIFIED; check the result on device and adjust the order. `.principal` is the centre of the toolbar on macOS [S103], which suits nothing here.
-- **New ▾:** `Menu(_:content:primaryAction:)` (macOS 13.0). A click makes a new invoice; the menu holds the advance invoice, the DDPP and the final invoice. A pull-down needs at least three items [S35].
-- **Grouping:** `ToolbarSpacer(.fixed)` (macOS 26.0) separates groups [S74].
-- **Narrow windows:** `visibilityPriority(_:)` (macOS 26.1) keeps New and the prominent item visible longer. `ToolbarItemVisibilityPriority` has `.automatic`, `.low` and `.high`, plus `init(lowerThan:)` and `init(higherThan:)`; lower-priority items move into the overflow menu first [S74].
+- **Placement.** Don't use `.primaryAction` for these items: on macOS "the location for the primary action is the leading edge of the toolbar" [S103], while the HIG puts the one prominent action on the trailing side [S8]. Use the default `.automatic` placement, which on macOS places items "in the current toolbar section in order of leading to trailing" [S103], and declare the prominent item last. That it then sits trailing next to search is UNVERIFIED; check the result on device. `.principal` is the centre of the toolbar on macOS [S103], which suits nothing here.
+- **New Invoice:** a plain `Button` with `plus`. A pull-down returns only with three real items [S35].
+- **Grouping:** `ToolbarSpacer(.fixed)` (macOS 26.0) [S74] goes only between Receive… and Count… on the Stock item, under `#if compiler(>=6.2)` and `if #available(macOS 26, *)`.
+- **Narrow windows:** `visibilityPriority(_:)` (macOS 26.1) keeps New Invoice and the prominent item visible longer. `ToolbarItemVisibilityPriority` has `.automatic`, `.low` and `.high`, plus `init(lowerThan:)` and `init(higherThan:)`; lower-priority items move into the overflow menu first [S74].
 - **Prominent style:** which SwiftUI style renders the HIG's toolbar `.prominent`, `.glassProminent` (macOS 26.0) or `.borderedProminent`, is UNVERIFIED.
 - **Overflow:** don't add an overflow menu by hand [S8].
+- **Show/Hide Toolbar** (⌥⌘T) stays. First check on macOS 27.2 what `ToolbarCommands()` (as built) lists with fixed toolbars. If Customize Toolbar… is absent, `ToolbarCommands()` stays. Only if it shows does `CommandGroup(replacing: .toolbar)` replace it: one item whose label shows the state ("Hide Toolbar" / "Show Toolbar"), toggling `@SceneStorage("toolbarHidden")`, applied with `toolbar(_:for: .automatic)` on macOS 14 and `toolbarVisibility(_:for:)` under `if #available(macOS 15, *)`, since `toolbar(_:for:)` is deprecated at macOS 27.3. It never uses `.windowToolbar`, which also hides the title and the traffic lights. Either way, check that ⌘F still presents search while the toolbar is hidden (screens-flows §1.4).
 
 ```swift
 .toolbar {
     ToolbarItem {                                          // .automatic (default); not .primaryAction (= leading on macOS)
-        Menu("New", content: { newMenuItems }, primaryAction: { newInvoice() })
+        Button { duplicate() } label: { Label { Text("Duplicate") } icon: { Image(systemName: "plus.square.on.square") } }
+            .help(Text("Copy this document into a new draft"))
+    }
+    ToolbarItem {                                          // declared last, so it is trailing
+        Button("Record Payment…") { showRecordPayment = true }
+            .buttonStyle(.borderedProminent)               // verify which style matches HIG .prominent
+            .keyboardShortcut("r", modifiers: .command)
     }
     .visibilityPriority(.high)                             // macOS 26.1
-    ToolbarSpacer(.fixed)
-    ToolbarItem { Button { duplicate() } label: { Label { Text("Duplicate") } icon: { Image(systemName: "plus.square.on.square") } } }
-    ToolbarSpacer(.fixed)
-    ToolbarItem {
-        Button("Issue…") { showIssueSheet = true }
-            .buttonStyle(.glassProminent)                  // verify which style matches HIG .prominent
-            .keyboardShortcut(.return, modifiers: .command)
-    }
-    .visibilityPriority(.high)
 }
-// verify on device: the prominent item ends up trailing, after search and the inspector toggle
+// verify on device: the prominent item ends up trailing
 ```
 
 ### 8.11a Keyboard map (cross-cutting)
 
-**The one authoritative keyboard map is screens-flows §3.1** (with the single-key table in §3.2). This document keeps no second table, so the two can't disagree. The decisions it records, in short: ⌘N New Invoice · ⇧⌘N New Advance Invoice · ⌥⌘N New Client · ⌘D Duplicate as Draft · ⌘R Record Payment (R in lists) · ⌘↩ Issue… · ⌘K palette · ⌘Y and Space Quick Look · ⌘1–⌘6 sidebar · ⇧⌘= / ⌘− / ⌘0 text size. Add Note, Delete Line and Move Line have no shortcut.
+**The one authoritative keyboard map is screens-flows §3.1** (with the single-key table in §3.2). This document keeps no second table, so the two can't disagree. The decisions it records, in short: ⌘N New Invoice · ⇧⌘N New Advance Invoice · ⌘D Duplicate ‹number› as Draft · ⌘R Record Payment… · ⌘↩ Issue… · ⌘F search · ⌘1–⌘4 sidebar (⌘5 Stock once it ships) · ⇧⌘= / ⌘− / ⌘0 text size. In a focused list the single keys are ↩, ⌫ and ⎋ only; letters type-select. New Client…, Add Note, Delete Line and Move Line have no shortcut. Never bound: ⌘K (reserved for a later command palette), ⌥⌘I (reserved for its HIG inspector meaning), ⌘Y (no Quick Look).
 
 - **Modifiers.** No Control-modifier shortcuts [S13]. Prefer letters with ⌘ or ⇧⌘, and let shortcuts localise to the layout, which is the `.automatic` default of `keyboardShortcut(_:modifiers:localization:)`, macOS 12.0 [S80].
-- **Palette.** The palette lists every command with its shortcut on the right, as Raycast does [S91]. `Return` runs the top result.
+- **Later: the palette.** If the command palette ships (screens-flows §2k), it lists every command with its shortcut on the right, as Raycast does [S91], and `Return` runs the top result. It repeats the menus; it never replaces them.
 
-### 8.12 Inspector panels
+### 8.12 Issued view figures
 
-- **Container:**
-  - `.inspector(isPresented:content:)` (macOS 14.0) [S60] at the `LayoutMetrics.inspector` widths (§5.3); the framework restores its presentation state [S60]
-  - toggle: ⌥⌘I and the toolbar's `sidebar.right`
-  - tabs: a `.tabs` picker (macOS 27.0) [S75] with **Details · Payments · Activity**; six at most [S10]
-  - content: `Form` + `.formStyle(.grouped)` [S1], section headers in title case [S1]
-- **Draft document: derived information only.** Every editable header field (Client, Type, Document language, Currency, VAT treatment, dates, Bank account, QR, VS) lives in the editor's header grid (§5.1), where Tab reaches it; the inspector never repeats it. The Details tab shows:
-  - TotalsPanel (§8.6)
-  - Rate: ExchangeRateRow with its source (tax documents only)
-  - VAT recap per rate with CZK
-  - payment details and QR preview (QRPreview, draft placeholder)
-  - the document chain (screens-flows §2d)
-- **Issued document:**
-  - the frozen header fields as `LabeledContent` (read-only, selectable) and the lock glyph. In Repair mode (v0.1.x) they become editable fields and the glyph is the open lock (§8.18).
-  - "Issued 5. 11. 2026 at 10:42", plus "PDF: Show in Finder"
-- **Payments tab:** the list of payments (date, `MoneyText`, CZK difference, source, note) and the "Record Payment…" button.
-- **Activity tab:** ActivityLogItems.
-- **Client inspector:** defaults (currency, document language, VAT treatment, due days, QR type, fixed VS); contacts; known payer IBANs (v0.2); open balance.
-- **Defaults for a new client:**
-  - VAT treatment: **EU reverse charge**, because Sasa's clients are "99% EU-EU" (Sasa's answer in the proposal doc, 5 Nov 2026). The client's country and VAT ID then adjust it, as InvoicingCore `CustomerVATStatus.inferred` does. An EU client without a VAT ID gets Czech 21 % with a warning. A client outside the EU gets Outside EU only with a VAT ID, and Czech 21 % without one (screens-flows §2e, ACCT). Czech VAT payers and customers outside the EU stay possible: the treatment is set per client.
-  - Payment term: **14 days** (InvoicingCore `Customer`, `paymentTermDays` default 14). Sasa answered "dunno", so this is the build default.
-  - Currency: **EUR, CZK or USD**, the v0.1 currencies (Sasa: "for start its enough, you can add dollar").
-  - Document language: follows the client's address. A Czech address gives Czech; any other gives Czech + English (InvoicingCore `Customer`).
-  - No footer text is printed until Sasa sets one in Settings (Footer text).
-- **Naming:** the menu item is "Show Inspector". The HIG Panels page notes that many apps title an inspector panel "Inspector" and name the menu item "Show Inspector" [S11]; that advice is for floating panels, and here the inspector is a split-view column, which the same page also allows [S11].
+There is no inspector (§5.1). What it held now lives here:
+- **Issued document: the figures grid** (screens-flows §2b), selectable `LabeledContent` rows, each only where it applies: Total · Advances deducted −X or Paid in advance −X · Paid (above 0) · Open balance (never on a DDPP) · Issued · DUZP (tax documents) · Due (payable kinds) · VS · Account (IBAN) · Rate (EUR and USD tax documents, §8.9) · VAT in CZK (only when Czech VAT is charged on an EUR or USD document). Below the grid, one line gives the document language and the treatment's short form ("Czech + English · EU goods, exempt"). The payment details are text; the QR is only on the PDF (§8.8).
+- **The lock line** carries the only lock glyph and the issue time: `lock.fill` (uncoloured, `TextRole.legalNote`) and "Issued 5. 11. 2026 at 19:02 · locked. Corrections via credit note (Phase 2)." In Repair mode (v0.1.x) it shows `lock.open.fill` and reads "Repair mode: changes are logged", and the figures become the same editable controls as in a draft (§8.18).
+- **The chain line** (an advance chain, screens-flows §2d): one text line under the header, `TextRole.body` links, no per-step symbols or tints, ending in one `.bordered` next-step button while a step is missing. VoiceOver reads each link with its state, for example "Advance ZF 2026-0003, paid". There is no ChainStrip component.
+- **Payments**, the **Activity** disclosure (collapsed, §8.15) and the **PDF row** (Save PDF…, Show PDF in Finder, Print) follow, in that order.
+- **A draft** keeps its derived values where Sasa edits: the totals bar (§8.6) and its rate line (§8.9).
+- **The client page** shows the contact details (email and phone), the client note and one defaults line under the header ("EUR · Czech + English · EU services, reverse charge · 30 days", one interpolated key, `TextRole.rowSecondary`), and the balances once, as the figure tiles (screens-flows §2e).
+- **A multi-selection** shows one summary in the detail column (screens-flows §2b): the title "3 selected", the caption "Totals per currency", and "Revenue (tax documents)", "Open balance" and, when an open advance is selected, "Unpaid advances". It follows the screens-flows §2a aggregation rules.
+- **Defaults for a new client** follow screens-flows §2e: the client type follows the VAT ID and the country (an EU VAT ID gives "EU business, goods", whose editor treatment is "EU goods, exempt (§ 64)", the build's ADR 0011), the payment term is 14 days, and the currency and document language follow the country. No footer text is printed until Sasa sets one in Settings ▸ Company.
 - **Keyboard:** Control-Tab moves to the next group of controls [S13]. Full Keyboard Access reaches every control.
 
-```swift
-enum InspectorTab: Hashable { case details, payments, activity }   // not "Tab": that would shadow SwiftUI.Tab (macOS 15.0) [S109]
+### 8.13 FileDropZone (v0.2: bank statement)
 
-.inspector(isPresented: $showInspector) {
-    VStack(spacing: 0) {
-        Picker("Panel", selection: $inspectorTab) {
-            Text("Details").tag(InspectorTab.details)
-            Text("Payments").tag(InspectorTab.payments)
-            Text("Activity").tag(InspectorTab.activity)
-        }
-        .pickerStyle(.tabs).labelsHidden()               // macOS 27.0; Fallback A: .segmented
-        Form { /* sections for inspectorTab */ }.formStyle(.grouped)
-    }
-    .inspectorColumnWidth(min: LayoutMetrics.inspector.min, ideal: LayoutMetrics.inspector.ideal, max: LayoutMetrics.inspector.max)
-}
-```
-
-### 8.13 FileDropZone (ČNB rates file, a secondary action in v0.1; bank statement in v0.2)
-
-- **Purpose:** drag in a file, check it, then commit.
-- **v0.1 role: secondary.** Typing the rate on the document is the primary path (§8.9). The ČNB file import stays as a secondary action in the Exchange rates section. It is already built: InvoicingData `RateStore.importDaily` and `RateStore.importYearly`, and the app shell's RatesView (build thread) has the file importer and a coverage view. Imported rates show source "ČNB file"; typed rates show "Typed", in the same list.
+- **Purpose:** drag in a file, check it, then commit. It ships with the v0.2 bank statement import, where dropping a file is the main path.
+- **v0.1 has no drop anywhere:** not on the window, the Exchange Rates sheet, the Issue sheet or the totals bar's rate form. A ČNB file is imported through File ▸ Import ČNB Rates…, the Exchange Rates sheet's button and the inline rate form's button, each opening the file dialog. That import is already built (InvoicingData `RateStore.importDaily` and `RateStore.importYearly`); imported rates show source "ČNB file", typed ones "Typed", in the same list. There is no "Drop a ČNB rates file here" tip.
 - **Anatomy:**
   - a `RoundedRectangle(cornerRadius: Radius.m)` with a 1 pt dashed `separatorColor` stroke
   - the `arrow.down.document` symbol
-  - the text "Drop a ČNB rates file (.txt) here", for the daily or the yearly file
+  - the text "Drop a bank statement here", with the accepted formats
   - a secondary line: "or click to choose a file"
   - Clicking opens `fileImporter` (macOS 11.0). It provides security-scoped URLs, which must be started and stopped [S82].
 - **States:**
@@ -883,11 +833,10 @@ enum InspectorTab: Hashable { case details, payments, activity }   // not "Tab":
   - The HIG says to highlight only when the drop is acceptable [S23].
   - The targeted state does not come from `dropDestination(for:isEnabled:action:)`, which has no `isTargeted` parameter; it comes from `onDropSessionUpdated(_:)` (macOS 26.0), which reports the `DropSession` and its phase while the drag is over the view [S101][S62].
   - importing: determinate progress [S34]
-  - **review:** an inline summary such as "254 days · EUR, USD · 2 new days" with Import / Cancel
+  - **review:** an inline summary with Import / Cancel
   - imported: a result line with Undo (§8.17)
   - error: the reason and a fix
-- **Also a drop target:** the Issue sheet's and TotalsPanel's missing-rate forms accept the ČNB file directly, and re-validate without closing the sheet (screens-flows §2c). There the drop is secondary too: the forms lead with the rate field.
-- **Keyboard:** focusable. Return or Space opens the file dialog. The window-wide drop works too.
+- **Keyboard:** focusable. Return or Space opens the file dialog. The v0.2 window-wide drop for a statement works too.
 
 ```swift
 RoundedRectangle(cornerRadius: Radius.m)
@@ -910,7 +859,7 @@ RoundedRectangle(cornerRadius: Radius.m)
   - **Right, the candidate:** number, client, open amount, due date. If there is none: "No suggestion".
   - The layout follows Xero's side-by-side row with one accept per line [S89]. Xero users asked for bulk accept (248 votes); the idea page has shown "in development" since 17 Nov 2025 (status checked 2026-11-05) [S90].
 - **States:**
-  - exact: pre-ticked and included in the toolbar's bulk "Accept Exact Matches (N)" (also Bank ▸ Accept Exact Matches and the palette)
+  - exact: pre-ticked and included in the toolbar's bulk "Accept Exact Matches (N)" (also in the menu bar, and in the palette if it ships)
   - **already recorded:** the bank line matches a payment Sasa recorded by hand (same document or VS, same amount, date within a tolerance, same account). Accepting links the line to that payment instead of creating a second one; it is included in the bulk accept (screens-flows §2f).
   - likely: needs Return
   - none
@@ -925,7 +874,7 @@ RoundedRectangle(cornerRadius: Radius.m)
   - **S** skips.
   - **⌘Z** undoes the last decision.
 - **Data rule:** unmatching never deletes the bank record.
-- **SwiftUI:** `onKeyPress(_:action:)` (macOS 14.0) on the focused list [S65]; the action returns `KeyPress.Result`, which has `.handled` and `.ignored` [S102]. If `List`/`Table` are backed by `NSTableView` on macOS (UNVERIFIED), its type-select is on by default (`allowsTypeSelect` defaults to true [S110]) and may eat letter keys before `onKeyPress` sees them. Prototype this on macOS 26/27 first; every single-letter action also has a menu item and a palette command (screens-flows §3.2).
+- **SwiftUI:** `onKeyPress(_:action:)` (macOS 14.0) on the focused list [S65]; the action returns `KeyPress.Result`, which has `.handled` and `.ignored` [S102]. If `List`/`Table` are backed by `NSTableView` on macOS (UNVERIFIED), its type-select is on by default (`allowsTypeSelect` defaults to true [S110]) and may eat letter keys before `onKeyPress` sees them. Prototype this on macOS 26/27 first. These v0.2 letter keys (N, S) are the only single-letter actions in the design, and each also has a menu item (screens-flows §3.2).
 
 ```swift
 List(selection: $selected) { ForEach(queue) { MatchRow(item: $0) } }
@@ -935,11 +884,11 @@ List(selection: $selected) { ForEach(queue) { MatchRow(item: $0) } }
 
 ### 8.15 ActivityLogItem
 
-- **Purpose:** the light-CRM timeline on the client page and the document Activity tab ("Activity" everywhere).
+- **Purpose:** the light-CRM timeline on the client page's Activity tab and in the issued view's collapsed Activity disclosure ("Activity" everywhere).
 - **Anatomy:**
-  - a kind symbol: note `text.pad.header`, issued `lock.fill`, payment `banknote`, PDF saved `square.and.arrow.up`, import `tray.and.arrow.down`, repair change `wrench.and.screwdriver.fill` (v0.1.x, §8.18)
-  - the text, in Body and selectable
-  - a linked document chip (DocumentTypeChip + number)
+  - no kind symbol, except `wrench.and.screwdriver.fill` on repair changes (v0.1.x, §8.18)
+  - the text, one built sentence ("Issued as FV 2026-0042", "Received: 1 000,00 €", "PDF saved to …", "Closed as unpaid: …"), in Body and selectable; a repair event names the field, old → new and the reason, and in the client tab starts with the document number
+  - in the client tab, the linked document number as a link
   - a timestamp in Caption, secondary, formatted with `Date.formatted(date:time:)` (macOS 12.0); the full timestamp is in the tooltip
   - newest first
 - **States:**
@@ -949,11 +898,11 @@ List(selection: $selected) { ForEach(queue) { MatchRow(item: $0) } }
 - **Keyboard:**
   - Return edits a note.
   - Delete removes it (undoable, `onDeleteCommand`).
-  - Client ▸ Add Note…, the composer at the top of the timeline, or the palette adds one. Add Note has **no** shortcut: ⌥⌘N is New Client (screens-flows §3.1), and the HIG warns against adding a modifier to an existing shortcut for an unrelated command [S13].
+  - File ▸ Add Note to “‹Client›”… (which switches to Activity and focuses the composer) or the composer "Add a note…" at the top of the timeline adds one; ↩ saves. Add Note has **no** shortcut: the HIG warns against adding a modifier to an existing shortcut for an unrelated command [S13].
 
 ```swift
 HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
-    Image(systemName: entry.kind.symbol).foregroundStyle(.secondary).accessibilityHidden(true)
+    if entry.isRepair { Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(.secondary).accessibilityHidden(true) }
     VStack(alignment: .leading, spacing: Spacing.xxs) {
         Text(verbatim: entry.text).textSelection(.enabled)
         Text(verbatim: entry.date.formatted(date: .abbreviated, time: .shortened)).textRole(.caption)
@@ -966,35 +915,37 @@ HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
 
 This component is not in the task list, but P2 depends on it.
 
-- **Trigger:** ⌘Return, the prominent toolbar button, or a click on the editor's readiness chip. It is a `.form` sheet sized to its content (§5.3) [S63]. Readiness is shown in exactly two places: this sheet and one chip in the editor's totals bar ("✓ Ready to issue" / "2 problems").
-- **Contents, which become immutable** (the full layout and the three severities are in screens-flows §2c):
-  - the **number that will be assigned** (`TextRole.documentNumber`)
-  - DocumentTypeChip
-  - client
-  - TotalsPanel (compact), **by document kind** (§8.6):
-    - *Invoice*: VAT in CZK and ExchangeRateRow (EUR or USD), QR type
-    - *Advance*: no DUZP, no rate, no "VAT in CZK"; the not-a-tax-document clause (§9 table, ACCT); QR type
-    - *DDPP*: the rate for its DUZP (the payment date; ACCT), VAT in CZK, no QR
-    - *Final*: the block of advances deducted, then Amount due; QR only if something is still payable
-  - legal notes
-  - a list of **blocking issues** (`exclamationmark.triangle`) that keeps "Issue" disabled until they're fixed [S28]
-  - **Missing rate, fixed in place:** when the only blocker is a missing ČNB rate, the row is an inline form, "EUR rate for 30. 10. 2026 missing", with a rate field, the needed publication date prefilled, and ↩ to save. Typing is the v0.1 primary path (§8.9); the typed rate gets source "Typed". The sheet is also a drop target for the ČNB file, as a secondary path. Either way it re-validates without closing.
-- **Focus:** when a ⚠ Check row needs the "Checked" checkbox, the checkbox gets initial focus with `defaultFocus` (macOS 13.0 [S65]), so Space ticks it without Tab.
+- **Trigger:** ⌘Return, the prominent toolbar button, or a click on the editor's readiness chip. It is a `.form` sheet sized to its content (§5.3) [S63]. The readiness chip shows only while something blocks Issue ("1 problem" / "N problems", §8.6); with nothing blocking, the prominent Issue… is the one go control.
+- **Contents, which become immutable** (the full layout is in screens-flows §2c):
+  - the heading with the **number that will be assigned** (`TextRole.documentNumber`): "Issue invoice FV 2026-0042?" and "Once issued, the document can't be edited or deleted." There is no series picker.
+  - **seven summary rows:** Type (the type name, long English with the Czech title; an advance adds "· Not a tax document"), Client (name, VAT ID and the treatment's short form), Language, Dates (no DUZP on an advance), Total (one VAT row per rate under Czech VAT; under a no-VAT treatment the VAT row carries the printed clause; a final invoice adds Advances deducted or Paid in advance, then Amount due), Rate (EUR and USD tax documents, §8.9) and Payment (QR type · account · predicted VS; a DDPP shows that there is no payment request)
+  - **two conditional rows:** PDF, only when no PDF folder is chosen; "Takes from stock: Bolt M8 −25 (95 left) · …", only when lines are linked (each item once with its summed quantity; the bracket is the on hand after Issue; the variant "(40 left, counted after the DUZP)"; never a blocker)
+  - no Legal row and no Info section: every clause sits in the Type, Dates, Total or Rate row
+  - **two severities**, ⛔ before ⚠: "Fix before issuing" rows keep Issue disabled until they're fixed [S28]; "Check before issuing" rows each have a "Checked" tick. A ⛔ row whose fix lies outside the draft has Fill in…, and the default button then reads Go to Problem.
+  - **Missing rate, fixed in place:** the Rate row is the inline rate form (§8.9). Saving re-validates the sheet without closing it.
+- **Focus:** the rate field when the rate is missing; otherwise, when a ⚠ Check row needs the "Checked" checkbox, the first checkbox gets initial focus with `defaultFocus` (macOS 13.0 [S65]), so Space ticks it without Tab.
 - **Buttons:** **Cancel** on the leading side, and **Issue** on the trailing side as the default (Return). Not the destructive style, because the person deliberately chose to issue [S15]. Esc cancels.
 - **No undo afterwards.** That is the point of gapless numbering (P2). The one exception is the audited Repair mode (v0.1.x, §8.18), which logs every change.
 
-### 8.17 Undo confirmation: inline result line (v0.1) and Undo toast (v0.2)
+### 8.17 Undo confirmation: inline result line
 
-- **Purpose:** confirm an undoable action that took effect immediately (delete a draft, unmatch, delete a note, import; in v0.2 also bulk accept), with a one-click Undo.
+- **Purpose:** confirm an action that took effect immediately (delete a draft, delete a note, issue, import; in v0.2 also unmatch and bulk accept), with a one-click Undo when the action registered one. It is the only confirmation surface, in v0.1 and v0.2.
 - **Edit ▸ Undo (⌘Z) is the primary undo.** It never expires: ⌘Z works at any time, as many times as needed, with named actions [S16]. The visual confirmation is secondary.
-- **v0.1: inline result line** (no glass). A plain, opaque line at the top of the content pane, just under the toolbar: `checkmark.circle` + the message ("Draft deleted") + a borderless "Undo" button. It is part of the content, not a floating layer.
-- **v0.2: Undo toast.** The same content in a capsule (`FloatingSurface` in `App/FA/DesignSystem/FloatingSurface.swift`, the one custom glass element, §6), for bulk actions where a floating confirmation earns its cost.
+- **Anatomy** (no glass): a plain line at the top of the content pane (`safeAreaInset`, top), just under the toolbar, on an opaque `.background(.background)` with a bottom `Divider`:
+  - a symbol by message kind, shared with `InlineMessage`: problem `exclamationmark.triangle.fill` in `.orange`, info `info.circle` in `.secondary`, done `checkmark.circle` in `.secondary` (result line only); the words stay `.primary`
+  - selectable text, up to two lines
+  - a borderless "Undo" when the action registered one
+  - a borderless close (`xmark`, label and tooltip "Close")
+  - nothing else: no other buttons. After Issue it reads "Issued FV 2026-0042 · PDF saved to ~/…/2026/FV 2026-0042 Acme GmbH.pdf" (one interpolated key), with close only; Record Payment… and Show PDF in Finder are in the issued view below it and in the menus. After Repair mode: "Repair mode ended · 3 changes logged".
+  - The Stock Count, Receive and Take Out sheets show their result in place (the figure and its history line), with no result line.
+- **v0.2:** the bulk results (bulk accept, import) use the same line. There is no Undo toast and no `FloatingSurface`.
 - **Shared rules:**
   - The button says "Undo", the same word as the Edit ▸ Undo item.
   - **Placement:** top of the content pane, never at the bottom edge [S7].
-  - **Not time-boxed.** The line or toast stays until the next user action in that pane or until it is closed explicitly (its own close button or Esc). It never hides on a timer: the HIG asks to "minimize use of time-boxed interface elements" and to "prefer dismissing views with an explicit action" [S5]. This is unlike Superhuman's 10-second undo [S97].
+  - **Not time-boxed.** The line stays until the next user action in that pane or until it is closed explicitly (its own close button or Esc). It never hides on a timer: the HIG asks to "minimize use of time-boxed interface elements" and to "prefer dismissing views with an explicit action" [S5]. This is unlike Superhuman's 10-second undo [S97].
   - After Undo, scroll to and highlight the restored item [S16].
   - Reduce Motion: fade only [S5].
+  - Show Borders (macOS 27): Undo, close and the inline Change… draw `.bordered` when `accessibilityShowBorders` is on (§6).
   - VoiceOver: post an announcement with `AccessibilityNotification.Announcement(_:).post()` (macOS 14.0). `Announcement` has three `init(_:)` overloads, for `String`, `AttributedString` and `NSAttributedString` [S68].
 - **Keyboard:** the button doesn't bind ⌘Z again; the Edit menu owns it.
 
@@ -1002,15 +953,15 @@ This component is not in the task list, but P2 depends on it.
 .safeAreaInset(edge: .top) {                                     // safeAreaInset(edge:alignment:spacing:content:), VerticalEdge, macOS 12.0 [S111]
     if let result {
         HStack(spacing: Spacing.s) {
-            Image(systemName: "checkmark.circle").accessibilityHidden(true)
+            Image(systemName: result.kind.symbol).foregroundStyle(result.kind.tint).accessibilityHidden(true)
             Text(result.message)
-            Button("Undo") { undoManager?.undo() }.buttonStyle(.borderless)
+            if result.canUndo { Button("Undo") { undoManager?.undo() }.buttonStyle(.borderless) }
             Spacer()
             Button { self.result = nil } label: { Image(systemName: "xmark") }   // explicit close; Esc too
                 .buttonStyle(.borderless).accessibilityLabel(Text("Close"))
         }
         .padding(.horizontal, Spacing.l).padding(.vertical, Spacing.s)
-        .background(.background)                                   // opaque in v0.1; v0.2 toast: .modifier(FloatingSurface())
+        .background(.background)                                   // opaque
         .transition(.opacity)                                    // verify Transition-protocol .opacity
     }
 }
@@ -1021,32 +972,32 @@ This component is not in the task list, but P2 depends on it.
 - **Purpose:** show, at all times, that Repair mode is on. Repair mode is the one audited exception to P2.
 - **The decision it follows** (the decisions table in Sasa's proposal doc, last row, 5 Nov 2026): "A Repair mode behind Touch ID or the password will unlock every record, issued documents included; each repair change is written to the audit log, which never leaves the Mac. There is no trace-free mode". It is planned for v0.1.x. The normal fix for a wrong issued document stays a corrective document (Phase 2). This design has no trace-free path.
 - **Starting Repair mode:**
-  - From a menu command, with no keyboard shortcut and no single key (RECOMMENDATION). File ▸ Repair Mode… (and the palette) opens the entry sheet with a required reason, then authentication. Every change also logs a reason (screens-flows §1.4, §2m).
+  - From a menu command, with no keyboard shortcut and no single key (RECOMMENDATION). File ▸ Repair Mode… opens the entry sheet (`presentationSizing(.form)` on macOS 15 [S63], a width range on macOS 14) with a required reason, then authentication. Every change also logs a reason (screens-flows §1.4, §2m).
   - The app calls `LAContext.evaluatePolicy(_:localizedReason:reply:)` (macOS 10.10 [S113]) with `LAPolicy.deviceOwnerAuthentication` (macOS 10.11 [S112]). On macOS that policy authenticates "with Touch ID, Apple Watch, or the user's password". Touch ID goes first when it is available and enrolled; "when these options aren't available, the system prompts the user for … user's password". The dialog's fallback button also asks for the password [S112]. So the password is always a way in.
   - The same policy also tries a nearby paired Apple Watch [S112]. The decision names only Touch ID and the password, so confirm with Sasa that a watch unlock is acceptable.
   - The reason text in the system dialog says what will happen and leaves out the app name, as Apple asks [S113]. Example (RECOMMENDATION): "unlock every record for repair" (screens-flows §2m).
   - Cancel or a failed check changes nothing and shows no extra alert.
-- **Placement:** one full-width bar at the top of the main window, under the toolbar and above all three columns. It also appears in every document window opened from it (RECOMMENDATION). Never at the bottom: the HIG says "Avoid placing controls or critical information at the bottom of a window" [S7].
+- **Placement:** one full-width bar at the top of the main window, under the toolbar and above all three columns. v0.1 has no other window that shows documents. Never at the bottom: the HIG says "Avoid placing controls or critical information at the bottom of a window" [S7].
 - **Anatomy:**
   - leading `wrench.and.screwdriver.fill` (macOS 11.0, data [S85]) in the caution tone (`.orange`), hierarchical rendering
   - the text **"Repair mode is on. Every change to a locked record is logged."** in `.primary`, Body semibold (`.body.weight(.semibold)`, [S55])
   - trailing, one standard `.bordered` button (macOS 10.15 [S114]): **"End Repair Mode"**. It is not prominent, so the window keeps one prominent action (P4).
   - background: the caution tone at 14 % opacity over opaque `windowBackgroundColor`, like a StatusBadge fill (§8.1); a 1 pt tone border at the bottom under Increase Contrast
 - **Tone:** caution (orange), never red, which is only for Overdue (P4). Symbol plus words, never colour alone [S4][S5]. The words stay `.primary`, because the system orange is below 4.5 : 1 on white (§4.4).
-- **Never glass.** The bar is opaque, like the v0.1 inline result line (§6, §8.17).
+- **Never glass.** The bar is opaque, like the inline result line (§6, §8.17).
 - **Not dismissable while the mode is on:**
   - no close button; Esc does nothing to it; no timer hides it; it never scrolls away
   - "End Repair Mode" ends it (the menu offers the same command). So do 10 minutes without a change (RECOMMENDATION, screens-flows §2m) and quitting (next bullet).
   - quitting the app also ends it, so every launch starts locked (RECOMMENDATION)
   - After a timeout the bar stays and reads "Repair mode ended after 10 minutes without changes" until Sasa closes it (screens-flows §2m). Only then does it get a close button.
 - **Issued documents while unlocked:**
-  - The `lock.fill` beside the number is replaced by `lock.open.fill` (macOS 10.15, data [S85]). It stays uncoloured, like the lock (§4.3). Tooltip and VoiceOver label: "Unlocked for repair" (RECOMMENDATION).
+  - The lock line's `lock.fill` is replaced by `lock.open.fill` (macOS 10.15, data [S85]), and the line reads "Repair mode: changes are logged". It stays uncoloured, like the lock (§4.3). Tooltip and VoiceOver label: "Unlocked for repair" (RECOMMENDATION).
   - The banner is always visible at the same time, so the open lock never stands alone.
-  - Read-only values (`LabeledContent`) become the same editable controls as in a draft (§8.3, §8.9, §8.12).
+  - Read-only values (`LabeledContent` in the issued view's figures) become the same editable controls as in a draft (§8.3, §8.9, §8.12).
   - Status badges keep their state; Repair mode is not a document state.
-  - When Repair mode ends, `lock.fill` returns and the fields are read-only again.
+  - When Repair mode ends, `lock.fill` returns and the fields are read-only again. The result line reads "Repair mode ended · N changes logged", with close only (§8.17).
   - A repaired issued document gets a new PDF. The previous PDF bytes stay with the audit event (screens-flows §2m, RECOMMENDATION). Whether the client needs the new PDF, or a corrective document instead, is ACCT.
-- **Every change is logged.** Each repair change is written to the audit log (InvoicingData `auditEvent`; the schema blocks updates and deletes of its rows). The log never leaves the Mac (decision). Backups include the log. How backups, and a cloud-synced backup folder, fit that decision is open for the lead and Sasa (screens-flows §2m). RECOMMENDATION: the document's Activity tab also lists each repair change as an immutable system event with `wrench.and.screwdriver.fill` (§8.15).
+- **Every change is logged.** Each repair change is written to the audit log (InvoicingData `auditEvent`; the schema blocks updates and deletes of its rows). The log never leaves the Mac (decision). Backups include the log. The default backup folder is local, a Backups folder next to the data file inside the app's container; how a cloud-synced backup folder fits the decision is open for the lead and Sasa (screens-flows §2m). RECOMMENDATION: the issued view's Activity disclosure and the client's Activity tab also list each repair change as an immutable system event with `wrench.and.screwdriver.fill`: one sentence with the field, old → new and the reason (§8.15).
 - **VoiceOver:**
   - The bar is one container, `accessibilityElement(children: .contain)` (macOS 10.15 [S68][S114]), labelled "Repair mode is on. Every change to a locked record is logged." The "End Repair Mode" button stays its own element.
   - Starting and ending post an announcement with `AccessibilityNotification.Announcement(_:).post()` (macOS 14.0 [S68]): "Repair mode on. Every change is logged." and "Repair mode ended. Records are locked." (RECOMMENDATION).
@@ -1108,15 +1059,20 @@ English comes first, because the UI is English. The Czech column is filled only 
 | Issue / Issued | — |
 | Draft | KONCEPT (the watermark "KONCEPT / DRAFT" on every draft PDF, §4.1) |
 | Overdue | — |
-| Partly paid / Paid / Overpaid | — |
+| Partly paid / Paid / Overpaid | — (Paid also names a DDPP and a final invoice settled by advances, §4.3) |
 | Awaiting payment / Partly paid – tax document missing / Paid – tax document missing / Tax document issued / Settled in final invoice (cs wording ACCT) / Closed unpaid | — |
-| Issued (paid) / Paid (by advances) | — |
 | Marked for credit note (cs wording ACCT) | — |
 | Variable symbol (VS) | Variabilní symbol (VS) |
 | Date of taxable supply | DUZP (ACCT) |
-| Reverse charge | the clause "daň odvede zákazník" (Brief); the treatment label "EU – přenesená daňová povinnost" is in the table below (ACCT) |
+| EU services, reverse charge | the clause "daň odvede zákazník" (Brief); the per-line treatment text is in the table below (ACCT) |
+| EU goods, exempt (§ 64) | the treatment text and the § 64 clause are in the table below (ACCT) |
+| Czech VAT · Outside EU, services · Other exemption | the per-line texts are in the table below (ACCT) |
+| Client type: EU business, goods · EU business, services · Czech VAT payer · Czech business, not a VAT payer · EU consumer · Business outside the EU, services · Consumer outside the EU | — (the client page, the suggestion line and the Issue sheet show the treatment's short form, not the client type) |
+| Paid in advance | Uhrazené zálohy (ACCT) |
 | Matched / Suggested / Unmatched / Not an invoice / Already recorded | — |
 | Activity | — |
+| Open balance | — (the one term for what is left to pay; never "Outstanding" or "Open") |
+| Stock item · On hand · Low (running low) · Count (the stock-take) · Receive · Take out | — (UI only; nothing about stock prints, screens-flows §2n) |
 | Document language: Czech / Czech + English | — |
 
 ### Legal and tax strings: one reviewed table (P7)
@@ -1127,14 +1083,17 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 |---|---|---|
 | Faktura – daňový doklad (with an en dash) | title of a regular invoice | Brief |
 | Zálohová faktura | title of an advance request | Brief |
-| Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby. / This is not a tax document. A tax document will be issued upon receipt of the payment. | note printed on an advance request (InvoicingCore `DocumentClause.notATaxDocument`) | ACCT |
+| Toto není daňový doklad. Daňový doklad bude vystaven po přijetí platby. / This is not a tax document. A tax document will be issued upon receipt of the payment. | note printed on an advance request for services or under Czech VAT (InvoicingCore `DocumentClause.notATaxDocument`) | ACCT |
+| Toto není daňový doklad. / This is not a tax document. | note printed on an advance request whose lines are all § 64 goods, which takes no payment tax document (`DocumentClause.notATaxDocumentForGoods`, ADR 0012) | ACCT |
 | Není daňovým dokladem | the brief's short form, not the printed clause; the in-app banner on an advance shows the English "Not a tax document" (screens-flows §5) | Brief |
 | Daňový doklad k přijaté platbě | title of a tax document for a received advance | Brief |
-| daň odvede zákazník (lowercase, with diacritics) | reverse-charge clause; capitalising it at the start of a printed line is ACCT | Brief |
+| daň odvede zákazník (lowercase, with diacritics) | reverse-charge clause (`DocumentClause.reverseChargeNotice`; the PDF prints "Daň odvede zákazník.", with the English gloss on a bilingual document); capitalising it at the start of a printed line is ACCT | Brief |
+| Dodání zboží do jiného členského státu, osvobozeno od daně podle § 64 odst. 1 zákona č. 235/2004 Sb., o dani z přidané hodnoty. / Intra-Community supply of goods, exempt from VAT under Section 64(1) of the Czech VAT Act and Article 138 of Council Directive 2006/112/EC. | the exemption reference § 29 odst. 2 písm. a) asks for, on a § 64 goods document (`DocumentClause.intraCommunitySupply`, ADR 0011) | ACCT |
 | IČO · DIČ · spisová značka · VS | identifiers | Brief |
 | Konečná faktura | Czech type name of the final invoice; the UI name is "Final invoice" (its PDF title in InvoicingCore `DocumentKind.title` is "Faktura – daňový doklad (vyúčtování záloh)", screens-flows §2d) | ACCT |
 | Odečet záloh · Odečteny zálohy zdaněné daňovými doklady č. … (§ 37a zákona o DPH). | caption of the deductions on a final invoice (InvoicingCore `DocumentLabel.advanceDeductions`) and the clause under them (`DocumentClause.advancesDeducted`); each deduction line is the next row | ACCT |
 | Odečet zálohy – daňový doklad č. …, platba ze dne …, sazba DPH … % | one deduction line per tax document and VAT rate on a final invoice (InvoicingPDF `PDFStrings.deductionLine`); the rate part is left out when there is none | ACCT |
+| Uhrazené zálohy / Advances paid · Záloha ZF 2026-0003 uhrazena 12. 11. 2026 / Advance ZF 2026-0003 paid on 12. 11. 2026 | heading (`DocumentLabel.advancesPaid`) and one row per payment for advances paid on § 64 goods on a final invoice, with no tax document (ADR 0012); the day prints the Czech way in the gloss too | ACCT |
 | Plnění · Základ daně a daň dokladu | VAT summary sub-rows on a final invoice: the supply, then the tax base and VAT of this document after the deducted advances (`PDFStrings`) | ACCT |
 | v Kč, kurz … | the VAT summary in CZK with its rate (`PDFStrings.inCZKAtRate`) | ACCT |
 | Celkem bez DPH | total before VAT (`PDFStrings.totalExcludingVAT`) | ACCT |
@@ -1146,20 +1105,20 @@ Every string printed on a document, or shown in the app with legal or tax meanin
 | pokračování / continued · Banka / Bank | page-continuation marker; bank-name label | Design |
 | English gloss of every Brief and ACCT string in this table | bilingual PDF | ACCT |
 | DUZP · Datum uskutečnění zdanitelného plnění | date-of-supply label | ACCT |
-| Tuzemsko 21 % · EU – přenesená daňová povinnost (PDP) · Mimo EU · Osvobozeno | VAT treatments and per-line rate labels | ACCT |
+| DPH 21 % · dodání zboží do jiného členského státu · přenesení daňové povinnosti · mimo předmět daně v tuzemsku · osvobozeno (English: VAT 21 % · intra-Community supply of goods · reverse charge · outside the scope of Czech VAT · exempt) | per-line treatment texts as built (`Document+Payment.swift`), for Czech VAT, EU goods, EU services, outside the EU and other exemptions | ACCT |
+| Plnění není předmětem daně v tuzemsku – místo plnění je mimo tuzemsko (§ 9 odst. 1 zákona o DPH). · Osvobozeno od daně podle ‹reference› zákona č. 235/2004 Sb., o dani z přidané hodnoty. | notes for outside-EU services (`DocumentClause.outsideScope`) and other exemptions (`DocumentClause.exempt`), with their English glosses | ACCT |
 | Kurzový rozdíl | CZK difference on a payment | ACCT |
 | Obchodní firma | label for the legal name | ACCT |
 | Dobropis / opravný daňový doklad | credit note (Phase 2) | ACCT |
-| K záloze … , platba ze dne … | reference line on a DDPP (core prints `DocumentClause.paymentReceived`) | ACCT |
+| Daňový doklad k platbě přijaté dne … na základě zálohové faktury č. …. / Tax document for the payment received on … against advance invoice No. …. | opening sentence of a DDPP (`DocumentClause.paymentReceived`) | ACCT |
 | Uzavřeno – neuhrazeno · K opravě dobropisem | closing actions (screens-flows §2d); the UI shows them in English (§4.3) | ACCT |
 | Zúčtováno v konečné faktuře | status of an advance deducted by an issued final invoice (follows "Konečná faktura"); the UI label is "Settled in final invoice" | ACCT |
-| Texts for outside-EU and exempt supplies | PDF notes | ACCT |
 
 The advance note: the brief's short form "Není daňovým dokladem" and the clause InvoicingCore prints (`DocumentClause.notATaxDocument`) differ. The PDF prints the core clause; reconciling the two with the accountant is a follow-up outside the design system (ACCT). If the PDF must print exactly the short form, the change belongs in InvoicingCore `DocumentClause.swift`.
 
-The same applies to the deduction clause and the DDPP reference. InvoicingCore prints `DocumentClause.advancesDeducted` ("Odečteny zálohy zdaněné daňovými doklady č. … (§ 37a zákona o DPH).") and `DocumentClause.paymentReceived` ("Daňový doklad k platbě přijaté dne … na základě zálohové faktury č. …."). Reconcile them with the accountant (ACCT).
+The deduction clause and the DDPP sentence above are the texts InvoicingCore prints (`DocumentClause.advancesDeducted`, `DocumentClause.paymentReceived`); the accountant approves them like every ACCT row.
 
-- **In the UI** the printed Czech title follows the English name, as in "Advance invoice (Zálohová faktura)", wherever the distinction matters: the type picker and the Issue sheet.
+- **In the UI** the printed Czech title follows the English name, as in "Advance invoice (Zálohová faktura)", wherever the distinction matters: the issued view header and the Issue sheet's Type row.
 - **Document language** (per document, default from the client): **"Czech"** or **"Czech + English"**. These are InvoicingCore `DocumentLanguage.czech` ("cs", Czech only, for Czech customers) and `.english` ("en", bilingual: Czech first, then English, for foreign customers). On a bilingual document every legal string is in Czech, with the English gloss underneath. The UI label is "Document language". The client default uses the same two values. Czech remains on documents. The UI shows Czech only where it quotes printed text (P7).
 - **PDF number and date format:** Czech formatting (`cs_CZ`, e.g. "1 234,50 €", "5. 11. 2026") in both document languages (RECOMMENDATION; confirm with Sasa and the accountant). The English gloss changes words, never number formats.
 - The required wording comes from the legal or VAT research and the accountant, not from this document.
@@ -1173,7 +1132,8 @@ The same applies to the deduction clause and the DDPP reference. InvoicingCore p
 | Quantities, rates (display) | `Decimal.FormatStyle(locale:)` (12.0) [S107] | same as money |
 | VAT percent | `Decimal.FormatStyle.Percent` (12.0). Czech puts a space before % ("21 %"); confirm the formatter's output | same |
 | Dates | `Date.FormatStyle` / `formatted(date:time:)` (12.0) | same |
-| CSV for the accountant | Two presets (screens-flows §2h): "For the accountant (Excel CZ)" and "Machine (ISO)". The machine preset uses a fixed `Locale(identifier: "en_US_POSIX")` formatter, ISO dates and "." decimals. Whether the accountant's Excel reads those as numbers is UNVERIFIED and depends on their tool, so the delimiter, decimal mark and encoding of the Excel preset are agreed with the accountant (ACCT). Never the UI locale. | fixed per preset |
+| Relative dates ("Counted 3 weeks ago", screens-flows §2n) | a relative date format style; which API, and its availability, is UNVERIFIED (check the Foundation docs before building Stock) | UI locale |
+| CSV for the accountant | One fixed format, no presets (screens-flows §2h): the delimiter, decimal mark, date format and encoding are agreed with the accountant (ACCT) and then built with a fixed `Locale`, never the UI locale. | fixed |
 
 - Never concatenate strings. Use full-sentence keys with interpolation in a String Catalog.
 - Counts need plural variants: English "1 day / 5 days", and the cs bonus entries "1 den / 2–4 dny / 5 dní". That String Catalogs support plurals is UNVERIFIED in this research; check it in Xcode 27.2.
@@ -1186,7 +1146,7 @@ The same applies to the deduction clause and the DDPP reference. InvoicingCore p
 - The UI is written and tested in English.
 - `DesignSystem.xcstrings` keeps its cs entries as a free bonus; the build thread keeps them. Czech UI is not in scope, and nothing in v0.1 depends on those entries.
 - There is no in-app language switch. The HIG warns against repeating system settings in the app [S18]. Whether the system's per-app language setting (System Settings ▸ General ▸ Language & Region ▸ Applications [S51]) would pick up the bonus cs entries is UNVERIFIED (screens-flows §2i). That mixed UI is out of scope.
-- Czech stays on documents (above); the UI shows it only where it quotes printed text (P7). The **document** language is per document, in the editor's header grid, and never a global setting [S18].
+- Czech stays on documents (above); the UI shows it only where it quotes printed text (P7). The **document** language is per document (Document ▸ Document Language ▸, default from the client), and never a global setting [S18].
 
 ---
 
@@ -1197,19 +1157,22 @@ The same applies to the deduction clause and the DDPP reference. InvoicingCore p
 - [ ] Every StatusBadge reads its word and detail ("Overdue, +12 days · 1 000,00 € left"). Compact badges carry an explicit label (`accessibilityLabel`, macOS 13.0 / `Text` overload 11.0) [S68], and the same text as tooltip.
 - [ ] Table rows read as one sentence: "Invoice FV 2026-0042, Acme GmbH, 1 234,50 euros, overdue 12 days" (`accessibilityElement(children: .combine)`) [S68].
 - [ ] Every icon-only toolbar button has a label [S1].
-- [ ] The QR code has a descriptive label (§8.8).
-- [ ] Glyph grids and strips have text: each ČNB coverage-grid day cell has a label such as "4. 11. 2026, rate published, 24,315", with the "Needed rates" text list beneath the grid; the advance chain strip uses SF Symbols and StatusStyle, and each step is a labelled `Link` or `Button` ("Advance ZF 2026-0003, paid") (screens-flows §2d, §2g).
+- [ ] The QR code has a descriptive label on the PDF page that carries it (§8.8); a draft's page reads "QR after issue".
+- [ ] Every missing-rate prompt states its currency and date in text ("EUR rate for 30. 10. 2026 missing"), and Enter Rate… has a text label (screens-flows §2c, §2g).
+- [ ] Each link of the advance chain line is a labelled `Button` with its state ("Advance ZF 2026-0003, paid"); Document ▸ Show Related Documents ▸ is its menu path (screens-flows §2d).
+- [ ] Overview tiles are one element each ("Unpaid, 18 400,00 euros and 35 000 Czech korunas, 7 documents"); the Unpaid advances link is a second element (screens-flows §2a).
+- [ ] Stock (when it ships): the Low badge is symbol + word; the sidebar Stock badge has the accessibility value "3 running low"; the editor's `shippingbox` marker has a VoiceOver label ("Takes from stock: Bolt M8 (120 ks on hand)", or on an advance "Bolt M8 (120 ks on hand) leaves stock with the final invoice") (screens-flows §2n).
 - [ ] The Repair mode banner (v0.1.x) reads "Repair mode is on. Every change to a locked record is logged.", its "End Repair Mode" button is its own element, and starting or ending Repair mode is announced. The open lock reads "Unlocked for repair" (§8.18).
-- [ ] If a chart is ever added (v0.1 uses a VAT table instead), it carries `accessibilityChartDescriptor` and titles the main message [S33].
+- [ ] If a chart is ever added (v0.1 has none), it carries `accessibilityChartDescriptor` and titles the main message [S33].
 - [ ] Voice Control: "Issue" works on the prominent button; add `accessibilityInputLabels` (macOS 11.0) where a control needs another spoken name.
 
 **Keyboard and Full Keyboard Access**
 - [ ] Every action is reachable from the menu bar [S14], including the Window menu with Minimize and Zoom [S14].
-- [ ] **FKA on:** turn on Full Keyboard Access in System Settings ▸ Accessibility ▸ Keyboard (the HIG says to turn it on "in the Accessibility area" of Settings [S13]; the HIG keyboard table also lists Control-F1 to toggle it [S13], but the Apple Support shortcuts page of 14 Sep 2026 does not [S106], so don't rely on Control-F1). Tab through the editor, the inspector, sheets and the matching queue.
-- [ ] **FKA off pass:** with Full Keyboard Access off, check that every editor control has a path that doesn't depend on Tab reaching it: Document ▸ Currency ▸, Document Language ▸, VAT Treatment ▸, QR ▸ and Change Type ▸ (checkmarked items, also in the palette); per-line VAT is a text field; the Issue sheet checkbox has initial focus. Whether a default setup skips non-text controls when tabbing is UNVERIFIED; test it on Sasa's Mac. The HIG keyboard table lists Control-F7 to "temporarily override the current keyboard access mode" [S13].
-- [ ] Single-key shortcuts work only when a list has focus, never in text fields [S92]. Prototype `onKeyPress` on a SwiftUI `Table` on macOS 26/27 before relying on it, because type-select may consume letter keys (§8.14); every single key has a ⌘ chord, a menu item or a palette command.
+- [ ] **FKA on:** turn on Full Keyboard Access in System Settings ▸ Accessibility ▸ Keyboard (the HIG says to turn it on "in the Accessibility area" of Settings [S13]; the HIG keyboard table also lists Control-F1 to toggle it [S13], but the Apple Support shortcuts page of 14 Sep 2026 does not [S106], so don't rely on Control-F1). Tab through the editor, the issued view, sheets and, in v0.2, the matching queue.
+- [ ] **FKA off pass:** with Full Keyboard Access off, check that every editor control has a path that doesn't depend on Tab reaching it: Document ▸ Change Type ▸, Currency ▸, Document Language ▸, VAT Treatment ▸ and Bank Account ▸ (checkmarked items), Document ▸ Show Related Documents ▸ and View ▸ Client Tab ▸; in Stock, the Stock menu's Count…, Receive… and Take Out…; per-line VAT is a text field; the Issue sheet checkbox has initial focus. Whether a default setup skips non-text controls when tabbing is UNVERIFIED; test it on Sasa's Mac. The HIG keyboard table lists Control-F7 to "temporarily override the current keyboard access mode" [S13].
+- [ ] Single-key shortcuts work only when a list has focus, never in text fields [S92]. Prototype `onKeyPress` on a SwiftUI `Table` on macOS 26/27 before relying on it, because type-select may consume letter keys (§8.14). In v0.1 the single keys are ↩, ⌫ and ⎋ only, and each has a menu item.
 - [ ] No hover-only affordances. The context menu and menu bar offer every hover action [S30].
-- [ ] Test the shortcut map on the **Czech QWERTZ** layout, especially ⌘1…⌘6, ⌘+ (⇧⌘=), ⌘−, ⌘0 and ⌘?, and record the result. On that layout "+" sits unshifted on the 1 key, so ⌘+ and ⌘1 may collide or behave unexpectedly (UNVERIFIED; no Apple page found on Czech key equivalents).
+- [ ] Test the shortcut map on the **Czech QWERTZ** layout, especially ⌘1…⌘5, ⌘+ (⇧⌘=), ⌘−, ⌘0 and ⌘?, and record the result. On that layout "+" sits unshifted on the 1 key, so ⌘+ and ⌘1 may collide or behave unexpectedly (UNVERIFIED; no Apple page found on Czech key equivalents).
 
 **Contrast and colour**
 - [ ] Status words and amounts are never drawn in a hue (§4.4).
@@ -1219,13 +1182,13 @@ The same applies to the deduction clause and the DDPP reference. InvoicingCore p
 
 **Motion and transparency**
 - [ ] Reduce Motion (`accessibilityReduceMotion`): fades replace slides; no blur animation; no glass bounce on custom elements [S5].
-- [ ] Reduce Transparency (`accessibilityReduceTransparency`): v0.2's Undo toast becomes opaque (§6). v0.1 has no custom glass.
+- [ ] Reduce Transparency (`accessibilityReduceTransparency`): nothing custom to adapt; the app has no custom glass (§6).
 - [ ] No time-boxed UI: nothing auto-dismisses on a timer (§8.17) [S5].
 - [ ] Show Borders (`accessibilityShowBorders`) on macOS 27: borderless custom buttons get borders [S67].
 - [ ] Liquid Glass slider at ultra clear and at fully tinted [S44]. Inactive windows (`appearsActive`) [S83].
 
 **Text**
-- [ ] Nothing below 10 pt on screen [S3]. View ▸ Bigger reaches 200 % on every content surface (Table, editor, inspector, Overview, totals, sheets) [S5], with no clipped table rows; test 200 % in the 1080 × 640 minimum window.
+- [ ] Nothing below 10 pt on screen [S3]. View ▸ Bigger reaches 200 % on every content surface (tables, editor, issued view, Overview, totals, sheets) [S5], with no clipped table rows; test 200 % in the 1080 × 640 minimum window.
 - [ ] Sidebar row size follows the system sidebar size setting (small, medium, large) [S9]. Don't fix it.
 
 **Data safety as accessibility**
@@ -1235,7 +1198,7 @@ The same applies to the deduction clause and the DDPP reference. InvoicingCore p
 
 ## Sources
 
-The research threads opened these on or before 2026-11-05. HIG and developer pages were read as Apple's DocC JSON; the URLs below are the human-readable versions. **[WebFetch]** means the page was read through a summarising fetch, so the wording may differ slightly.
+The research threads opened these on or before 2026-11-05. After the lean pass (6 Nov 2026) no section cites S11, S17, S26, S59, S60, S69, S70, S77, S84, S86, S87, S93, S96, S98, S100, S104, S105 or S109; their entries stay so that the numbers stay stable. HIG and developer pages were read as Apple's DocC JSON; the URLs below are the human-readable versions. **[WebFetch]** means the page was read through a summarising fetch, so the wording may differ slightly.
 
 **HIG** (base `https://developer.apple.com/design/human-interface-guidelines/`)
 - [S1] Adopting Liquid Glass — https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass

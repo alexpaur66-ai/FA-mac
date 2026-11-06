@@ -145,3 +145,35 @@ and an overpaid advance without its DDPP hiding the surplus (a documented trade-
 Also in this follow-up, from the build thread: the VS prefixes are FV 1 and ZF 2, with none for DD, which carries no
 payment request (sf §2i); the per-series prefix lands in the core with the next data-layer PR. The M1 Pro facts now cite
 Sasa's message in the project chat.
+
+## 2026-11-06 — Lean pass, Stock and EU goods
+
+Why: Sasa asked on 5 Nov 2026 (17:45 UTC, project chat): "Let's keep it precise and clean. No need to rush. Hopefully
+the gui won't be bilions of setting and icons and menus but nice intuitive easy to use and fast." In the same message
+they asked for rough stock keeping ("mostly roughly so I know how much of what for ordering"), and on 5 Nov 18:51 UTC
+told the build that their sales are "90% goods".
+
+What the pass did:
+- 214 proposals to cut, merge, move or defer something (settings, menus, toolbars and the inspector, screens, visual
+  style) each survived one skeptic. They were then reconciled per group and judged through three lenses (fit for Sasa,
+  correctness, cost and coherence; two of three to pass). That left **100 decisions**: 32 cut, 38 merge, 10 move,
+  8 defer, 12 keep. A short list of settlements resolves the conflicts between groups. The ADR edits that follow from
+  them went to the build, which owns the ADRs.
+- Counts before → after, compared with main at 18679ea: sidebar sections 6 → 4 (Exchange rates and Exports & Backup
+  become sheets opened from File; Stock adds a fifth once it ships); Settings panes 7 → 4; custom menus 2 → 1 (the
+  Client menu folds into File; a Stock menu makes it 2 once Stock ships). The inspector, the Undo toast and
+  `FloatingSurface` go, the command palette and Quick Look are deferred, and status badges use three tones with no green.
+- Settings apply as soon as a field is committed, except Numbering, which keeps its Save button.
+- The DUZP default has no per-client rule any more: a draft with a Period takes the period's last day, otherwise
+  "Same as the issue date" (sf §2c, RECOMMENDATION; Q3 asks Sasa).
+- **Stock** is new: sf §2n (the list, Count…, Receive…, Take Out…, linked lines, the client's Items tab, the Overview
+  line). Nothing of it is built.
+- **EU goods (§ 64)** is written into both specs: the VAT treatment names and order, the client type split, the rate
+  day (`Document.exchangeRateDay`), advances with no payment tax document and "Paid in advance" on the final invoice,
+  and the PR 22 texts, as built in PRs 21 and 22 (ADR 0011, ADR 0012). The legal wording stays ACCT.
+- Sources: sf gains [S156]–[S166]; both source lists note which numbers no section cites any more (kept so the numbers
+  stay stable). README's platform policy now says CI builds with Xcode 26.3 since PR 20.
+
+Not re-checked in this pass: the shell's build-status notes against PRs 20–22, except where a note names them. The
+two questions on cards to Sasa (an EU client without a VAT ID; restarting the numbering each year) are written as
+the recommended answer and marked in the specs.
