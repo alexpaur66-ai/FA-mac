@@ -175,6 +175,12 @@ struct NumberCell: Hashable {
     private(set) var lastInvoiceTotals: [String: Money] = [:]
     /// The line holding keyboard focus, for the Document menu's line items.
     var focusedLineID: String?
+    /// False while the issue date floats: it reads "On issue" and becomes the day of Issue (docs-28). Kept
+    /// with the draft, outside its snapshot (`DocumentStore.draftDating`).
+    private(set) var issueDateSetByHand = true
+    /// The day the draft was started, for the Issue sheet's check that a floating date moves a "Same as
+    /// issue date" DUZP into a later month (docs-28).
+    private(set) var startedOn: CalendarDay?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// Set when the draft was deleted: nothing is written any more (a pending save would re-create it).
@@ -200,6 +206,9 @@ struct NumberCell: Hashable {
                 return
             }
             self.document = document
+            let dating = try stores.documents.draftDating(id: documentID)
+            issueDateSetByHand = dating?.issueDateSetByHand ?? true
+            startedOn = dating?.createdAt.map { CalendarDay($0, in: .current) }
             customers = try stores.customers.all()
             profile = try stores.profile.load()
             series = try stores.series.series(for: document.kind)
@@ -223,6 +232,7 @@ struct NumberCell: Hashable {
             refreshReceiptPayment()
             refreshDeductionConflicts()
             refreshRate()
+            floatIssueDate()
         } catch {
             loadError = ErrorText.message(error)
         }
@@ -272,7 +282,7 @@ struct NumberCell: Hashable {
         saveTask = nil
         guard !discarded, saveState != .saved, let document, document.status == .draft else { return true }
         do {
-            try stores.documents.saveDraft(Self.strippingBlankTrailingLines(document))
+            try stores.documents.saveDraft(Self.strippingBlankTrailingLines(document), issueDateSetByHand: issueDateSetByHand)
             saveState = .saved
             saveError = nil
             return true
@@ -530,9 +540,33 @@ struct NumberCell: Hashable {
         refreshRate()
     }
 
+    /// An issue date picked by hand; it stops floating (docs-28).
+    func setIssueDate(_ day: CalendarDay) {
+        issueDateSetByHand = true
+        moveIssueDate(to: day)
+    }
+
+    /// On: the issue date floats again and reads "On issue". Off: the date shown stays, set by hand.
+    func setIssueDateOnIssue(_ onIssue: Bool) {
+        guard issueDateSetByHand == onIssue else { return }
+        issueDateSetByHand = !onIssue
+        // The flag is saved with the draft, so a change of the flag alone is a change to save.
+        update { _ in }
+        floatIssueDate()
+    }
+
+    /// A floating issue date follows today: when the draft opens, when the Issue sheet opens and at Issue,
+    /// so a draft left open over midnight is issued with the day of Issue (docs-18, docs-28).
+    func floatIssueDate() {
+        guard !issueDateSetByHand, let document else { return }
+        let today = CalendarDay(Date(), in: .current)
+        guard document.issueDate != today else { return }
+        moveIssueDate(to: today)
+    }
+
     /// Moving the issue date keeps the due days, so the due date moves with it, and so does a tax point
     /// that is "same as the issue date".
-    func setIssueDate(_ day: CalendarDay) {
+    private func moveIssueDate(to day: CalendarDay) {
         update { doc in
             let term = doc.dueDate.days(since: doc.issueDate)
             doc.issueDate = day
@@ -1174,6 +1208,7 @@ struct NumberCell: Hashable {
     /// since the editor opened).
     /// The returned document carries its number.
     func issue(seriesID: String) throws -> Document {
+        floatIssueDate()
         refreshReferenceData()
         refreshRate()
         // A draft stored before blank trailing lines were dropped is written again without them.

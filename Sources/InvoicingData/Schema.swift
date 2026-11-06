@@ -323,6 +323,16 @@ enum Schema {
                 BEGIN SELECT RAISE(ABORT, 'the payment is settled in an issued final invoice'); END
                 """)
         }
+
+        // v4 (docs-28): the floating issue date. A draft's issue date follows the day of Issue until it is set by
+        // hand; the flag is kept with the draft, outside its snapshot, so the issued snapshot never holds it.
+        migrator.registerMigration("v4") { db in
+            try db.alter(table: "document") { t in
+                t.add(column: "issueDateSetByHand", .boolean).notNull().defaults(to: false)
+            }
+            // A draft saved before keeps the date it shows: only drafts created from now on float.
+            try db.execute(sql: "UPDATE document SET issueDateSetByHand = 1 WHERE status = 'draft'")
+        }
         return migrator
     }
 }

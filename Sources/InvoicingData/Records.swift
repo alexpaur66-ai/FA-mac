@@ -175,10 +175,13 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     var createdAt: String
     var updatedAt: String
     var issuedAt: String?
+    /// Since v4: false while a draft's issue date floats to the day of Issue (docs-28).
+    var issueDateSetByHand: Bool
 
     /// Builds the row for `document`; `totals` is nil when the amounts cannot be computed (a draft may
     /// be incomplete). The hash is stored for issued documents only.
-    init(document: Document, totals: DocumentTotals?, createdAt: String, updatedAt: String, issuedAt: String?) throws {
+    init(document: Document, totals: DocumentTotals?, createdAt: String, updatedAt: String, issuedAt: String?,
+         issueDateSetByHand: Bool = false) throws {
         id = document.id
         kind = document.kind.rawValue
         status = document.status.rawValue
@@ -212,6 +215,7 @@ struct DocumentRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.issuedAt = issuedAt
+        self.issueDateSetByHand = issueDateSetByHand
     }
 
     func decode() throws -> Document {

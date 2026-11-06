@@ -38,6 +38,30 @@ import InvoicingCore
         #expect(again.number == nil)
     }
 
+    @Test func issueDateSetByHandIsKeptWithTheDraft() throws {
+        // docs-28: a new draft's issue date floats; the flag is kept outside the snapshot, a save without it
+        // keeps the stored value, and issuing keeps the snapshot free of it.
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        let draft = Fixtures.czkDraft()
+        try store.saveDraft(draft, now: Fixtures.now)
+        let created = try #require(try store.draftDating(id: draft.id))
+        #expect(created.issueDateSetByHand == false)
+        #expect(created.createdAt == Fixtures.now)
+
+        try store.saveDraft(draft, issueDateSetByHand: true, now: Fixtures.now.addingTimeInterval(60))
+        #expect(try store.draftDating(id: draft.id)?.issueDateSetByHand == true)
+        try store.saveDraft(draft, now: Fixtures.now.addingTimeInterval(120))
+        let kept = try #require(try store.draftDating(id: draft.id))
+        #expect(kept.issueDateSetByHand == true)
+        #expect(kept.createdAt == Fixtures.now)
+        #expect(try store.document(id: draft.id) == draft)
+
+        try store.saveDraft(draft, issueDateSetByHand: false, now: Fixtures.now.addingTimeInterval(180))
+        #expect(try store.draftDating(id: draft.id)?.issueDateSetByHand == false)
+        #expect(try store.draftDating(id: "no-such-document") == nil)
+    }
+
     @Test func draftWithoutComputableAmountsHasNoTotals() throws {
         let database = try Fixtures.prepared()
         let store = DocumentStore(database)

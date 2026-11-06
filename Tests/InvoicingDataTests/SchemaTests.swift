@@ -14,7 +14,7 @@ import InvoicingCore
             let exists = try database.queue.read { db in try db.tableExists(table) }
             #expect(exists, "missing table \(table)")
         }
-        #expect(InvoicingData.schemaVersion == 3)
+        #expect(InvoicingData.schemaVersion == 4)
         let foreignKeys = try database.queue.read { db in try Bool.fetchOne(db, sql: "PRAGMA foreign_keys") }
         #expect(foreignKeys == true)
     }
@@ -221,5 +221,39 @@ import InvoicingCore
         #expect(paidInAdvance == nil)
         #expect(treatments == nil)
         #expect(amountDue == 100000)
+    }
+
+    @Test func upgradingAV3DatabaseKeepsTheDatesOfSavedDrafts() throws {
+        // v4 (docs-28) adds the set-by-hand flag: a draft saved before keeps the date it shows (flag on), an
+        // issued row reads off, and a row inserted after the migration floats by default.
+        let queue = try DatabaseQueue()
+        let migrator = Schema.migrator
+        try migrator.migrate(queue, upTo: "v3")
+        try queue.write { db in
+            for (id, status, number) in [("doc-draft", "draft", nil), ("doc-issued", "issued", "FV-2026-001")] as [(String, String, String?)] {
+                try db.execute(sql: """
+                    INSERT INTO document (id, kind, status, number, customerName, issueDate, dueDate, currency, snapshot,
+                                          createdAt, updatedAt)
+                    VALUES (?, 'invoice', ?, ?, 'Beispiel GmbH', '2026-11-05', '2026-11-19', 'EUR', '{}',
+                            '2026-11-05T10:00:00Z', '2026-11-05T10:00:00Z')
+                    """, arguments: [id, status, number])
+            }
+        }
+        try migrator.migrate(queue)
+        let (draft, issued) = try queue.read { db -> (Bool?, Bool?) in
+            (try Bool.fetchOne(db, sql: "SELECT issueDateSetByHand FROM document WHERE id = 'doc-draft'"),
+             try Bool.fetchOne(db, sql: "SELECT issueDateSetByHand FROM document WHERE id = 'doc-issued'"))
+        }
+        #expect(draft == true)
+        #expect(issued == false)
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO document (id, kind, status, customerName, issueDate, dueDate, currency, snapshot, createdAt, updatedAt)
+                VALUES ('doc-new', 'invoice', 'draft', 'Beispiel GmbH', '2026-11-06', '2026-11-20', 'EUR', '{}',
+                        '2026-11-06T10:00:00Z', '2026-11-06T10:00:00Z')
+                """)
+        }
+        let fresh = try queue.read { db in try Bool.fetchOne(db, sql: "SELECT issueDateSetByHand FROM document WHERE id = 'doc-new'") }
+        #expect(fresh == false)
     }
 }

@@ -18,6 +18,19 @@ public struct DocumentFilter: Hashable, Sendable {
     }
 }
 
+/// How a draft's issue date is set (docs-28).
+public struct DraftDating: Hashable, Sendable {
+    /// False while the issue date floats: it reads "On issue" and becomes the day of Issue.
+    public let issueDateSetByHand: Bool
+    /// When the draft was first saved; nil when the stored stamp cannot be read.
+    public let createdAt: Date?
+
+    public init(issueDateSetByHand: Bool, createdAt: Date?) {
+        self.issueDateSetByHand = issueDateSetByHand
+        self.createdAt = createdAt
+    }
+}
+
 /// How much of a document has been paid.
 public struct PaymentState: Hashable, Sendable {
     public let amountDue: Money
@@ -40,7 +53,9 @@ public struct DocumentStore: Sendable {
     /// `issue` is the only way to an issued document. Throws `documentIsFrozen` for an issued id. A draft
     /// that is the receipt of a payment (`attachReceipt`) must still match it: an edit of its kind,
     /// currency, advance or amount that breaks the link throws `receiptMismatch` or `currencyMismatch`.
-    public func saveDraft(_ document: Document, now: Date = Date()) throws {
+    /// `issueDateSetByHand` records whether the issue date was picked by hand (docs-28); nil keeps the
+    /// stored flag, and a new draft's issue date floats.
+    public func saveDraft(_ document: Document, issueDateSetByHand: Bool? = nil, now: Date = Date()) throws {
         try database.queue.write { db in
             let stamp = Timestamps.string(now)
             let existing = try DocumentRecord.fetchOne(db, key: document.id)
@@ -51,7 +66,8 @@ public struct DocumentStore: Sendable {
             draft.status = .draft
             draft.number = nil
             let totals = try? DocumentTotals.compute(for: draft)
-            let record = try DocumentRecord(document: draft, totals: totals, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, issuedAt: nil)
+            let record = try DocumentRecord(document: draft, totals: totals, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, issuedAt: nil,
+                                            issueDateSetByHand: issueDateSetByHand ?? existing?.issueDateSetByHand ?? false)
             for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == draft.id).fetchAll(db) {
                 try Self.checkReceipt(db, payment: payment, receipt: record)
             }
@@ -81,6 +97,15 @@ public struct DocumentStore: Sendable {
         }
         try record.delete(db)
         try AuditLog.append(db, entity: "document", id: record.id, action: "delete", details: details, at: stamp)
+    }
+
+    /// How a draft's issue date is set (docs-28): kept with the draft, outside its snapshot. Nil when no
+    /// document has the id.
+    public func draftDating(id: String) throws -> DraftDating? {
+        try database.queue.read { db in
+            guard let record = try DocumentRecord.fetchOne(db, key: id) else { return nil }
+            return DraftDating(issueDateSetByHand: record.issueDateSetByHand, createdAt: try? Date(record.createdAt, strategy: .iso8601))
+        }
     }
 
     public func document(id: String) throws -> Document? {
@@ -171,7 +196,8 @@ public struct DocumentStore: Sendable {
             let totals = try DocumentTotals.compute(for: document)
 
             let stamp = Timestamps.string(now)
-            let issued = try DocumentRecord(document: document, totals: totals, createdAt: record.createdAt, updatedAt: stamp, issuedAt: stamp)
+            let issued = try DocumentRecord(document: document, totals: totals, createdAt: record.createdAt, updatedAt: stamp, issuedAt: stamp,
+                                            issueDateSetByHand: record.issueDateSetByHand)
             // The issued receipt rests on its payment: check the link again, the draft may have changed since.
             for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == id).fetchAll(db) {
                 try Self.checkReceipt(db, payment: payment, receipt: issued)
