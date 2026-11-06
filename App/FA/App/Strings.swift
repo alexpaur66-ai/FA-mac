@@ -570,6 +570,8 @@ enum L {
     }
     static let setToToday = r("issue.setToToday", "Set to today")
     static func issueFailed(_ error: String) -> LocalizedStringResource { r("issue.failed", "Issue failed: \(error)") }
+    /// Issue pressed after midnight: the floating issue date moved to the new day and nothing was issued (docs-28).
+    static let issueDateMovedToToday = r("issue.dateMovedToToday", "A new day has begun: the issue date is now today. Check the sheet, then issue again.")
     static func issuedResult(_ number: String) -> LocalizedStringResource { r("issue.result", "Issued \(number)") }
     static let draftGone = r("editor.gone", "This draft no longer exists.")
     static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {

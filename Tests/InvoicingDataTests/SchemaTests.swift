@@ -246,6 +246,9 @@ import InvoicingCore
         }
         #expect(draft == true)
         #expect(issued == false)
+        // The tax point's flag starts off: a draft saved before tells an explicit tax point by its other day.
+        let taxPoint = try queue.read { db in try Bool.fetchOne(db, sql: "SELECT taxPointSetByHand FROM document WHERE id = 'doc-draft'") }
+        #expect(taxPoint == false)
         try queue.write { db in
             try db.execute(sql: """
                 INSERT INTO document (id, kind, status, customerName, issueDate, dueDate, currency, snapshot, createdAt, updatedAt)

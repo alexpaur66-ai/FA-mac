@@ -83,10 +83,13 @@ enum TreatmentChoice: Hashable, CaseIterable, Identifiable {
 
 enum DraftEditorError: Error, CustomStringConvertible {
     case saveFailed(String)
+    /// A floating issue date moved to a new day at Issue: nothing was issued (docs-28).
+    case issueDateMoved
 
     var description: String {
         switch self {
         case .saveFailed(let detail): detail
+        case .issueDateMoved: String(localized: L.issueDateMovedToToday)
         }
     }
 }
@@ -219,8 +222,12 @@ struct NumberCell: Hashable {
             } else if let customer = customers.first(where: { $0.id == document.customerID }) {
                 treatmentChoice = TreatmentChoice(customer.vatStatus.defaultTreatment)
             }
-            // A payment tax document's tax point is the day of its payment and never follows the issue date.
-            taxPointExplicit = document.kind == .paymentTaxDocument || document.taxPointDate.map { $0 != document.issueDate } ?? false
+            // A payment tax document's tax point is the day of its payment and never follows the issue date. A
+            // tax point picked with "Same as the issue date" off is stored as such, so one on the issue date's day
+            // does not float with it (docs-28); a draft saved without the flag tells it by a different day.
+            let taxPointSetByHand = dating?.taxPointSetByHand ?? false
+            taxPointExplicit = document.kind == .paymentTaxDocument || taxPointSetByHand
+                || document.taxPointDate.map { $0 != document.issueDate } ?? false
             // One blank row to type into (design-system.md §8.5); it is never saved or validated.
             if document.lines.isEmpty { appendBlankLine() }
             recompute()
@@ -282,7 +289,8 @@ struct NumberCell: Hashable {
         saveTask = nil
         guard !discarded, saveState != .saved, let document, document.status == .draft else { return true }
         do {
-            try stores.documents.saveDraft(Self.strippingBlankTrailingLines(document), issueDateSetByHand: issueDateSetByHand)
+            try stores.documents.saveDraft(Self.strippingBlankTrailingLines(document), issueDateSetByHand: issueDateSetByHand,
+                                           taxPointSetByHand: taxPointExplicit)
             saveState = .saved
             saveError = nil
             return true
@@ -556,12 +564,15 @@ struct NumberCell: Hashable {
     }
 
     /// A floating issue date follows today: when the draft opens, when the Issue sheet opens and at Issue,
-    /// so a draft left open over midnight is issued with the day of Issue (docs-18, docs-28).
-    func floatIssueDate() {
-        guard !issueDateSetByHand, let document else { return }
+    /// so a draft left open over midnight is issued with the day of Issue (docs-18, docs-28). True when the
+    /// date moved.
+    @discardableResult
+    func floatIssueDate() -> Bool {
+        guard !issueDateSetByHand, let document else { return false }
         let today = CalendarDay(Date(), in: .current)
-        guard document.issueDate != today else { return }
+        guard document.issueDate != today else { return false }
         moveIssueDate(to: today)
+        return true
     }
 
     /// Moving the issue date keeps the due days, so the due date moves with it, and so does a tax point
@@ -1206,9 +1217,11 @@ struct NumberCell: Hashable {
     /// first, so the supplier and client copies follow a Settings save made meanwhile, and so is the rate
     /// of the rate day (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`: a day's file may have been imported
     /// since the editor opened).
-    /// The returned document carries its number.
+    /// The returned document carries its number. A floating issue date that moves to a new day here (the
+    /// sheet stayed open over midnight) throws `issueDateMoved` without issuing, so the sheet shows the new
+    /// date, number and checks before Issue is pressed again.
     func issue(seriesID: String) throws -> Document {
-        floatIssueDate()
+        if floatIssueDate() { throw DraftEditorError.issueDateMoved }
         refreshReferenceData()
         refreshRate()
         // A draft stored before blank trailing lines were dropped is written again without them.

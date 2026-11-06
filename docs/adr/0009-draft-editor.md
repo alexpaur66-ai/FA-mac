@@ -40,8 +40,11 @@ the list, and uses an English interface.
   toggle is on, and the date becomes today when the draft opens, when the Issue sheet opens and at
   Issue. Turning the toggle off keeps the date in a date picker, set by hand. The flag is the draft
   row's `issueDateSetByHand` column (schema v4), outside the snapshot; drafts saved before v4 count as
-  set by hand. The sheet's ⚠ issue-date row ("Set to today") shows only for a date set by hand that is
-  not today, or for a floating date that moves a "Same as the issue date" DUZP out of the month the
+  set by hand. A tax point picked with "Same as the issue date" off is kept the same way
+  (`taxPointSetByHand`), so one on the issue date's day stays put while the issue date floats; Undo of
+  Delete Draft writes both flags back. A floating date that moves while the Issue sheet is open (past
+  midnight) stops Issue once, so the sheet shows the new date and checks first. The sheet's ⚠
+  issue-date row ("Set to today") shows only for a date set by hand that is not today, or for a floating date that moves a "Same as the issue date" DUZP out of the month the
   draft was started in. The per-client DUZP rule is dropped (lean pass: a Period sets the month's last day).
 - **Exchange rate.** A foreign-currency tax document takes `RateStore.rate(for:on:)` for its tax point;
   the rule-6 fallback (last published rate) is shown as ℹ. Without any rate the inline form saves a

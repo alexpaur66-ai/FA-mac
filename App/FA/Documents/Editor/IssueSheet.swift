@@ -504,6 +504,10 @@ struct IssueSheet: View {
             let issued = try model.issue(seriesID: seriesID)
             dismiss()
             onIssued(issued)
+        } catch DraftEditorError.issueDateMoved {
+            // Nothing was issued: the sheet shows the new day's date, number and checks before Issue again.
+            issuing = false
+            error = String(localized: L.issueDateMovedToToday)
         } catch DraftEditorError.saveFailed(let detail) {
             issuing = false
             error = String(localized: L.issueFailed(detail))

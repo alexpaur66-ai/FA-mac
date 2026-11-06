@@ -22,11 +22,15 @@ public struct DocumentFilter: Hashable, Sendable {
 public struct DraftDating: Hashable, Sendable {
     /// False while the issue date floats: it reads "On issue" and becomes the day of Issue.
     public let issueDateSetByHand: Bool
+    /// True when the tax point was picked with "Same as the issue date" off: it stays put while the issue
+    /// date floats, even when it is the issue date's day.
+    public let taxPointSetByHand: Bool
     /// When the draft was first saved; nil when the stored stamp cannot be read.
     public let createdAt: Date?
 
-    public init(issueDateSetByHand: Bool, createdAt: Date?) {
+    public init(issueDateSetByHand: Bool, taxPointSetByHand: Bool = false, createdAt: Date?) {
         self.issueDateSetByHand = issueDateSetByHand
+        self.taxPointSetByHand = taxPointSetByHand
         self.createdAt = createdAt
     }
 }
@@ -54,8 +58,10 @@ public struct DocumentStore: Sendable {
     /// that is the receipt of a payment (`attachReceipt`) must still match it: an edit of its kind,
     /// currency, advance or amount that breaks the link throws `receiptMismatch` or `currencyMismatch`.
     /// `issueDateSetByHand` records whether the issue date was picked by hand (docs-28); nil keeps the
-    /// stored flag, and a new draft's issue date floats.
-    public func saveDraft(_ document: Document, issueDateSetByHand: Bool? = nil, now: Date = Date()) throws {
+    /// stored flag, and a new draft's issue date floats. `taxPointSetByHand` likewise records a tax point
+    /// picked with "Same as the issue date" off; nil keeps the stored flag.
+    public func saveDraft(_ document: Document, issueDateSetByHand: Bool? = nil, taxPointSetByHand: Bool? = nil,
+                          now: Date = Date()) throws {
         try database.queue.write { db in
             let stamp = Timestamps.string(now)
             let existing = try DocumentRecord.fetchOne(db, key: document.id)
@@ -67,7 +73,8 @@ public struct DocumentStore: Sendable {
             draft.number = nil
             let totals = try? DocumentTotals.compute(for: draft)
             let record = try DocumentRecord(document: draft, totals: totals, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, issuedAt: nil,
-                                            issueDateSetByHand: issueDateSetByHand ?? existing?.issueDateSetByHand ?? false)
+                                            issueDateSetByHand: issueDateSetByHand ?? existing?.issueDateSetByHand ?? false,
+                                            taxPointSetByHand: taxPointSetByHand ?? existing?.taxPointSetByHand ?? false)
             for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == draft.id).fetchAll(db) {
                 try Self.checkReceipt(db, payment: payment, receipt: record)
             }
@@ -104,7 +111,8 @@ public struct DocumentStore: Sendable {
     public func draftDating(id: String) throws -> DraftDating? {
         try database.queue.read { db in
             guard let record = try DocumentRecord.fetchOne(db, key: id) else { return nil }
-            return DraftDating(issueDateSetByHand: record.issueDateSetByHand, createdAt: try? Date(record.createdAt, strategy: .iso8601))
+            return DraftDating(issueDateSetByHand: record.issueDateSetByHand, taxPointSetByHand: record.taxPointSetByHand,
+                               createdAt: try? Date(record.createdAt, strategy: .iso8601))
         }
     }
 
@@ -197,7 +205,7 @@ public struct DocumentStore: Sendable {
 
             let stamp = Timestamps.string(now)
             let issued = try DocumentRecord(document: document, totals: totals, createdAt: record.createdAt, updatedAt: stamp, issuedAt: stamp,
-                                            issueDateSetByHand: record.issueDateSetByHand)
+                                            issueDateSetByHand: record.issueDateSetByHand, taxPointSetByHand: record.taxPointSetByHand)
             // The issued receipt rests on its payment: check the link again, the draft may have changed since.
             for payment in try DocumentPaymentRecord.filter(Column("receiptDocumentID") == id).fetchAll(db) {
                 try Self.checkReceipt(db, payment: payment, receipt: issued)
