@@ -50,9 +50,11 @@ existing data to import.
   code change. Dates, money and counts always go through the system formatters.
 - **Text scale** (View ▸ Bigger / Smaller / Actual Size) is kept in `AppModel`, persisted in
   UserDefaults, 1.0–2.0 in five steps, and applied through the design system's environment value.
-- **Settings** is the standard Settings scene: General, Company, Bank accounts, Numbering (defaults
-  FV `{YYYY}-{NNNN}` with VS prefix 1 for invoices and final invoices, ZF with prefix 2, DD without a
-  prefix), Documents & PDF, VAT defaults, Backup; the window reopens on the pane viewed last. The Overview
+- **Settings** is the standard Settings scene with four panes (lean pass set-01, PR 31): General (the PDF
+  folder), Company (with the footer), Bank Accounts, Numbering (defaults FV `{YYYY}-{NNNN}` with VS prefix
+  1 for invoices and final invoices, ZF with prefix 2, DD without a prefix). There are no Documents & PDF,
+  VAT defaults or Backup panes; their contents are fixed rules, General or the File menu. Every pane but
+  Numbering stores a field as soon as it is committed. The window reopens on the pane viewed last. The Overview
   shows a "Getting started" card until company, bank account and series exist. *Amended by the lean pass
   (other-04, other-15):* the card has those three steps only and one Open Settings… button for the first
   unfinished pane; on a first run it is the Overview's only content, and a data error replaces it.
@@ -102,7 +104,9 @@ existing data to import.
 - Payments keeps its selection per window and lists Date · Client · Document · Amount · Note, with search;
   as in Documents, a selection the search hides is dropped, so ⌫ and the menus act only on visible rows.
 - The client form has a country pop-up and a VAT treatment pop-up; new clients default to EUR, 14 days
-  and EU reverse charge (decision of 5 Nov 2026). The company's term and footer live in Documents & PDF.
+  and the client's VAT status from the goods-decisions country rule (goods decisions of 5 Nov 2026; ADR
+  0011). The footer lives in Company, one for both document languages (answers R033); a new client's
+  payment term is a fixed 14 days, and each client keeps its own term.
 - The Numbering pane and the series sheet compare the variable symbols and the document numbers of a
   sample number across series (two series issuing the same numbers get a warning),
   preview the next number as the store assigns it today, and lock year and counter once the app issued a
