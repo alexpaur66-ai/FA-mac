@@ -40,7 +40,10 @@ final class RepairModeModel {
     func turnOn(reason: String) async -> Bool {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        // Already on (another window unlocked it): the running session keeps its reason and its count.
+        if isOn { return true }
         guard await Self.authenticate(prompt: String(localized: L.repairAuthPrompt)) else { return false }
+        if isOn { return true }
         self.reason = trimmed
         changeCount = 0
         endedByTimeout = false
@@ -368,10 +371,15 @@ final class DocumentRepairer {
         let text = result.changes.count == 1
             ? String(localized: L.repairDoneOne(number)) : String(localized: L.repairDone(number, result.changes.count))
         report(text, isProblem: false, documentID: documentID)
+        // Only the fields this repair changed go back, onto the header as stored then: a later repair of the
+        // same document (from another window, say) stays.
         let before = result.before
+        let changed = Set(result.changes.map(\.field))
         register { repairer in
             do {
-                try repairer.perform(documentID: documentID, repair: before, reason: reason, asUndo: !asUndo)
+                let current = try repairer.stores.repairs.header(documentID: documentID)
+                let reverted = before.restoring(changed, onto: current)
+                try repairer.perform(documentID: documentID, repair: reverted, reason: reason, asUndo: !asUndo)
             } catch {
                 repairer.report(ErrorText.message(error), isProblem: true, documentID: nil)
             }

@@ -23,11 +23,28 @@ public struct DocumentHeaderRepair: Hashable, Sendable {
         self.init(customer: document.customer, dueDate: document.dueDate, orderReference: document.orderReference, note: document.note)
     }
 
+    /// A text that differs from the stored one only in surrounding blanks is not a change: the stored text
+    /// stays exactly as it is, so an untouched field is never logged and Undo restores the exact snapshot.
     func apply(to document: inout Document) {
         document.customer = customer
         document.dueDate = dueDate
-        document.orderReference = Self.cleaned(orderReference)
-        document.note = Self.cleaned(note)
+        if Self.cleaned(orderReference) != Self.cleaned(document.orderReference) {
+            document.orderReference = Self.cleaned(orderReference)
+        }
+        if Self.cleaned(note) != Self.cleaned(document.note) {
+            document.note = Self.cleaned(note)
+        }
+    }
+
+    /// `current` with the fields in `fields` set back to the values this header holds; the client's details
+    /// go back as a whole. Undo uses it so it takes back only its own change, not a later one.
+    public func restoring(_ fields: Set<RepairField>, onto current: DocumentHeaderRepair) -> DocumentHeaderRepair {
+        var header = current
+        if fields.contains(where: { $0.rawValue.hasPrefix("customer") }) { header.customer = customer }
+        if fields.contains(.dueDate) { header.dueDate = dueDate }
+        if fields.contains(.orderReference) { header.orderReference = orderReference }
+        if fields.contains(.note) { header.note = note }
+        return header
     }
 
     /// Empty text is no text.
@@ -79,6 +96,14 @@ public struct RepairStore: Sendable {
 
     public init(_ database: AppDatabase) {
         self.database = database
+    }
+
+    /// The header of the issued document as stored now.
+    public func header(documentID: String) throws -> DocumentHeaderRepair {
+        try database.queue.read { db in
+            let (_, document) = try Self.issued(db, id: documentID)
+            return DocumentHeaderRepair(document)
+        }
     }
 
     /// The issued document with `repair` applied, checked but not stored: the app renders its new PDF from it.

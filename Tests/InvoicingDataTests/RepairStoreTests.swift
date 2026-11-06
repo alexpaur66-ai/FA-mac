@@ -80,6 +80,50 @@ import InvoicingCore
         }
     }
 
+    @Test func anUntouchedNoteKeepsItsBlanksAndIsNotLogged() throws {
+        let database = try Fixtures.prepared()
+        let documents = DocumentStore(database)
+        var draft = Fixtures.czkDraft()
+        draft.note = "Thanks\n"
+        draft.orderReference = " PO-7 "
+        try documents.saveDraft(draft, now: Fixtures.now)
+        let document = try documents.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        let store = RepairStore(database)
+        // The sheet saved with no edits: the text fields come back as stored.
+        #expect(throws: RepairError.nothingChanged) {
+            try store.repair(documentID: "doc-cz", repair: DocumentHeaderRepair(document), reason: "Typo", pdf: nil)
+        }
+        var repair = DocumentHeaderRepair(document)
+        repair.dueDate = Fixtures.day("2026-11-30")
+        let result = try store.repair(documentID: "doc-cz", repair: repair, reason: "Wrong due date", pdf: nil,
+                                      now: Fixtures.now.addingTimeInterval(60))
+        #expect(result.changes.map(\.field) == [.dueDate])
+        let stored = try #require(try documents.document(id: "doc-cz"))
+        #expect(stored.note == "Thanks\n")
+        #expect(stored.orderReference == " PO-7 ")
+    }
+
+    @Test func undoTakesBackOnlyItsOwnFields() throws {
+        let database = try Fixtures.prepared()
+        let document = try issuedInvoice(database)
+        let store = RepairStore(database)
+        var dueDate = DocumentHeaderRepair(document)
+        dueDate.dueDate = Fixtures.day("2026-11-30")
+        let first = try store.repair(documentID: "doc-cz", repair: dueDate, reason: "Wrong due date", pdf: nil,
+                                     now: Fixtures.now.addingTimeInterval(60))
+        var client = try store.header(documentID: "doc-cz")
+        client.customer = movedParty()
+        try store.repair(documentID: "doc-cz", repair: client, reason: "Wrong address", pdf: nil,
+                         now: Fixtures.now.addingTimeInterval(120))
+        // Undo of the first repair: the due date goes back, the later address stays.
+        let undo = first.before.restoring(Set(first.changes.map(\.field)), onto: try store.header(documentID: "doc-cz"))
+        let undone = try store.repair(documentID: "doc-cz", repair: undo, reason: "Undo: Wrong due date", pdf: nil,
+                                      now: Fixtures.now.addingTimeInterval(180))
+        #expect(undone.changes.map(\.field) == [.dueDate])
+        #expect(undone.document.dueDate == document.dueDate)
+        #expect(undone.document.customer.address.street == "Nová 5")
+    }
+
     @Test func aRepairThatBreaksTheDocumentIsRefused() throws {
         let database = try Fixtures.prepared()
         let documents = DocumentStore(database)

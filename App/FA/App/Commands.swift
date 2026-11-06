@@ -200,9 +200,11 @@ struct AppCommands: Commands {
             Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
                 .disabled(actions?.showDataFolder == nil)
             Divider()
-            // No shortcut on purpose: it unlocks every record (§2m, §3.1). While on, it ends the mode.
-            if let end = actions?.endRepairMode {
-                Button { end() } label: { Text(L.repairEnd) }
+            // No shortcut on purpose: it unlocks every record (§2m, §3.1). While on, it ends the mode, whichever
+            // window is key: the mode is the app's, not a window's.
+            // The focused window's actions also carry the state, so the menu follows it as focus changes.
+            if model.repairMode.isOn || actions?.endRepairMode != nil {
+                Button { model.repairMode.end() } label: { Text(L.repairEnd) }
             } else {
                 Button { actions?.turnOnRepairMode?() } label: { Text(L.menuRepairMode) }
                     .disabled(actions?.turnOnRepairMode == nil)
