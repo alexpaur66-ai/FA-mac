@@ -702,7 +702,6 @@ struct NumberCell: Hashable {
         recompute()
     }
 
-    @discardableResult
     // MARK: Discount column (docs-22)
 
     /// Add Discount: the line whose Discount % cell takes focus. The column shows while this is set, a line
@@ -727,6 +726,7 @@ struct NumberCell: Hashable {
         if discountRequestLineID != nil { discountRequestLineID = nil }
     }
 
+    @discardableResult
     func addLine() -> String {
         let line = DocumentLine(text: "", quantity: 1, unit: nil, unitPrice: 0, treatment: newLineTreatment)
         update { doc in doc.lines.append(line) }
