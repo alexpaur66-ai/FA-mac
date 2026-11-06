@@ -26,7 +26,9 @@ struct SettingsRoot: View {
 
     var body: some View {
         if let stores = model.stores {
+            // A restore bumps the generation: the panes reload from the restored data.
             SettingsView(stores: stores)
+                .id(model.generation)
         } else {
             DatabaseErrorView(detail: model.openError ?? "", databaseURL: model.databaseURL)
         }
@@ -36,6 +38,7 @@ struct SettingsRoot: View {
 struct SettingsView: View {
     let stores: Stores
     @AppStorage(SettingsPane.storageKey) private var pane: SettingsPane = .general
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         TabView(selection: $pane) {
@@ -53,6 +56,12 @@ struct SettingsView: View {
                 .tag(SettingsPane.numbering)
         }
         .frame(minWidth: 640, minHeight: 480)
+        // A restore is about to replace the data: Remove Bank Account undos made before it do nothing
+        // (AppModel spends them) and leave the window's Edit ▸ Undo.
+        .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
+            BankAccountUndo.invalidateAll()
+            undoManager?.removeAllActions()
+        }
     }
 }
 
@@ -260,6 +269,12 @@ struct CompanyPane: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             commit()
         }
+        // Commit once into the data about to be backed up, then never again: the pane is rebuilt on the
+        // restored data, and its onDisappear must not write the old fields over it.
+        .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
+            commit()
+            isLoaded = false
+        }
     }
 
     @ViewBuilder
@@ -392,6 +407,15 @@ struct CompanyPane: View {
         let action = BankAccountUndo()
         registered.append(action)
         return action
+    }
+
+    /// Before a restore replaces the data: every removal made so far can no longer be undone, so no Undo
+    /// puts an account of the replaced data into the restored profile. The actions stay in `registered`,
+    /// as a closed Settings window's stack may still point at them.
+    static func invalidateAll() {
+        for action in registered {
+            action.run = nil
+        }
     }
 }
 
@@ -821,4 +845,8 @@ extension Notification.Name {
     /// Posted after Settings wrote the company profile, a bank account, a number series or the document
     /// defaults, so an open draft editor re-reads them at once (design check E024).
     static let settingsDidSave = Notification.Name("FA.settingsDidSave")
+    /// Posted just before a restore replaces the data (before the backup of the current data): open
+    /// editors write what they hold, then write nothing more, so the restored data is never overwritten
+    /// by a view that is about to be rebuilt.
+    static let dataWillBeReplaced = Notification.Name("FA.dataWillBeReplaced")
 }

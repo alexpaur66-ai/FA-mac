@@ -136,6 +136,15 @@ final class DocumentListModel {
         return ticket
     }
 
+    /// Before a restore replaces the data: every registration made so far is spent, so neither the line
+    /// nor Edit ▸ Undo writes the replaced data into the restored data. The tickets stay alive here, as
+    /// the UndoManager may still point at them.
+    func invalidateUndo() {
+        for ticket in undoTickets {
+            ticket.spent = true
+        }
+    }
+
     /// True the first time a ticket is used: the result line's Undo and Edit ▸ Undo share one ticket.
     private func spend(_ ticket: UndoTicket) -> Bool {
         guard !ticket.spent else { return false }

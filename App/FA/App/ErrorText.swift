@@ -25,6 +25,12 @@ enum ErrorText {
         if let patternError = error as? DocumentNumberPattern.PatternError {
             return String(localized: resource(patternError))
         }
+        if let backupError = error as? BackupError {
+            switch backupError {
+            case .unreadable: return String(localized: L.backupUnreadable)
+            case .madeByNewerVersion: return String(localized: L.backupFromNewerVersion)
+            }
+        }
         if let numbering = error as? DocumentNumberSeries.NumberingError {
             return String(localized: resource(numbering))
         }

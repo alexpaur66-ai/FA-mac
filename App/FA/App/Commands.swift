@@ -152,12 +152,17 @@ struct AppCommands: Commands {
             Button {} label: { Text(L.menuExportAccountant) }
                 .disabled(true)
             Divider()
-            // Back Up Now runs at once (§2h); Restore from Backup… comes with the restore step and stays
-            // disabled until then. Show Data Folder is the one place the data file is reachable from.
+            // Back Up Now runs at once; Restore from Backup… picks a file, previews it and asks (§2h). Show
+            // Data Folder is the one place the data file is reachable from.
             Button { actions?.backUpNow?() } label: { Text(L.backUpNow) }
                 .disabled(actions?.backUpNow == nil)
-            Button {} label: { Text(L.restoreFromBackup) }
-                .disabled(true)
+            // The preview and the alert show in the main window, so it is brought up first (a new one only
+            // when none is open).
+            Button {
+                showMainWindow()
+                model.chooseBackupToRestore()
+            } label: { Text(L.restoreFromBackup) }
+                .disabled(!model.canRestore)
             Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
                 .disabled(actions?.showDataFolder == nil)
         }
