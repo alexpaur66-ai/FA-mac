@@ -154,7 +154,6 @@ enum L {
     // MARK: Document detail (screens-flows.md §2b)
 
     static let draftTitle = r("document.draft", "Draft")
-    static let draftNote = r("document.draftNote", "Drafts open in the editor. This draft carries the client's defaults and can be deleted.")
     static func lockLine(_ issued: String) -> LocalizedStringResource {
         r("document.lockLine", "Issued \(issued) · locked. Corrections via credit note (Phase 2).")
     }
@@ -164,7 +163,6 @@ enum L {
     }
     static let paymentsSection = r("document.payments", "Payments")
     static let paid = r("document.paid", "Paid")
-    static let outstanding = r("document.outstanding", "Outstanding")
     static let issuedOn = r("document.issuedOn", "Issue date")
     static let dueOn = r("document.dueOn", "Due date")
     static let variableSymbol = r("document.variableSymbol", "Variable symbol")
@@ -176,7 +174,6 @@ enum L {
     static let totalsPerCurrency = r("document.totalsPerCurrency", "Totals per currency")
     static let activity = r("document.activity", "Activity")
     static let account = r("document.account", "Account")
-    static let chain = r("document.chain", "Related Documents")
 
     // MARK: Sheets
 
@@ -626,7 +623,6 @@ enum L {
     static let paymentDeleted = r("result.paymentDeleted", "Payment deleted")
     static let accountRemoved = r("result.accountRemoved", "Bank account removed")
     static let importedRatesOne = r("rates.importedOne", "1 rate imported")
-    static let lockedNumber = r("document.locked", "Issued and locked")
     static func paymentLockedBy(_ number: String) -> LocalizedStringResource {
         r("payment.lockedBy", "Payment is the basis of \(number) and can't be deleted")
     }
@@ -703,13 +699,10 @@ enum L {
     static func seriesCollisionWith(_ name: String) -> LocalizedStringResource {
         r("series.collisionWith", "Would give the same variable symbol as the series \(name). Change the pattern or the VS prefix.")
     }
-    static let bannerClosedUnpaid = r("document.bannerClosedUnpaid", "Closed as unpaid")
-    static let bannerMarkedForCreditNote = r("document.bannerMarkedForCreditNote", "Marked for credit note – credit notes arrive in Phase 2")
     static func rateEqualsAmount(_ amount: Int, _ code: String, _ rate: String) -> LocalizedStringResource {
         r("rates.rateEqualsAmount", "\(amount) \(code) = \(rate) CZK")
     }
     static let documentDefaultsTitle = r("settings.documentDefaults", "Document defaults")
-    static let deductedByLabel = r("document.deductedByLabel", "Deducted in")
     static let activityDraftCreated = r("activity.draftCreated", "Draft created")
     static let draftRestoredUnlinked = r(
         "result.draftRestoredUnlinked",
@@ -747,12 +740,9 @@ enum L {
     static func advanceAlreadyInFinalInvoice(_ numbers: String) -> LocalizedStringResource {
         r("finalInvoice.advanceAlreadyIn", "This advance is already in final invoice \(numbers).")
     }
-    static let settledInLabel = r("document.settledInLabel", "Settled in")
     static func paymentSettledBy(_ number: String) -> LocalizedStringResource {
         r("payment.settledBy", "Payment is settled in \(number) and can't be deleted")
     }
-    /// The lock of a settled payment row, for VoiceOver.
-    static let paymentSettledLocked = r("payment.settledLocked", "A final invoice settled this payment as paid in advance; it cannot change.")
     static func errorRelatedPaymentSettled(_ number: String) -> LocalizedStringResource {
         r("error.relatedPaymentSettled",
           "Final invoice \(number) settled the other side of this credit as paid in advance, so the credit cannot be deleted.")
@@ -798,4 +788,62 @@ enum L {
     static let unpaidAdvances = r("selection.unpaidAdvances", "Unpaid advances")
     static let selectionRevenue = r("selection.revenue", "Revenue (tax documents)")
     static let openBalance = r("selection.openBalance", "Open balance")
+
+    // MARK: Lean documents (screens-flows.md §2b, §2d; design-system.md §4.3)
+
+    /// The badge detail of a final invoice its advances settled.
+    static let byAdvances = r("status.byAdvances", "by advances")
+    static let showClientHelp = r("document.showClientHelp", "Show this client in Clients")
+    static let colTaxPoint = r("column.taxPoint", "DUZP")
+    static let figureTaxPoint = r("document.taxPoint", "DUZP")
+    /// "1 EUR = 24,315 CZK · for 30. 10. 2026 · Typed".
+    static func figureRate(_ rate: String, _ day: String, _ source: String) -> LocalizedStringResource {
+        r("document.rateLine", "\(rate) · for \(day) · \(source)")
+    }
+    /// A weekend or holiday: the last rate published before the rate day (screens-flows.md §0 rule 6).
+    static func figureRateFallback(_ rate: String, _ day: String, _ source: String) -> LocalizedStringResource {
+        r("document.rateLineFallback", "\(rate) · last published rate, for \(day) · \(source)")
+    }
+    /// "Czech + English · EU goods, exempt".
+    static func languageAndTreatments(_ language: String, _ treatments: String) -> LocalizedStringResource {
+        r("document.languageAndTreatments", "\(language) · \(treatments)")
+    }
+
+    // The chain line (screens-flows.md §2d).
+    static func chainAdvance(_ number: String) -> LocalizedStringResource { r("chain.advance", "Advance \(number)") }
+    static func chainAdvanceState(_ number: String, _ state: String) -> LocalizedStringResource {
+        r("chain.advanceState", "Advance \(number) · \(state)")
+    }
+    /// VoiceOver: "Advance ZF 2026-0003, paid".
+    static func chainAdvanceSpoken(_ number: String, _ state: String) -> LocalizedStringResource {
+        r("chain.advanceSpoken", "Advance \(number), \(state)")
+    }
+    static func chainPayment(_ day: String) -> LocalizedStringResource { r("chain.payment", "Payment \(day)") }
+    static let chainPaymentFuture = r("chain.paymentFuture", "Payment")
+    static func chainTaxDocument(_ number: String) -> LocalizedStringResource { r("chain.taxDocument", "Tax document \(number)") }
+    static let chainTaxDocumentDraft = r("chain.taxDocumentDraft", "Tax document (draft)")
+    static let chainTaxDocumentFuture = r("chain.taxDocumentFuture", "Tax document")
+    static func chainFinal(_ number: String) -> LocalizedStringResource { r("chain.final", "Final invoice \(number)") }
+    static let chainFinalDraft = r("chain.finalDraft", "Final invoice (draft)")
+    static let chainFinalFuture = r("chain.finalFuture", "Final invoice")
+
+    // Document ▸ Show Related Documents ▸ (screens-flows.md §1.4), title case.
+    static let menuShowRelated = r("menu.showRelated", "Show Related Documents")
+    static func relatedAdvance(_ number: String) -> LocalizedStringResource { r("menu.related.advance", "Advance \(number)") }
+    static func relatedTaxDocument(_ number: String) -> LocalizedStringResource { r("menu.related.taxDocument", "Tax Document \(number)") }
+    static let relatedTaxDocumentDraft = r("menu.related.taxDocumentDraft", "Tax Document (Draft)")
+    static func relatedFinal(_ number: String) -> LocalizedStringResource { r("menu.related.final", "Final Invoice \(number)") }
+    static let relatedFinalDraft = r("menu.related.finalDraft", "Final Invoice (Draft)")
+
+    // View ▸ Sort By ▸ and Edit ▸ Jump to Search Field (screens-flows.md §1.4).
+    static let menuSortBy = r("menu.sortBy", "Sort By")
+    static let sortAscending = r("menu.sortAscending", "Ascending")
+    static let sortDescending = r("menu.sortDescending", "Descending")
+    /// The Drafts filter's default sort, which has no column.
+    static let sortLastEdited = r("menu.sortLastEdited", "Last Edited")
+    static let jumpToSearch = r("menu.jumpToSearch", "Jump to Search Field")
+    /// The subtitle of the Record Payment and closing sheets: "FV 2026-0042 · Acme GmbH".
+    static func numberAndClient(_ number: String, _ client: String) -> LocalizedStringResource {
+        r("closure.subtitle", "\(number) · \(client)")
+    }
 }

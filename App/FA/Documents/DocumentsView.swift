@@ -1,5 +1,6 @@
 // The Documents section: one table over the live document states, with the smart filter from the sidebar,
-// search, the per-filter sort and the toolbar (screens-flows.md §2b).
+// search, the per-filter sort and the toolbar (screens-flows.md §2b). The keys are ↩ (open), ⌫ (delete the
+// selected drafts) and ⎋ (clear the search, then the selection); no letter key is bound.
 
 import InvoicingCore
 import InvoicingData
@@ -12,21 +13,32 @@ struct DocumentsView: View {
     @Binding var selection: Set<String>
     /// The search text; the window owns it so that opening a draft can clear it.
     @Binding var search: String
+    /// Edit ▸ Jump to Search Field presents the field through this binding.
+    @Binding var searchPresented: Bool
+    /// The filter's sort, remembered per filter by the window (screens-flows.md §1.1 Restore).
+    @Binding var sortOrder: [KeyPathComparator<DocumentRow>]
     /// The draft open in the editor: its row stays listed whatever the search says.
     let editingID: String?
     let newDocument: @MainActor (DocumentKind) -> Void
     /// What one row offers, for the context menu and the toolbar.
     let documentActions: @MainActor (String) -> DocumentActions
     let deleteDrafts: @MainActor ([String]) -> Void
+    /// ↩ or a double-click: a draft moves focus into its editor, an issued document into the issued view.
+    let open: @MainActor (String) -> Void
 
-    @State private var sortOrder: [KeyPathComparator<DocumentRow>] = [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
     @SceneStorage("documentsColumns") private var columnCustomization: TableColumnCustomization<DocumentRow>
+    @FocusState private var tableFocused: Bool
     @Environment(\.locale) private var locale
 
     private var rows: [DocumentRow] {
         documents.rows(for: filter)
-            .filter { $0.matches(search: search) || $0.id == editingID }
+            .filter { row in row.id == editingID || matchesSearch(row) }
             .sorted(using: sortOrder)
+    }
+
+    /// The row is a result of the search; the open draft's row is listed without being one.
+    private func matchesSearch(_ row: DocumentRow) -> Bool {
+        row.matches(search: search, extra: { documents.searchText(for: row.state) })
     }
 
     /// The selection without the documents the filter or the search hides, so the detail column, the
@@ -51,9 +63,12 @@ struct DocumentsView: View {
         }
         .navigationTitle(Text(L.documents))
         .navigationSubtitle(Text(subtitle(count: rows.count)))
-        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchDocuments))
-        .onChange(of: filter, initial: true) { _, newFilter in
-            sortOrder = newFilter.defaultSortOrder
+        .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: Text(L.searchDocuments))
+        // ↩ in the field moves focus to the first result (screens-flows.md §2b), not to the open draft's row.
+        .onSubmit(of: .search) {
+            guard let first = rows.first(where: { matchesSearch($0) }) else { return }
+            selection = [first.id]
+            tableFocused = true
         }
         .onChange(of: rows.map(\.id), initial: true) { _, ids in
             let kept = Self.pruned(selection, visible: Set(ids), known: { documents.state(id: $0) != nil })
@@ -85,9 +100,11 @@ struct DocumentsView: View {
             .width(min: 90, ideal: 130)
             .customizationID("number")
 
+            // The short name as text, the long title as its tooltip (screens-flows.md §5).
             TableColumn(Text(L.colType), value: \.typeName) { row in
-                Label { Text(verbatim: row.typeName) } icon: { Image(systemName: row.kind.symbol) }
+                Text(verbatim: row.typeName)
                     .textRole(.body)
+                    .help(Text(row.kind.longTitle))
             }
             .width(min: 80, ideal: 110)
             .customizationID("type")
@@ -133,19 +150,44 @@ struct DocumentsView: View {
             .alignment(.trailing)
             .customizationID("open")
 
+            // The date of taxable supply, hidden by default; "—" when the document has none.
+            TableColumn(Text(L.colTaxPoint), value: \.taxPointKey) { row in
+                if let day = row.summary.taxPointDate {
+                    DayText(day)
+                } else {
+                    Text(verbatim: "—").textRole(.amountSecondary)
+                }
+            }
+            .width(min: 90, ideal: 100)
+            .alignment(.trailing)
+            .customizationID("duzp")
+            .defaultVisibility(.hidden)
+
             TableColumn(Text(L.colVS), value: \.variableSymbol) { row in
                 Text(verbatim: row.variableSymbol).textRole(.amount)
             }
             .alignment(.trailing)
             .customizationID("vs")
             .defaultVisibility(.hidden)
-
-            TableColumn(Text(L.colCurrency), value: \.currencyCode)
-                .customizationID("currency")
-                .defaultVisibility(.hidden)
         }
         .contextMenu(forSelectionType: String.self) { ids in
             contextMenu(ids)
+        } primaryAction: { ids in
+            // A double-click opens the row, as ↩ does.
+            if ids.count == 1, let id = ids.first { open(id) }
+        }
+        .focused($tableFocused)
+        .onKeyPress(.return) {
+            guard selection.count == 1, let id = selection.first else { return .ignored }
+            open(id)
+            return .handled
+        }
+        .onExitCommand {
+            if !search.isEmpty {
+                search = ""
+            } else {
+                selection = []
+            }
         }
         .onDeleteCommand {
             // Only the selected drafts the table shows; a hidden id is never deleted.
@@ -160,14 +202,18 @@ struct DocumentsView: View {
                 Button { paymentAction() } label: { Text(actions.paymentTitle) }
             }
             // At most one create item, the chain's next step (screens-flows.md §2b): a payment waiting for
-            // its tax document comes before the final invoice. The Document menu may show both.
+            // its tax document comes before the final invoice, which shows only where the chain line offers
+            // it. The Document menu may show both.
             if let createTaxDocument = actions.createTaxDocument {
                 Button { createTaxDocument() } label: { Text(L.createTaxDocumentForPayment) }
-            } else if let createFinalInvoice = actions.createFinalInvoice {
+            } else if actions.finalInvoiceIsNextStep, let createFinalInvoice = actions.createFinalInvoice {
                 Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
             }
             if let duplicate = actions.duplicate {
-                Button { duplicate() } label: { Text(actions.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicate) }
+                Button { duplicate() } label: { Text(actions.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicateAsDraft) }
+            }
+            if let savePDF = actions.savePDF {
+                Button { savePDF() } label: { Text(L.savePDF) }
             }
             if actions.closeAdvanceAction != nil || actions.creditNoteAction != nil {
                 Divider()
@@ -193,7 +239,7 @@ struct DocumentsView: View {
     /// The observation stopped: the text and a retry, above the last states the list received.
     private func listError(_ error: String) -> some View {
         HStack(spacing: Spacing.m) {
-            InlineMessage(String(localized: L.listStopped) + " " + error)
+            InlineMessage(L.listStopped, detail: error)
             Spacer()
             Button { documents.restart() } label: { Text(L.retry) }
         }
@@ -255,21 +301,12 @@ struct DocumentsView: View {
     }
 }
 
-/// The number of a row: an issued document's number with a small lock, a dash for a draft.
+/// The number of a row in the amount role, a dash for a draft. No lock: the lock shows once, on the issued
+/// view's lock line (design-system.md §8.1).
 struct DocumentNumberText: View {
     let row: DocumentRow
 
     var body: some View {
-        if row.isIssued {
-            HStack(spacing: Spacing.xs) {
-                Text(verbatim: row.number.isEmpty ? "—" : row.number).textRole(.body)
-                Image(systemName: "lock.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityLabel(Text(L.lockedNumber))
-            }
-        } else {
-            Text(verbatim: "—").textRole(.body)
-        }
+        Text(verbatim: row.isIssued && !row.number.isEmpty ? row.number : "—").textRole(.amount)
     }
 }

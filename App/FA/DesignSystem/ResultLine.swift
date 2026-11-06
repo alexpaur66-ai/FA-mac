@@ -6,9 +6,7 @@
 import SwiftUI
 
 struct ResultLineModel: Identifiable, Equatable {
-    enum Kind {
-        case success, error, info
-    }
+    typealias Kind = MessageKind
 
     let id = UUID()
     let text: String
@@ -16,7 +14,7 @@ struct ResultLineModel: Identifiable, Equatable {
     /// Takes the action back; the button runs it and clears the line.
     let undo: (@MainActor () -> Void)?
 
-    init(_ text: String, kind: Kind = .success, undo: (@MainActor () -> Void)? = nil) {
+    init(_ text: String, kind: Kind = .done, undo: (@MainActor () -> Void)? = nil) {
         self.text = text
         self.kind = kind
         self.undo = undo
@@ -35,8 +33,8 @@ struct ResultLine: View {
 
     var body: some View {
         HStack(spacing: Spacing.s) {
-            Image(systemName: symbol)
-                .foregroundStyle(tint)
+            Image(systemName: model.kind.symbol)
+                .foregroundStyle(model.kind.tint)
                 .accessibilityHidden(true)
             Text(verbatim: model.text)
                 .textRole(.body)
@@ -61,28 +59,13 @@ struct ResultLine: View {
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
+        // Opaque, not the bar material: the app has no custom glass (design-system.md §8.17).
+        .background(.background)
         .overlay(alignment: .bottom) { Divider() }
         .accessibilityElement(children: .contain)
         .onAppear {
             AccessibilityNotification.Announcement(model.text).post()
         }
         .id(model.id)
-    }
-
-    private var symbol: String {
-        switch model.kind {
-        case .success: "checkmark.circle"
-        case .error: "xmark.octagon.fill"
-        case .info: "info.circle"
-        }
-    }
-
-    private var tint: Color {
-        switch model.kind {
-        case .success: .green
-        case .error: .red
-        case .info: .secondary
-        }
     }
 }

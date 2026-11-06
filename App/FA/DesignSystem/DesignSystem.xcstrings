@@ -70,24 +70,6 @@
         }
       }
     },
-    "status.document.issuedPaid" : {
-      "comment" : "Payment tax document (DDPP): always paid.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "cs" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vystaveno (uhrazeno)"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Issued (paid)"
-          }
-        }
-      }
-    },
     "status.document.markedForCreditNote" : {
       "comment" : "Czech wording to be confirmed with the accountant.",
       "extractionState" : "manual",
@@ -153,23 +135,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paid"
-          }
-        }
-      }
-    },
-    "status.document.paidByAdvances" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "cs" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Uhrazeno (zálohami)"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paid (by advances)"
           }
         }
       }

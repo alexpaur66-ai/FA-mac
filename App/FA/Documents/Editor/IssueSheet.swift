@@ -234,7 +234,7 @@ struct IssueSheet: View {
                 }
             }
         } else {
-            InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .warning)
+            InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .problem)
         }
     }
 
@@ -367,14 +367,14 @@ struct IssueSheet: View {
         if !warnings.isEmpty || !extraWarnings.isEmpty || dateNotToday {
             section(L.checkTitle) {
                 ForEach(warnings) { issue in
-                    InlineMessage(issue.message(language: .english), kind: .warning)
+                    InlineMessage(issue.message(language: .english), kind: .problem)
                 }
                 ForEach(extraWarnings, id: \.self) { warning in
-                    InlineMessage(warning, kind: .warning)
+                    InlineMessage(warning, kind: .problem)
                 }
                 if dateNotToday {
                     HStack(spacing: Spacing.m) {
-                        InlineMessage(L.issueDateNotToday(document.issueDate.formatted(locale)), kind: .warning)
+                        InlineMessage(L.issueDateNotToday(document.issueDate.formatted(locale)), kind: .problem)
                         Button { model.setIssueDate(today) } label: { Text(L.setToToday) }
                     }
                 }

@@ -14,6 +14,8 @@ struct OverviewView: View {
     /// Help ▸ Getting Started: the card stays up although the required steps are done, until it is closed.
     @Binding var forced: Bool
     let show: @MainActor (SidebarItem) -> Void
+    /// The Overdue tile: Unpaid sorted by due date, oldest first (screens-flows.md §2a).
+    let showOverdue: @MainActor () -> Void
     let newDocument: @MainActor (DocumentKind) -> Void
     let newClient: @MainActor () -> Void
     let importRates: @MainActor () -> Void
@@ -32,13 +34,15 @@ struct OverviewView: View {
     @Environment(\.locale) private var locale
 
     init(stores: Stores, documents: DocumentListModel, selection: Binding<String?>, forced: Binding<Bool>,
-         show: @escaping @MainActor (SidebarItem) -> Void, newDocument: @escaping @MainActor (DocumentKind) -> Void,
+         show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
+         newDocument: @escaping @MainActor (DocumentKind) -> Void,
          newClient: @escaping @MainActor () -> Void, importRates: @escaping @MainActor () -> Void) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
         self._forced = forced
         self.show = show
+        self.showOverdue = showOverdue
         self.newDocument = newDocument
         self.newClient = newClient
         self.importRates = importRates
@@ -155,7 +159,7 @@ struct OverviewView: View {
         HStack(spacing: Spacing.m) {
             HStack(spacing: Spacing.m) {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(done ? Color.green : Color.secondary)
+                    .foregroundStyle(Color.secondary)
                     .accessibilityHidden(true)
                 Text(title).textRole(.body)
             }
@@ -213,7 +217,7 @@ struct OverviewView: View {
                     MoneyListText(monies: figures.unpaidAdvances, locale: locale, role: .amountSecondary)
                 }
             }
-            Tile(symbol: "exclamationmark.circle", title: L.tileOverdue, action: { show(.filter(.unpaid)) }) {
+            Tile(symbol: "exclamationmark.circle", title: L.tileOverdue, action: { showOverdue() }) {
                 KPIMoney(monies: figures.overdue, locale: locale)
             } lines: {
                 HStack(spacing: Spacing.xs) {

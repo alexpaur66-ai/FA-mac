@@ -304,7 +304,7 @@ struct DraftEditorView: View {
                 }
             }
         } else {
-            InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .warning)
+            InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .problem)
         }
     }
 
@@ -360,7 +360,7 @@ struct DraftEditorView: View {
                 }
             }
             if let stale = model.warnings.first(where: { $0.code == .exchangeRateStale }) {
-                InlineMessage(stale.message(language: .english), kind: .warning)
+                InlineMessage(stale.message(language: .english), kind: .problem)
             }
             if let rateError = model.rateError {
                 InlineMessage(rateError)
@@ -781,7 +781,7 @@ struct DraftEditorView: View {
                 InlineMessage(conflict)
             }
             ForEach(model.deductionWarnings, id: \.self) { warning in
-                InlineMessage(warning, kind: .warning)
+                InlineMessage(warning, kind: .problem)
             }
             if let deductionError = model.deductionError {
                 InlineMessage(deductionError)
@@ -831,7 +831,7 @@ struct DraftEditorView: View {
                     InlineMessage(conflict)
                 }
                 ForEach(model.deductionWarnings, id: \.self) { warning in
-                    InlineMessage(warning, kind: .warning)
+                    InlineMessage(warning, kind: .problem)
                 }
                 if let deductionError = model.deductionError {
                     InlineMessage(deductionError)

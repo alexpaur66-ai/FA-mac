@@ -450,7 +450,7 @@ struct ClientFormSheet: View {
                         Text(L.fieldVATTreatment)
                     }
                     if vatStatus.isEUBusiness && vatID.trimmingCharacters(in: .whitespaces).isEmpty {
-                        InlineMessage(vatStatus == .euBusinessGoods ? L.goodsExemptionNeedsVATID : L.reverseChargeNeedsVATID, kind: .warning)
+                        InlineMessage(vatStatus == .euBusinessGoods ? L.goodsExemptionNeedsVATID : L.reverseChargeNeedsVATID, kind: .problem)
                     }
                 }
                 Section {

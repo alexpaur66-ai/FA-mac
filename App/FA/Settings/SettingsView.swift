@@ -307,7 +307,7 @@ struct BankAccountsPane: View {
                     // Remove has no confirmation: Undo puts the account back (design-system.md §10).
                     if removed != nil {
                         HStack(spacing: Spacing.m) {
-                            Label { Text(L.accountRemoved) } icon: { Image(systemName: "checkmark.circle").foregroundStyle(.green) }
+                            Label { Text(L.accountRemoved) } icon: { Image(systemName: MessageKind.done.symbol).foregroundStyle(MessageKind.done.tint) }
                                 .textRole(.caption)
                             Button { undoRemove() } label: { Text(L.undo) }
                         }
@@ -453,10 +453,10 @@ struct NumberingPane: View {
                     }
                 }
                 if numbersCollide {
-                    InlineMessage(L.seriesNumbersCollide, kind: .warning)
+                    InlineMessage(L.seriesNumbersCollide, kind: .problem)
                 }
                 if collides {
-                    InlineMessage(L.seriesPrefixCollision, kind: .warning)
+                    InlineMessage(L.seriesPrefixCollision, kind: .problem)
                 }
             } header: {
                 Text(L.seriesTitle)
@@ -706,9 +706,9 @@ struct SeriesFormSheet: View {
                     }
                 }
                 if let other = numberCollidingSeries {
-                    InlineMessage(L.seriesNumberCollisionWith(other.name), kind: .warning)
+                    InlineMessage(L.seriesNumberCollisionWith(other.name), kind: .problem)
                 } else if let other = collidingSeries {
-                    InlineMessage(L.seriesCollisionWith(other.name), kind: .warning)
+                    InlineMessage(L.seriesCollisionWith(other.name), kind: .problem)
                 }
                 if let error {
                     InlineMessage(error)

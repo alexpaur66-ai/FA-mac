@@ -24,12 +24,17 @@ struct DocumentActions {
     /// The number of the issued document Duplicate would copy: "Duplicate FV-2026-007 as Draft".
     var duplicateSourceNumber: String?
     var createFinalInvoice: (@MainActor () -> Void)?
+    /// Create Final Invoice is the chain line's next step: no payment waits for its tax document and no
+    /// draft final invoice exists. The context menu offers it only then; the Document menu refuses instead.
+    var finalInvoiceIsNextStep = false
     var createTaxDocument: (@MainActor () -> Void)?
     var savePDF: (@MainActor () -> Void)?
     var showPDFInFinder: (@MainActor () -> Void)?
     var printDocument: (@MainActor () -> Void)?
     /// Selects the document's client in Clients.
     var showClient: (@MainActor () -> Void)?
+    /// Document ▸ Show Related Documents ▸: the chain's other documents, in chain line order (§2d).
+    var related: [RelatedDocumentAction] = []
 
     /// Reopen of a closed advance: the Close Advance as Unpaid… row reads "Reopen Advance" (§1.4).
     var reopenAdvance: (@MainActor () -> Void)? { reopenKind == .closedUnpaid ? reopen : nil }
@@ -49,6 +54,21 @@ struct DocumentActions {
     var creditNoteTitle: LocalizedStringResource { removeCreditNoteMark != nil ? L.removeCreditNoteMark : L.markForCreditNote }
 }
 
+/// One item of Document ▸ Show Related Documents ▸: "Advance ZF 2026-0003", "Final Invoice (Draft)".
+struct RelatedDocumentAction: Identifiable {
+    let id: String
+    let title: String
+    let open: @MainActor () -> Void
+}
+
+/// View ▸ Sort By ▸ for the table shown: its sort, and how to change it.
+struct SortMenuActions {
+    var current: DocumentSort
+    var set: @MainActor (DocumentSort) -> Void
+    /// The columns the menu lists, in header order.
+    var columns: [DocumentSortColumn] = DocumentSortColumn.menuColumns
+}
+
 struct MainActions {
     var show: @MainActor (SidebarItem) -> Void
     var newDocument: @MainActor (DocumentKind) -> Void
@@ -62,6 +82,10 @@ struct MainActions {
     var showDataFolder: (@MainActor () -> Void)?
     /// The Documents filter shown, for the checkmark in View ▸ Filter ▸; nil outside Documents.
     var currentFilter: DocumentSmartFilter?
+    /// View ▸ Sort By ▸; nil where no table can sort from the menu yet.
+    var sort: SortMenuActions?
+    /// Edit ▸ Jump to Search Field (⌥⌘F): presents the section's search field; from Overview, Documents'.
+    var jumpToSearch: (@MainActor () -> Void)?
     /// Client context (the Clients section with a client selected): File ▸ New Invoice reads
     /// "New Invoice for Acme GmbH" and prefills that client.
     var newDocumentClientName: String?
@@ -175,6 +199,7 @@ struct AppCommands: Commands {
                 Text(L.menuFilter)
             }
             .disabled(actions == nil)
+            sortMenu
             Divider()
             // A draft in the editor: its detail swaps between the editor and the live PDF preview (§2c).
             Button { actions?.togglePreview?() } label: { Text(actions?.previewShown == true ? L.hidePreview : L.showPreview) }
@@ -212,9 +237,26 @@ struct AppCommands: Commands {
             Divider()
             Button { document?.showClient?() } label: { Text(L.showClient) }
                 .disabled(document?.showClient == nil)
+            // The menu path along the chain line's links (§2d); disabled outside a chain.
+            Menu {
+                ForEach(document?.related ?? []) { item in
+                    Button { item.open() } label: { Text(verbatim: item.title) }
+                }
+            } label: {
+                Text(L.menuShowRelated)
+            }
+            .disabled(document?.related.isEmpty ?? true)
             Divider()
             Button { document?.deleteDraft?() } label: { Text(L.deleteDraft) }
                 .disabled(document?.deleteDraft == nil)
+        }
+
+        // Edit ▸ Jump to Search Field (⌥⌘F, the HIG's "Jump to the search field control"). Whether the system
+        // Find ▸ Find… (⌘F) presents the toolbar search is a device check (§1.4), so ⌘F is not bound here.
+        CommandGroup(after: .textEditing) {
+            Button { actions?.jumpToSearch?() } label: { Text(L.jumpToSearch) }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(actions?.jumpToSearch == nil)
         }
 
         // Window ▸ Main Window brings the main window to the front, or reopens it when it was closed (§1.1).
@@ -309,6 +351,43 @@ struct AppCommands: Commands {
             editor?.requestRateFocus()
         } label: { Text(L.menuEnterRate) }
             .disabled(editor?.needsExchangeRate != true)
+    }
+
+    /// View ▸ Sort By ▸: the table's columns in header order with a checkmark on the current one, then
+    /// Ascending / Descending (§1.4). Choosing a column keeps the direction. Disabled without a table.
+    @ViewBuilder private var sortMenu: some View {
+        let sort = actions?.sort
+        Menu {
+            Picker(selection: Binding(
+                get: { sort?.current.column },
+                set: { column in
+                    if let column, let sort { sort.set(DocumentSort(column: column, ascending: sort.current.ascending)) }
+                })) {
+                ForEach(sort?.columns ?? DocumentSortColumn.menuColumns) { column in
+                    Text(column.title).tag(Optional(column))
+                }
+            } label: {
+                Text(L.menuSortBy)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Picker(selection: Binding(
+                get: { sort?.current.ascending ?? true },
+                set: { ascending in
+                    if let sort { sort.set(DocumentSort(column: sort.current.column, ascending: ascending)) }
+                })) {
+                Text(L.sortAscending).tag(true)
+                Text(L.sortDescending).tag(false)
+            } label: {
+                Text(L.menuSortBy)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(L.menuSortBy)
+        }
+        .disabled(sort == nil)
     }
 
     /// The currencies the editor's header offers, plus the draft's own when it is another one.
