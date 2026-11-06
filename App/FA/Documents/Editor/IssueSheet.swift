@@ -84,6 +84,8 @@ struct IssueSheet: View {
             // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
             // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the rate day's rate).
             model.refreshReferenceData()
+            // A floating issue date is the day of Issue (docs-28): the sheet shows the day it will issue with.
+            model.floatIssueDate()
             model.refreshRate()
             if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
                 seriesID = model.series.first?.id
@@ -449,7 +451,8 @@ struct IssueSheet: View {
     }
 
     /// The validator's warnings, the editor's own checks (one defaults row, the 50 % total change, an
-    /// advance under another treatment, a receipt in another draft), then the issue date that is not today.
+    /// advance under another treatment, a receipt in another draft), then the issue date: one set by hand that
+    /// is not today, or a floating one that moves a "Same as the issue date" DUZP into a later month (docs-28).
     private func checkRows(_ document: Document) -> [CheckRow] {
         var rows: [CheckRow] = []
         for issue in model.warnings {
@@ -459,9 +462,16 @@ struct IssueSheet: View {
         for warning in model.extraWarnings {
             rows.append(CheckRow(id: "editor|\(warning)", text: warning))
         }
-        if document.issueDate != CalendarDay(Date(), in: .current) {
-            rows.append(CheckRow(id: "issueDate|\(document.issueDate)",
-                                 text: String(localized: L.issueDateNotToday(document.issueDate.formatted(locale))), setsToday: true))
+        let today = CalendarDay(Date(), in: .current)
+        if model.issueDateSetByHand {
+            if document.issueDate != today {
+                rows.append(CheckRow(id: "issueDate|\(document.issueDate)",
+                                     text: String(localized: L.issueDateNotToday(document.issueDate.formatted(locale))), setsToday: true))
+            }
+        } else if document.kind.isTaxDocument, document.kind != .paymentTaxDocument, model.taxPointSameAsIssue,
+                  let started = model.startedOn, started.startOfMonth < document.issueDate.startOfMonth {
+            rows.append(CheckRow(id: "floatedMonth|\(started)|\(document.issueDate)",
+                                 text: String(localized: L.floatedIntoLaterMonth(started.formatted(locale), document.issueDate.formatted(locale)))))
         }
         return rows
     }
@@ -494,6 +504,10 @@ struct IssueSheet: View {
             let issued = try model.issue(seriesID: seriesID)
             dismiss()
             onIssued(issued)
+        } catch DraftEditorError.issueDateMoved {
+            // Nothing was issued: the sheet shows the new day's date, number and checks before Issue again.
+            issuing = false
+            error = String(localized: L.issueDateMovedToToday)
         } catch DraftEditorError.saveFailed(let detail) {
             issuing = false
             error = String(localized: L.issueFailed(detail))

@@ -121,10 +121,11 @@ final class DocumentListModel {
     // MARK: Undo
 
     /// A deleted draft with the payment it was the tax document of (as it was at the deletion), so Undo
-    /// can relink it.
+    /// can relink it, and how its dates were set (docs-28), so a date set by hand does not float after Undo.
     struct DeletedDraft: Sendable {
         let document: Document
         let receiptOf: DocumentPayment?
+        let dating: DraftDating?
     }
 
     /// A new ticket for one undo registration of the window, kept alive here (the UndoManager does not
@@ -153,7 +154,9 @@ final class DocumentListModel {
         do {
             for entry in deleted {
                 let payment: DocumentPayment? = try entry.receiptOf.flatMap { try currentPayment($0) }
-                try stores.documents.saveDraft(entry.document)
+                // The flags are written back as they were; without them, a restored date counts as set by hand.
+                try stores.documents.saveDraft(entry.document, issueDateSetByHand: entry.dating?.issueDateSetByHand ?? true,
+                                               taxPointSetByHand: entry.dating?.taxPointSetByHand)
                 lastID = entry.document.id
                 guard entry.receiptOf != nil else { continue }
                 guard let payment, payment.receiptDocumentID == nil else {
