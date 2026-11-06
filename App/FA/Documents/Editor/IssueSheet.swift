@@ -32,6 +32,8 @@ struct IssueSheet: View {
     /// The ⚠ rows ticked so far; a row whose words change is a new row and needs its own tick.
     @State private var checkedIDs: Set<String> = []
     @State private var issuing = false
+    /// The months already exported for the accountant (screens-flows.md §2h), for the closed-month check.
+    @State private var exportRecords: [MonthExport] = []
     @State private var error: String?
     @FocusState private var focus: Field?
 
@@ -90,6 +92,7 @@ struct IssueSheet: View {
             model.floatIssueDate()
             model.refreshRate()
             syncSeriesID()
+            exportRecords = (try? model.stores.exports.records()) ?? []
         }
         // Settings ▸ Numbering saved while the sheet stayed open (Open Settings… on the no-series row): the
         // series read again must also be the one Issue uses.
@@ -505,6 +508,13 @@ struct IssueSheet: View {
                   let started = model.startedOn, started.startOfMonth < document.issueDate.startOfMonth {
             rows.append(CheckRow(id: "floatedMonth|\(started)|\(document.issueDate)",
                                  text: String(localized: L.floatedIntoLaterMonth(started.formatted(locale), document.issueDate.formatted(locale)))))
+        }
+        // A document in a month already exported to the accountant (§2c): the month by the export's rule.
+        let month = document.exportDay.startOfMonth
+        if let record = exportRecords.first(where: { $0.month == month }) {
+            let day = AccountantExportFiles.exportDay(record).map { $0.formatted(locale) } ?? record.exportedAt
+            rows.append(CheckRow(id: "exportedMonth|\(month)|\(record.exportedAt)",
+                                 text: String(localized: L.issueMonthExported(MonthBar.title(month, locale: locale), day))))
         }
         return rows
     }

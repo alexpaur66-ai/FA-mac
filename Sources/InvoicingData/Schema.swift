@@ -377,6 +377,19 @@ enum Schema {
                 t.primaryKey(["documentID", "lineID"])
             }
         }
+
+        // v7 (screens-flows.md §2h): one record per month exported for the accountant: when, into which folder,
+        // and the hash of each document's snapshot as exported, so a document issued (or, with Repair mode,
+        // changed) in that month afterwards shows as "changed after export". Exporting the month again
+        // replaces the record.
+        migrator.registerMigration("v7") { db in
+            try db.create(table: "monthExport") { t in
+                t.column("month", .text).primaryKey()
+                t.column("exportedAt", .text).notNull()
+                t.column("folder", .text).notNull()
+                t.column("documents", .text).notNull()
+            }
+        }
         return migrator
     }
 }

@@ -111,6 +111,22 @@ public struct Document: Hashable, Sendable, Codable, Identifiable {
         return ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: taxPoint, issueDate: issueDate)
     }
 
+    /// The day that puts the document in a month of the accountant's export (screens-flows.md §2h, ACCT): an
+    /// advance request, which is not a tax document, by its issue date; a document whose lines are all goods
+    /// exempt under § 64 by the § 22 odst. 1 day (`ReportingDay`); every other tax document, a mixed one and a
+    /// payment tax document included, by its DUZP. The Issue sheet's check for an exported month uses it too.
+    public var exportDay: CalendarDay {
+        switch kind {
+        case .advanceRequest:
+            return issueDate
+        case .paymentTaxDocument:
+            return taxPoint
+        case .invoice, .finalInvoice:
+            guard isIntraCommunityGoodsOnly else { return taxPoint }
+            return ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: taxPoint, issueDate: issueDate)
+        }
+    }
+
     /// The heading in the document's language.
     public var title: String { kind.title(language: language) }
 }

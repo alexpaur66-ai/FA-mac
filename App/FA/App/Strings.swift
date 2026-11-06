@@ -1056,4 +1056,49 @@ enum L {
     static func refundRecordedResult(_ amount: String, _ number: String) -> LocalizedStringResource {
         r("recordPayment.refundResult", "Refund of \(amount) recorded on \(number)")
     }
+
+    // MARK: Export for Accountant (screens-flows.md §2h)
+
+    static let exportTitle = r("export.title", "Export for Accountant")
+    static func exportButton(_ month: String) -> LocalizedStringResource { r("export.button", "Export \(month)…") }
+    static func exportAgainButton(_ month: String) -> LocalizedStringResource { r("export.buttonAgain", "Export \(month) Again…") }
+    static let exportNotYet = r("export.notYet", "Not exported yet")
+    static func exportedOnTo(_ day: String, _ folder: String) -> LocalizedStringResource {
+        r("export.exportedOnTo", "Exported on \(day) to \(folder)")
+    }
+    static let exportChangedOne = r("export.changedOne", "1 document changed after export")
+    static func exportChangedCount(_ count: Int) -> LocalizedStringResource {
+        r("export.changedCount", "\(count) documents changed after export")
+    }
+    /// "October 2026: 14 documents (2 advances, non-tax) · 9 payments · VAT 42 180 Kč".
+    static func exportPreview(_ month: String, _ documents: String, _ payments: String, _ vat: String) -> LocalizedStringResource {
+        r("export.preview", "\(month): \(documents) · \(payments) · VAT \(vat)")
+    }
+    static func exportDocumentsWithAdvances(_ documents: String, _ advances: Int) -> LocalizedStringResource {
+        r("export.documentsWithAdvances", "\(documents) (\(advances) advances, non-tax)")
+    }
+    static func exportDocumentsWithAdvanceOne(_ documents: String) -> LocalizedStringResource {
+        r("export.documentsWithAdvanceOne", "\(documents) (1 advance, non-tax)")
+    }
+    static func exportPaymentsCount(_ count: Int) -> LocalizedStringResource { r("export.paymentsCount", "\(count) payments") }
+    static let exportPaymentsOne = r("export.paymentsOne", "1 payment")
+    static func exportDone(_ month: String) -> LocalizedStringResource { r("export.done", "\(month) exported") }
+    static func exportDoneBackup(_ month: String) -> LocalizedStringResource { r("export.doneBackup", "\(month) exported · backup made") }
+    static func exportDoneBackupFailed(_ month: String, _ reason: String) -> LocalizedStringResource {
+        r("export.doneBackupFailed", "\(month) exported · backup failed: \(reason)")
+    }
+    static func exportFailed(_ reason: String) -> LocalizedStringResource {
+        r("export.failed", "The files could not be written, so the month is not marked as exported. \(reason)")
+    }
+    static let exportPanelPrompt = r("export.panelPrompt", "Export")
+    static let exportPanelMessage = r("export.panelMessage", "The month's files are written into a new folder with this name.")
+    /// The Overview queue row (§2a): "October 2026 · 1 document changed after export".
+    static func exportQueueRow(_ month: String, _ changed: String) -> LocalizedStringResource {
+        r("export.queueRow", "\(month) · \(changed)")
+    }
+    static let exportAgain = r("export.again", "Export Again…")
+    /// The Issue sheet's check for a document in a month already exported (§2c).
+    static func issueMonthExported(_ month: String, _ day: String) -> LocalizedStringResource {
+        r("issue.monthExported", "\(month) was already exported for the accountant on \(day); this document belongs to that month")
+    }
 }

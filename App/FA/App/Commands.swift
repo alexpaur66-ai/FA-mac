@@ -80,6 +80,8 @@ struct MainActions {
     /// Help ▸ Getting Started: the Overview with the setup card shown again.
     var showGettingStarted: @MainActor () -> Void
     var showDataFolder: (@MainActor () -> Void)?
+    /// File ▸ Export for Accountant….
+    var exportForAccountant: (@MainActor () -> Void)?
     /// File ▸ Back Up Now; nil for the in-memory database.
     var backUpNow: (@MainActor () -> Void)?
     /// The Documents filter shown, for the checkmark in View ▸ Filter ▸; nil outside Documents.
@@ -168,9 +170,9 @@ struct AppCommands: Commands {
                 .disabled(actions == nil)
             Button { actions?.importRates() } label: { Text(L.importRates) }
                 .disabled(actions == nil)
-            // The export step brings it (screens-flows.md §2h); listed, disabled, until then.
-            Button {} label: { Text(L.menuExportAccountant) }
-                .disabled(true)
+            // The export sheet (screens-flows.md §2h), on the previous month; no shortcut.
+            Button { actions?.exportForAccountant?() } label: { Text(L.menuExportAccountant) }
+                .disabled(actions?.exportForAccountant == nil)
             Divider()
             // Back Up Now runs at once; Restore from Backup… picks a file, previews it and asks (§2h). Show
             // Data Folder is the one place the data file is reachable from.
