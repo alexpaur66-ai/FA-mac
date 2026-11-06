@@ -152,10 +152,9 @@ public struct RepairStore: Sendable {
 
     /// Every field that differs, in a fixed order, so the audit trail names each one.
     static func changes(from old: Document, to new: Document) -> [RepairChange] {
+        // As printed, with the country always: "Krátká 1, 602 00 Brno, CZ".
         func text(_ address: PostalAddress) -> String {
-            [address.street, [address.postalCode, address.city].filter { !$0.isEmpty }.joined(separator: " "), address.countryCode]
-                .filter { !$0.isEmpty }
-                .joined(separator: ", ")
+            address.lines(alwaysIncludeCountry: true).joined(separator: ", ")
         }
         func registry(_ entry: RegistryEntry?) -> String {
             entry.map { $0.court.rawValue + " " + $0.fileNumber } ?? ""
