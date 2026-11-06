@@ -73,9 +73,10 @@ struct ClientsView: View {
     let clients: ClientsModel
     let documents: DocumentListModel
     @Binding var selection: String?
+    /// The Clients search, kept by the window so that opening a client from elsewhere can clear it.
+    @Binding var search: String
     let editClient: @MainActor (String?) -> Void
 
-    @State private var search = ""
     @State private var sortOrder = [KeyPathComparator(\ClientRow.name, comparator: .localizedStandard)]
     @Environment(\.locale) private var locale
 
@@ -503,6 +504,14 @@ struct ClientFormSheet: View {
         countryCode.uppercased() == "CZ" ? Currency.czk.code : Currency.eur.code
     }
 
+    /// True for an EU member state's ISO country code other than CZ. The VAT prefixes name Greece "EL",
+    /// so "GR" is mapped as the core's CustomerVATStatus.inferred does.
+    static func isEUCountryOtherThanCZ(_ countryCode: String) -> Bool {
+        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+        guard country != "CZ" else { return false }
+        return VATIdentifier.euPrefixes.contains(country == "GR" ? "EL" : country)
+    }
+
     /// The new client's derived values, for each not yet picked by hand; the Edit sheet never re-infers.
     private func reinfer() {
         guard customer == nil else { return }
@@ -570,8 +579,9 @@ struct ClientFormSheet: View {
                     } label: {
                         Text(L.fieldClientType)
                     }
-                    // Once a country is picked and while the VAT ID is empty (other-08).
-                    if vatStatus.isEUBusiness && !countryCode.isEmpty && trimmedVATID.isEmpty {
+                    // For an EU country other than CZ while the VAT ID is empty, not on the status alone
+                    // (other-08, shell-23).
+                    if vatStatus.isEUBusiness && Self.isEUCountryOtherThanCZ(countryCode) && trimmedVATID.isEmpty {
                         InlineMessage(vatStatus == .euBusinessGoods ? L.goodsExemptionNeedsVATID : L.reverseChargeNeedsVATID, kind: .problem)
                     }
                 }
