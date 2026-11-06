@@ -418,10 +418,12 @@ struct NumberCell: Hashable {
         let chosen = customers.first { $0.id == id }
         update { doc in
             // Deductions and advances paid belong to the previous client's advances; the store would refuse them
-            // at issue.
+            // at issue. So does the advance the draft was made from: the editor no longer edits that number, and
+            // keeping it would tie this client's draft to the other client's advance chain.
             if chosen?.id != doc.customerID {
                 doc.advanceDeductions = []
                 doc.paidAdvances = nil
+                doc.relatedDocumentNumber = nil
             }
             doc.customerID = chosen?.id
             doc.customer = chosen?.party
@@ -609,6 +611,24 @@ struct NumberCell: Hashable {
         return profile.bankConnections.filter { $0.currency == nil || $0.currency == document.currency }
     }
 
+    /// The company's default among the accounts that fit: the first kept in the currency, else the first
+    /// without one, as `CompanyProfile.bankConnection(for:)` picks it at issue.
+    var defaultBankAccount: BankConnection? {
+        let fitting = bankAccounts
+        return fitting.first { $0.currency == document?.currency } ?? fitting.first
+    }
+
+    /// The account the document will print: the one picked, else the default (docs-18).
+    var selectedBankAccount: BankConnection? {
+        document?.payment?.bankConnection ?? defaultBankAccount
+    }
+
+    /// The header pop-up and Document ▸ Bank Account ▸: the default is an ordinary entry, stored as no
+    /// choice so that it keeps following the company's settings.
+    func chooseBankAccount(_ account: BankConnection?) {
+        setBankAccount(account == defaultBankAccount ? nil : account)
+    }
+
     /// nil means the company's default account for the currency, chosen by the data layer at issue.
     func setBankAccount(_ account: BankConnection?) {
         update { doc in
@@ -682,6 +702,38 @@ struct NumberCell: Hashable {
     private func appendBlankLine() {
         document?.lines.append(DocumentLine(text: "", quantity: 1, unit: nil, unitPrice: 0, treatment: newLineTreatment))
         recompute()
+    }
+
+    // MARK: Discount column (docs-22)
+
+    /// Add Discount: the line whose Discount % cell takes focus. The column shows while this is set, a line
+    /// has a discount or a discount cell holds text that is not a number. A focused discount cell holds it
+    /// too, so clearing the only discount does not remove the cell being typed in; it ends when focus
+    /// leaves the discount cells.
+    private(set) var discountRequestLineID: String?
+    private(set) var discountRequestVersion = 0
+
+    var showsDiscountColumn: Bool {
+        discountRequestLineID != nil
+            || (document?.lines.contains { $0.discountPercent != 0 } ?? false)
+            || invalidCells.keys.contains { $0.column == .discount }
+    }
+
+    /// The given line, else the focused one (Document ▸ Add Discount needs the cursor in a line, §1.4).
+    func requestDiscount(on lineID: String?) {
+        guard let id = lineID ?? focusedLineID else { return }
+        discountRequestLineID = id
+        discountRequestVersion += 1
+    }
+
+    /// A discount cell took focus: the column stays while the cursor is in it, even when its value becomes
+    /// 0 mid-edit. Moves no focus.
+    func holdDiscountColumn(on lineID: String) {
+        if discountRequestLineID == nil { discountRequestLineID = lineID }
+    }
+
+    func endDiscountRequest() {
+        if discountRequestLineID != nil { discountRequestLineID = nil }
     }
 
     @discardableResult

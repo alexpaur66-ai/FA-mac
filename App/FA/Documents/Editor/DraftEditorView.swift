@@ -3,6 +3,7 @@
 // the model, which recomputes totals and issues and autosaves. One focus model covers the header and the
 // lines, so ↩ moves down a column, Esc reverts a field and the menu bar reaches the focused line.
 
+import AppKit
 import InvoicingCore
 import InvoicingData
 import SwiftUI
@@ -51,6 +52,9 @@ struct DraftEditorView: View {
     let onIssued: @MainActor (Document) -> Void
     /// New Client “X”… from the client field: the New Client sheet opens with the typed name.
     let newClient: @MainActor (String) -> Void
+    /// A document of the chain line: an issued one in its issued view, a draft in the editor.
+    var openChainItem: (@MainActor (ChainItem) -> Void)? = nil
+    var chainAction: (@MainActor (ChainNextStep) -> Void)? = nil
 
     @Environment(\.locale) private var locale
     @Environment(\.textScale) private var textScale
@@ -59,6 +63,11 @@ struct DraftEditorView: View {
     @Binding var previewShown: Bool
     @FocusState private var focus: EditorFocus?
     @State private var changingRate = false
+    /// The advance chain of a payment tax document or final invoice draft (docs-10), read from the store.
+    @State private var chain: AdvanceChain?
+    @State private var notesExpanded = false
+    /// The width the line grid fills when its columns need less (it scrolls sideways when they need more).
+    @State private var gridViewportWidth: CGFloat = 0
 
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
     private static let markerWidth: CGFloat = 20
@@ -81,6 +90,9 @@ struct DraftEditorView: View {
                     VStack(alignment: .leading, spacing: Spacing.section) {
                         if model.saveState == .failed, let saveError = model.saveError {
                             InlineMessage(saveError)
+                        }
+                        if let chain {
+                            ChainLine(chain: chain, open: { openChainItem?($0) }, perform: { chainAction?($0) })
                         }
                         if document.kind == .advanceRequest {
                             // The banner (screens-flows.md §0 rule 3); the printed clause is InvoicingCore's.
@@ -114,12 +126,33 @@ struct DraftEditorView: View {
                     applyFocusRequest()
                     // Enter Rate… chosen while the preview was shown: the editor is back and takes it.
                     if model.takeRateFocusRequest() { focusRate() }
+                    // Likewise Add Discount: its column shows, so its cell takes the focus.
+                    if let id = model.discountRequestLineID {
+                        Task { @MainActor in focus = .discount(id) }
+                    }
                 }
                 .onChange(of: model.focusRequestVersion) { _, _ in applyFocusRequest() }
                 .onChange(of: model.rateFocusRequest) { _, _ in
                     if model.takeRateFocusRequest() { focusRate() }
                 }
-                .onChange(of: focus) { _, newValue in model.focusedLineID = newValue?.lineID }
+                .onChange(of: focus) { oldValue, newValue in
+                    model.focusedLineID = newValue?.lineID
+                    // Add Discount showed the column for one line; it stays only while a line has a discount.
+                    // A focused discount cell keeps it, so a value typed down to 0 keeps its cell.
+                    if case .discount(let id)? = newValue {
+                        model.holdDiscountColumn(on: id)
+                    } else if case .discount? = oldValue {
+                        model.endDiscountRequest()
+                    }
+                }
+                .onChange(of: model.discountRequestVersion) { _, _ in
+                    guard let id = model.discountRequestLineID else { return }
+                    Task { @MainActor in focus = .discount(id) }
+                }
+                .onChange(of: model.documentID, initial: true) { _, _ in
+                    notesExpanded = !(document.note ?? "").isEmpty || !(document.orderReference ?? "").isEmpty
+                }
+                .task(id: chainKey) { refreshChain() }
             } else if let error = model.loadError {
                 ContentUnavailableView {
                     Label { Text(verbatim: error) } icon: { Image(systemName: "exclamationmark.triangle") }
@@ -129,7 +162,7 @@ struct DraftEditorView: View {
             }
         }
         .navigationTitle(Text(verbatim: title))
-        .navigationSubtitle(Text(saveLine))
+        .navigationSubtitle(Text(subtitle))
         .toolbar {
             // Fixed items (design-system.md §8.11): the Preview toggle, then the one prominent action,
             // Issue…, text only and declared last so it is trailing. ⌘D duplicates from the File menu.
@@ -171,12 +204,42 @@ struct DraftEditorView: View {
         }
     }
 
-    private var saveLine: LocalizedStringResource {
-        switch model.saveState {
+    /// "Invoice · Draft · Saved": the type, which left the header, then the save state (docs-18).
+    private var subtitle: LocalizedStringResource {
+        let state: LocalizedStringResource = switch model.saveState {
         case .saved: L.editorDraftSaved
         case .pending: L.editorDraftSaving
         case .failed: L.editorDraftNotSaved
         }
+        guard let kind = model.document?.kind else { return state }
+        return L.editorSubtitle(String(localized: kind.editorSubtitleTitle), String(localized: state))
+    }
+
+    // MARK: Chain line
+
+    /// What the chain depends on: the draft's own links and every document's last change, so a payment,
+    /// an issued tax document or a saved deduction redraws it. nil for the kinds that show no chain.
+    private var chainKey: Int? {
+        guard let document = model.document,
+              document.kind == .paymentTaxDocument || document.kind == .finalInvoice else { return nil }
+        var hasher = Hasher()
+        hasher.combine(document.relatedDocumentNumber)
+        hasher.combine(document.advanceDeductions.map(\.documentNumber))
+        hasher.combine((document.paidAdvances ?? []).map(\.advanceNumber))
+        hasher.combine(model.saveState == .saved)
+        for state in documents.states {
+            hasher.combine(state.id)
+            hasher.combine(state.summary.updatedAt)
+        }
+        return hasher.finalize()
+    }
+
+    private func refreshChain() {
+        guard chainKey != nil else {
+            chain = nil
+            return
+        }
+        chain = try? AdvanceChain.of(model.documentID, stores: stores, states: documents.states)
     }
 
     // MARK: Focus
@@ -262,29 +325,26 @@ struct DraftEditorView: View {
         .padding(.vertical, Spacing.m)
     }
 
-    /// Base and Total are the lines before any deduction; a final invoice then shows the advances
-    /// deducted, the advances paid on § 64 goods (ADR 0012), the amount due and the VAT after the
-    /// deduction, the base of the VAT in CZK (screens-flows.md §2d, step 4: Total → − advances → Amount due). Under reverse charge or the § 64
-    /// exemption the VAT figure's place says so; the VAT in CZK appears only when Czech VAT is charged in a
-    /// foreign currency.
+    /// One figure per fact (docs-24). Under Czech VAT: Base, VAT and Total, and the VAT in CZK on a foreign
+    /// currency; under the other treatments one Total that names the treatment. A final invoice that
+    /// deducts or counts something paid in advance adds those, the amount due and, under Czech VAT, the VAT
+    /// after the advances in VAT's place (screens-flows.md §2d, step 4: Total → − advances → Amount due).
     @ViewBuilder private func figures(_ document: Document) -> some View {
         if let totals = model.totals {
             let chargesVAT = totals.rows.contains(where: { $0.treatment.chargesVAT })
-            let isFinal = document.kind == .finalInvoice
-            let isReceipt = document.kind == .paymentTaxDocument
-            figure(L.base, totals.totalBase, document.currency)
-            if document.hasReverseCharge && !chargesVAT {
-                dashFigure(L.reverseChargeItem)
+            let deducted = totals.totalGross - totals.dueBeforePaidInAdvance
+            let reduces = document.kind == .finalInvoice && (deducted != 0 || totals.paidInAdvance != 0)
+            let totalRole: TextRole = reduces || document.kind == .paymentTaxDocument ? .amountStrong : .total
+            if let untaxed = untaxedLabel {
+                figure(L.totalWithTreatment(String(localized: untaxed)), totals.totalGross, document.currency, role: totalRole)
+            } else {
+                figure(L.base, totals.totalBase, document.currency)
+                if !reduces {
+                    figure(L.vat, totals.totalVAT, document.currency)
+                }
+                figure(L.total, totals.totalGross, document.currency, role: totalRole)
             }
-            if document.hasIntraCommunityGoods && !chargesVAT {
-                dashFigure(L.exemptSection64Item)
-            }
-            if chargesVAT && !isFinal {
-                figure(L.vat, totals.totalVAT, document.currency)
-            }
-            figure(L.total, totals.totalGross, document.currency, role: isFinal || isReceipt ? .amountStrong : .total)
-            if isFinal {
-                let deducted = totals.totalGross - totals.dueBeforePaidInAdvance
+            if reduces {
                 if deducted != 0 {
                     figure(L.advancesDeducted, -deducted, document.currency)
                 }
@@ -308,6 +368,17 @@ struct DraftEditorView: View {
         }
     }
 
+    /// The treatment the single Total names, or nil under Czech VAT.
+    private var untaxedLabel: LocalizedStringResource? {
+        switch model.treatmentChoice {
+        case .czechVAT: nil
+        case .intraCommunityGoods: L.exemptSection64Item
+        case .reverseChargeEU: L.reverseChargeItem
+        case .outsideEU: L.treatmentOutsideEU
+        case .exempt: L.treatmentExempt
+        }
+    }
+
     private func figure(_ label: LocalizedStringResource, _ amount: Decimal, _ currency: Currency, role: TextRole = .amountStrong) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(label).textRole(.caption)
@@ -322,28 +393,27 @@ struct DraftEditorView: View {
         }
     }
 
-    private func readinessChip(_ count: Int) -> some View {
-        Button { openIssueSheet() } label: {
-            if count == 0 {
-                Label { Text(L.readyToIssue) } icon: { Image(systemName: "checkmark.circle.fill") }
-            } else {
-                Label { Text(count == 1 ? L.oneProblem : L.problems(count)) } icon: { Image(systemName: "exclamationmark.circle.fill") }
+    /// Only while something blocks Issue (docs-24): a ready draft shows nothing, and the prominent Issue…
+    /// is the call to action.
+    @ViewBuilder private func readinessChip(_ count: Int) -> some View {
+        if count > 0 {
+            Button { openIssueSheet() } label: {
+                Label { Text(count == 1 ? L.oneProblem : L.problems(count)) } icon: {
+                    Image(systemName: MessageKind.problem.symbol)
+                }
             }
+            .buttonStyle(.bordered)
+            .tint(.orange)
         }
-        .buttonStyle(.bordered)
-        .tint(count == 0 ? .green : .orange)
     }
 
-    /// "1 EUR = 24,315 CZK · for 4. 11. 2026 · ČNB file" with Change…, the fallback note, a stale-rate
-    /// warning and the last rate error (design-system.md §8.9).
+    /// "1 EUR = 24,315 CZK · for 30. 10. 2026 · Typed" with Change…, the fallback note, a stale-rate
+    /// warning and the last rate error (design-system.md §8.9, docs-24).
     private func rateLine(_ rate: ExchangeRate, document: Document) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.s) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
                 Text(L.rateEquals(document.currency.code, Self.rateText(rate, locale: locale))).textRole(.amount)
-                Text(L.rateDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
+                Text(L.rateLineDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
                 Button { changingRate = true } label: { Text(L.changeRate) }
                     .buttonStyle(.link)
                     .popover(isPresented: $changingRate, arrowEdge: .bottom) {
@@ -406,20 +476,6 @@ struct DraftEditorView: View {
                 }
             }
             GridRow {
-                Text(L.fieldType).textRole(.label)
-                Picker(selection: Binding(get: { document.kind }, set: { model.setKind($0) })) {
-                    ForEach(DraftEditorModel.kindOptions(for: document.kind), id: \.self) { kind in
-                        Text(verbatim: kind.pickerTitle).tag(kind)
-                    }
-                } label: {
-                    Text(L.fieldType)
-                }
-                .labelsHidden()
-                .frame(maxWidth: 360)
-                // A payment tax document belongs to its payment; another type would orphan the link.
-                .disabled(isReceipt)
-            }
-            GridRow {
                 Text(L.fieldIssueDate).textRole(.label)
                 DatePicker(selection: dayBinding(document.issueDate) { model.setIssueDate($0) }, displayedComponents: .date) {
                     Text(L.fieldIssueDate)
@@ -454,15 +510,13 @@ struct DraftEditorView: View {
             }
             GridRow {
                 Text(L.fieldDue).textRole(.label)
-                // "30 days" and the date, linked: each updates the other (screens-flows.md §2c).
+                // "14 days → Wed 19. 11. 2026": the days are typed, the date follows as text (docs-18).
                 HStack(spacing: Spacing.m) {
                     DueDaysField(model: model)
                         .frame(width: 56 * textScale)
                     Text(model.dueDays == 1 ? L.dueDaysOne : L.dueDays(model.dueDays)).textRole(.body)
-                    DatePicker(selection: dayBinding(document.dueDate) { model.setDueDate($0) }, displayedComponents: .date) {
-                        Text(L.fieldDue)
-                    }
-                    .labelsHidden()
+                    Text(L.dueOnDate(Self.weekday(document.dueDate, locale: locale), document.dueDate.formatted(locale)))
+                        .textRole(.rowSecondary)
                 }
             }
             GridRow {
@@ -481,18 +535,6 @@ struct DraftEditorView: View {
                     .labelsHidden()
                     .frame(maxWidth: 240)
                 }
-            }
-            GridRow {
-                Text(L.fieldLanguage).textRole(.label)
-                Picker(selection: Binding(get: { document.language }, set: { model.setLanguage($0) })) {
-                    Text(L.languageCzech).tag(DocumentLanguage.czech)
-                    Text(L.languageEnglish).tag(DocumentLanguage.english)
-                } label: {
-                    Text(L.fieldLanguage)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 280)
             }
             GridRow {
                 Text(L.fieldTreatment).textRole(.label)
@@ -519,12 +561,19 @@ struct DraftEditorView: View {
                     }
                 }
             }
-            if !isReceipt {
+            // One fitting account is plain text; a pop-up only when two or more fit; none fitting, no row,
+            // and the Issue sheet blocks (docs-18). Document ▸ Bank Account ▸ is the menu path.
+            let accounts = isReceipt ? [] : model.bankAccounts
+            if let only = accounts.first, accounts.count == 1 {
                 GridRow {
                     Text(L.fieldBankAccount).textRole(.label)
-                    Picker(selection: Binding(get: { document.payment?.bankConnection }, set: { model.setBankAccount($0) })) {
-                        Text(L.defaultAccount).tag(BankConnection?.none)
-                        ForEach(model.bankAccounts, id: \.self) { account in
+                    Text(Self.accountLabel(only)).textRole(.body)
+                }
+            } else if accounts.count > 1 {
+                GridRow {
+                    Text(L.fieldBankAccount).textRole(.label)
+                    Picker(selection: Binding(get: { model.selectedBankAccount }, set: { model.chooseBankAccount($0) })) {
+                        ForEach(accounts, id: \.self) { account in
                             Text(Self.accountLabel(account)).tag(Optional(account))
                         }
                     } label: {
@@ -532,31 +581,6 @@ struct DraftEditorView: View {
                     }
                     .labelsHidden()
                     .frame(maxWidth: 360)
-                }
-            }
-            GridRow {
-                Text(L.fieldOrderReference).textRole(.label)
-                TextField(text: Binding(get: { document.orderReference ?? "" }, set: { model.setOrderReference($0) })) {
-                    Text(L.fieldOrderReference)
-                }
-                .labelsHidden()
-                .textRole(.body)
-                .frame(maxWidth: 360)
-            }
-            if document.kind == .finalInvoice {
-                GridRow {
-                    Text(L.fieldRelatedDocument).textRole(.label)
-                    TextField(text: Binding(get: { document.relatedDocumentNumber ?? "" }, set: { model.setRelatedDocumentNumber($0) })) {
-                        Text(L.fieldRelatedDocument)
-                    }
-                    .labelsHidden()
-                    .textRole(.body)
-                    .frame(maxWidth: 360)
-                }
-            } else if isReceipt, let related = document.relatedDocumentNumber {
-                GridRow {
-                    Text(L.fieldRelatedDocument).textRole(.label)
-                    Text(verbatim: related).textRole(.body)
                 }
             }
         }
@@ -580,6 +604,11 @@ struct DraftEditorView: View {
         }
     }
 
+    /// "Wed": the day of the week in the UI locale, for the due date's text.
+    static func weekday(_ day: CalendarDay, locale: Locale) -> String {
+        day.midnight(in: .current).formatted(Date.FormatStyle(locale: locale).weekday(.abbreviated))
+    }
+
     private func dayBinding(_ day: CalendarDay, set: @escaping @MainActor (CalendarDay) -> Void) -> Binding<Date> {
         Binding(get: { day.midnight(in: .current) }, set: { set(CalendarDay($0, in: .current)) })
     }
@@ -590,13 +619,21 @@ struct DraftEditorView: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.linesTitle).textRole(.sectionTitle)
             // The columns need about 800 pt; a narrower detail column scrolls the grid sideways instead of
-            // clipping the rate and the line total.
-            ViewThatFits(in: .horizontal) {
+            // clipping the rate and the line total. One grid in one scroll view, at least as wide as the
+            // column: the Discount column coming and going while the user edits keeps the cells and the focus
+            // (a ViewThatFits switch between two grids would rebuild them).
+            ScrollView(.horizontal) {
                 lineGrid(document)
-                ScrollView(.horizontal) {
-                    lineGrid(document)
+                    .frame(minWidth: gridViewportWidth, alignment: .leading)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { gridViewportWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, width in gridViewportWidth = width }
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             // ⌘L lives in the Document menu, which reaches the editor through the focused scene.
             Button { model.addLineAndFocus() } label: {
@@ -604,6 +641,10 @@ struct DraftEditorView: View {
             }
         }
     }
+
+    /// Description · Qty · Unit · Unit price · [Discount %] · [VAT rate] · Line total (docs-22): Discount
+    /// shows while a line has one or Add Discount asked for it, VAT rate only under Czech VAT.
+    private var showsVATRate: Bool { model.treatmentChoice == .czechVAT }
 
     private func lineGrid(_ document: Document) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -620,8 +661,12 @@ struct DraftEditorView: View {
             Text(L.colQty).frame(width: qtyWidth, alignment: .trailing)
             Text(L.colUnit).frame(width: unitWidth, alignment: .leading)
             Text(L.colUnitPrice).frame(width: priceWidth, alignment: .trailing)
-            Text(L.colDiscount).frame(width: discountWidth, alignment: .trailing)
-            Text(L.colVATRate).frame(width: rateWidth, alignment: .leading)
+            if model.showsDiscountColumn {
+                Text(L.colDiscount).frame(width: discountWidth, alignment: .trailing)
+            }
+            if showsVATRate {
+                Text(L.colVATRate).frame(width: rateWidth, alignment: .leading)
+            }
             Text(L.colLineTotal).frame(width: totalWidth, alignment: .trailing)
             Color.clear.frame(width: Self.markerWidth, height: 1)
         }
@@ -639,24 +684,12 @@ struct DraftEditorView: View {
                         commit: { value in model.setLine(line.id) { $0.quantity = value } },
                         onSubmit: { moveDown(from: .quantity(line.id)) })
                 .frame(width: qtyWidth)
-            HStack(spacing: 0) {
-                LineTextCell(label: L.colUnit, value: line.unit ?? "", focus: $focus, focusValue: .unit(line.id),
-                             commit: { value in model.setLine(line.id) { $0.unit = value.isEmpty ? nil : value } },
-                             onSubmit: { moveDown(from: .unit(line.id)) })
-                Menu {
-                    ForEach(Self.units, id: \.self) { unit in
-                        Button(unit) { model.setLine(line.id) { $0.unit = unit } }
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .menuStyle(.button)
-                .buttonStyle(.borderless)
-                .menuIndicator(.hidden)
-                .frame(width: 20)
-                .accessibilityLabel(Text(L.colUnit))
-            }
-            .frame(width: unitWidth)
+            // A text field; macOS 15 suggests the usual units under it (docs-22).
+            LineTextCell(label: L.colUnit, value: line.unit ?? "", focus: $focus, focusValue: .unit(line.id),
+                         suggestions: Self.units,
+                         commit: { value in model.setLine(line.id) { $0.unit = value.isEmpty ? nil : value } },
+                         onSubmit: { moveDown(from: .unit(line.id)) })
+                .frame(width: unitWidth)
             AmountField(cell: NumberCell(lineID: line.id, column: .unitPrice), label: L.colUnitPrice, value: line.unitPrice, fractionLength: 2...2,
                         model: model, focus: $focus, focusValue: .price(line.id),
                         // Stored as shown and printed: the price is rounded to the currency's minor units, so
@@ -667,13 +700,17 @@ struct DraftEditorView: View {
                         },
                         onSubmit: { moveDown(from: .price(line.id)) })
                 .frame(width: priceWidth)
-            AmountField(cell: NumberCell(lineID: line.id, column: .discount), label: L.colDiscount, value: line.discountPercent, fractionLength: 0...2,
-                        model: model, focus: $focus, focusValue: .discount(line.id),
-                        commit: { value in model.setLine(line.id) { $0.discountPercent = value } },
-                        onSubmit: { moveDown(from: .discount(line.id)) })
-                .frame(width: discountWidth)
-            rateCell(line, document: document)
-                .frame(width: rateWidth, alignment: .leading)
+            if model.showsDiscountColumn {
+                AmountField(cell: NumberCell(lineID: line.id, column: .discount), label: L.colDiscount, value: line.discountPercent,
+                            fractionLength: 0...2, model: model, focus: $focus, focusValue: .discount(line.id),
+                            commit: { value in model.setLine(line.id) { $0.discountPercent = value } },
+                            onSubmit: { moveDown(from: .discount(line.id)) })
+                    .frame(width: discountWidth)
+            }
+            if showsVATRate {
+                rateCell(line, document: document)
+                    .frame(width: rateWidth, alignment: .leading)
+            }
             Group {
                 if let amounts = model.lineAmounts(at: index) {
                     MoneyText(amount: amounts.gross, currency: document.currency.code, locale: locale)
@@ -699,34 +736,21 @@ struct DraftEditorView: View {
                 .disabled(index == 0)
             Button { model.moveLine(line.id, by: 1) } label: { Text(L.moveLineDown) }
                 .disabled(index == document.lines.count - 1)
+            Button { model.requestDiscount(on: line.id) } label: { Text(L.addDiscount) }
             Divider()
             Button(role: .destructive) { model.removeLine(line.id) } label: { Text(L.deleteLine) }
         }
     }
 
+    /// The column shows only under Czech VAT, where every line is taxable; the header and the totals bar
+    /// name any other treatment once.
     @ViewBuilder private func rateCell(_ line: DocumentLine, document: Document) -> some View {
-        switch line.treatment {
-        case .taxable(let kind):
+        if case .taxable(let kind) = line.treatment {
             VATRateField(line: line, kind: kind, day: document.taxPoint, model: model, focus: $focus, focusValue: .vatRate(line.id),
                          commit: { newKind in model.setLine(line.id) { $0.treatment = .taxable(newKind) } },
                          onSubmit: { moveDown(from: .vatRate(line.id)) })
-        case .intraCommunityGoods:
-            Text(L.rateExempt)
-                .textRole(.rowSecondary)
-                .help(Text(L.treatmentEUGoods))
-                .accessibilityLabel(Text(L.treatmentEUGoods))
-        case .reverseChargeEU:
-            Text(L.rateReverseCharge)
-                .textRole(.rowSecondary)
-                .help(Text(L.treatmentReverseCharge))
-                .accessibilityLabel(Text(L.treatmentReverseCharge))
-        case .outsideEU:
-            Text(verbatim: "—")
-                .textRole(.rowSecondary)
-                .help(Text(L.treatmentOutsideEU))
-                .accessibilityLabel(Text(L.treatmentOutsideEU))
-        case .exempt:
-            Text(L.rateExempt).textRole(.rowSecondary)
+        } else {
+            Text(verbatim: "—").textRole(.rowSecondary)
         }
     }
 
@@ -896,17 +920,20 @@ struct DraftEditorView: View {
 
     // MARK: Notes
 
+    /// Note and Order reference (docs-23). The footer is the company's, set in Settings; the group opens by
+    /// itself when either field has text.
     private func notes(_ document: Document) -> some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $notesExpanded) {
             VStack(alignment: .leading, spacing: Spacing.m) {
                 TextField(text: Binding(get: { document.note ?? "" }, set: { model.setNote($0) }), axis: .vertical) {
                     Text(L.fieldNote)
                 }
                 .textRole(.body)
-                TextField(text: Binding(get: { document.footer ?? "" }, set: { model.setFooter($0) }), axis: .vertical) {
-                    Text(L.fieldFooter)
+                TextField(text: Binding(get: { document.orderReference ?? "" }, set: { model.setOrderReference($0) })) {
+                    Text(L.fieldOrderReference)
                 }
                 .textRole(.body)
+                .frame(maxWidth: 360)
             }
             .padding(.top, Spacing.s)
         } label: {
@@ -946,8 +973,8 @@ private struct TotalsBarAttachment<Bar: View>: ViewModifier {
 // MARK: - Client field
 
 /// The client as a text field with type-ahead on name, IČO and VAT ID (screens-flows.md §2c, design-system.md
-/// §8.4). While typing, the matches list under the field with their defaults and caution chips, and the
-/// last row is New Client “X”…; ↩ picks the highlighted row, ↓/↑ move, Esc and leaving the field revert.
+/// §8.4). While typing, the matches list under the field with their defaults, and the last row is New
+/// Client “X”…; the client's problems show under the field as problem messages (docs-20); ↩ picks the highlighted row, ↓/↑ move, Esc and leaving the field revert.
 /// The list is drawn by the app on every macOS version, so a keyboard user has the same path everywhere.
 struct ClientField<Focus: Hashable>: View {
     let model: DraftEditorModel
@@ -1019,13 +1046,11 @@ struct ClientField<Focus: Hashable>: View {
                 suggestions
             }
             if let document = model.document, document.customerID != nil, !(isFocused && editing) {
-                HStack(spacing: Spacing.s) {
-                    if document.customer.vatIdentifier == nil, document.requiresCustomerVATID {
-                        chip(L.vatIDMissing)
-                    }
-                    if document.customer.address.street.isEmpty || document.customer.address.city.isEmpty {
-                        chip(L.addressMissing)
-                    }
+                if document.customer.vatIdentifier == nil, document.requiresCustomerVATID {
+                    InlineMessage(L.vatIDMissing)
+                }
+                if document.customer.address.street.isEmpty || document.customer.address.city.isEmpty {
+                    InlineMessage(L.addressMissing)
                 }
             }
         }
@@ -1041,7 +1066,7 @@ struct ClientField<Focus: Hashable>: View {
                 .padding(.horizontal, Spacing.s)
                 .padding(.vertical, Spacing.xs)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(index == highlighted ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: Radius.s))
+                .modifier(SuggestionHighlight(isOn: index == highlighted))
             }
             Button { newClient(query) } label: {
                 Label {
@@ -1054,7 +1079,7 @@ struct ClientField<Focus: Hashable>: View {
             .padding(.horizontal, Spacing.s)
             .padding(.vertical, Spacing.xs)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(highlighted == matches.count ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: Radius.s))
+            .modifier(SuggestionHighlight(isOn: highlighted == matches.count))
         }
         .padding(Spacing.xs)
         .frame(maxWidth: 360)
@@ -1062,39 +1087,19 @@ struct ClientField<Focus: Hashable>: View {
         .overlay(RoundedRectangle(cornerRadius: Radius.m).stroke(.separator))
     }
 
-    /// Name, then "IČO · country · default currency · document language · VAT treatment" (design-system.md
-    /// §8.4), so a client found by its IČO shows it, and the caution chips.
+    /// Name, then "EUR · 14 days · EU goods, exempt": the client's currency, due days and treatment in their
+    /// short forms (docs-20).
     private func suggestionRow(_ customer: Customer) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(verbatim: customer.party.name).textRole(.body)
-            HStack(spacing: Spacing.s) {
-                Text(Self.suggestionLine(customer)).textRole(.rowSecondary)
-                if customer.party.vatIdentifier == nil, customer.vatStatus.defaultTreatment.requiresCustomerVATID {
-                    chip(L.vatIDMissing)
-                }
-                if customer.party.address.street.isEmpty || customer.party.address.city.isEmpty {
-                    chip(L.addressMissing)
-                }
-            }
+            Text(Self.suggestionLine(customer)).textRole(.rowSecondary)
         }
     }
 
     static func suggestionLine(_ customer: Customer) -> LocalizedStringResource {
-        let country = customer.party.address.countryCode
-        let language = String(localized: customer.language == .czech ? L.languageCzech : L.languageEnglish)
+        let days = String(localized: customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays))
         let treatment = String(localized: TreatmentChoice(customer.vatStatus.defaultTreatment).shortTitle)
-        if let ico = customer.party.identificationNumber?.digits {
-            return L.clientSuggestionLine(ico, country, customer.currency.code, language, treatment)
-        }
-        return L.clientSuggestionLineNoICO(country, customer.currency.code, language, treatment)
-    }
-
-    private func chip(_ text: LocalizedStringResource) -> some View {
-        Text(text)
-            .textRole(.badge)
-            .padding(.horizontal, Spacing.s)
-            .padding(.vertical, Spacing.xxs)
-            .background(Color.orange.opacity(0.2), in: Capsule())
+        return L.clientSuggestionLine(customer.currency.code, days, treatment)
     }
 
     private func move(_ delta: Int) {
@@ -1119,6 +1124,21 @@ struct ClientField<Focus: Hashable>: View {
     private func revert() {
         text = currentName
         editing = false
+    }
+}
+
+/// The highlighted suggestion in the system's selection colours, as a menu or a list draws it (docs-20).
+private struct SuggestionHighlight: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content
+                .foregroundStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                .background(Color(nsColor: .selectedContentBackgroundColor), in: RoundedRectangle(cornerRadius: Radius.s))
+        } else {
+            content
+        }
     }
 }
 
@@ -1161,6 +1181,8 @@ struct LineTextCell<Focus: Hashable>: View {
     let value: String
     let focus: FocusState<Focus?>.Binding
     let focusValue: Focus
+    /// Offered under the field on macOS 15 and later; plain text before.
+    var suggestions: [String] = []
     let commit: @MainActor (String) -> Void
     let onSubmit: @MainActor () -> Void
 
@@ -1169,6 +1191,22 @@ struct LineTextCell<Focus: Hashable>: View {
     private var isFocused: Bool { focus.wrappedValue == focusValue }
 
     var body: some View {
+        withSuggestions(field)
+    }
+
+    @ViewBuilder private func withSuggestions<Field: View>(_ field: Field) -> some View {
+        if #available(macOS 15, *), !suggestions.isEmpty {
+            field.textInputSuggestions {
+                ForEach(suggestions, id: \.self) { suggestion in
+                    Text(verbatim: suggestion).textInputCompletion(suggestion)
+                }
+            }
+        } else {
+            field
+        }
+    }
+
+    private var field: some View {
         TextField(text: Binding(get: { value }, set: { commit($0) })) { Text(label) }
             .labelsHidden()
             .textRole(.body)
@@ -1185,8 +1223,8 @@ struct LineTextCell<Focus: Hashable>: View {
 }
 
 /// A numeric cell of the lines grid (screens-flows.md §2c, design-system.md §8.3, §8.5). A number is
-/// written as it is typed; text that is not a number stays in the cell with a red outline and a trailing
-/// warning symbol that says what to type, the model counts the cell as ⛔, and the value from before the
+/// written as it is typed; text that is not a number stays in the cell with a trailing orange warning
+/// symbol that says what to type (no red outline, docs-26), the model counts the cell as ⛔, and the value from before the
 /// edit stands: a typo never leaves a shorter number behind. Esc restores that value; ↩ moves down.
 struct AmountField<Focus: Hashable>: View {
     let cell: NumberCell
@@ -1215,9 +1253,6 @@ struct AmountField<Focus: Hashable>: View {
                 .multilineTextAlignment(.trailing)
                 .textRole(.amount)
                 .focused(focus, equals: focusValue)
-                .overlay {
-                    RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
-                }
                 .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
                 // A rebuilt cell (after the preview, a relayout) shows the invalid text it held, still ⛔,
                 // or the stored value (screens-flows.md §2c: never lose input).
@@ -1346,9 +1381,6 @@ struct VATRateField<Focus: Hashable>: View {
             .labelsHidden()
             .textRole(.amount)
             .focused(focus, equals: focusValue)
-            .overlay {
-                RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
-            }
             .accessibilityHint(Text(verbatim: invalid ? fixIt : ""))
             // A rebuilt cell shows the invalid text it held, still ⛔, or the rate (screens-flows.md §2c); a
             // treatment without a rate drops the entry in the model (`dropRateCellsOfUntaxedLines`).
@@ -1442,8 +1474,8 @@ struct VATRateField<Focus: Hashable>: View {
 
 // MARK: - Rate forms
 
-/// The inline rate form (screens-flows.md §2c, design-system.md §8.9 "missing"): the tax point's rate is
-/// not stored, so the user types it for the prefilled publication day, or imports the ČNB file. ↩ saves
+/// The inline rate form (docs-25): the rate day's rate is not stored, so the user types it for that day,
+/// or imports the ČNB file. There is no date picker; Change… on the saved rate corrects its day. ↩ saves
 /// with the source "Typed" and the document takes the rate at once. Errors show under the field, in the
 /// editor and in the Issue sheet alike.
 struct RateEntryForm<Focus: Hashable>: View {
@@ -1455,7 +1487,6 @@ struct RateEntryForm<Focus: Hashable>: View {
     @Environment(\.locale) private var locale
     @Environment(\.textScale) private var textScale
     @State private var text = ""
-    @State private var day = Date()
     @State private var importing = false
     @State private var importLine: String?
 
@@ -1496,8 +1527,6 @@ struct RateEntryForm<Focus: Hashable>: View {
                     InlineMessage(rateError)
                 }
             }
-            .onAppear { day = model.neededRateDay.midnight(in: .current) }
-            .onChange(of: model.neededRateDay) { _, needed in day = needed.midnight(in: .current) }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .data], allowsMultipleSelection: false) { result in
                 guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
                 importLine = outcome.line
@@ -1515,16 +1544,12 @@ struct RateEntryForm<Focus: Hashable>: View {
         .textRole(.amount)
         .frame(width: 120 * textScale)
         .focused(focus, equals: focusValue)
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.s).stroke(Color.red, lineWidth: invalid ? 1.5 : 0)
-        }
         .onSubmit { save() }
     }
 
-    /// The publication day, Save Rate and Import Rates…, beside the field or under it.
+    /// Save Rate, then the secondary Import ČNB Rates…, beside the field or under it.
     @ViewBuilder
     private var rateControls: some View {
-        DatePicker(selection: $day, displayedComponents: .date) { Text(L.rateDateLabel) }
         Button { save() } label: { Text(L.saveRate) }
             .disabled((parsed ?? 0) <= 0)
         Button { importing = true } label: { Text(L.importRates) }
@@ -1532,7 +1557,7 @@ struct RateEntryForm<Focus: Hashable>: View {
 
     private func save() {
         guard let parsed, parsed > 0 else { return }
-        model.saveManualRate(parsed, validFor: CalendarDay(day, in: .current))
+        model.saveManualRate(parsed, validFor: model.neededRateDay)
         if model.rateError == nil { text = "" }
     }
 }

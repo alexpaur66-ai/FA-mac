@@ -309,6 +309,13 @@ struct AppCommands: Commands {
             .disabled(editor?.focusedLineID == nil)
         Button { editor?.moveFocusedLine(by: 1) } label: { Text(L.moveLineDown) }
             .disabled(editor?.focusedLineID == nil)
+        // The focused line's Discount % cell (docs-22, §1.4: enabled with the cursor in a line).
+        Button {
+            // The preview hides the grid: the editor comes back first and focuses the cell, as Enter Rate… does.
+            if actions?.previewShown == true { actions?.togglePreview?() }
+            editor?.requestDiscount(on: nil)
+        } label: { Text(L.addDiscount) }
+            .disabled(editor?.focusedLineID == nil)
         Divider()
         Picker(selection: Binding(get: { document?.kind ?? .invoice }, set: { kind in editor?.setKind(kind) })) {
             ForEach(DraftEditorModel.kindOptions(for: document?.kind ?? .invoice), id: \.self) { kind in
@@ -345,6 +352,15 @@ struct AppCommands: Commands {
             Text(L.menuVATTreatment)
         }
         .disabled(editor == nil)
+        // The header's pop-up for Full Keyboard Access off (docs-18): enabled only when two or more fit.
+        Picker(selection: Binding(get: { editor?.selectedBankAccount }, set: { account in editor?.chooseBankAccount(account) })) {
+            ForEach(editor?.bankAccounts ?? [], id: \.self) { account in
+                Text(DraftEditorView.accountLabel(account)).tag(Optional(account))
+            }
+        } label: {
+            Text(L.menuBankAccount)
+        }
+        .disabled(isReceipt || (editor?.bankAccounts.count ?? 0) < 2)
         Button {
             // The preview hides the rate form: the editor comes back first and takes the request (recheck N06).
             if actions?.previewShown == true { actions?.togglePreview?() }
