@@ -35,6 +35,8 @@ struct OverviewView: View {
     /// The selected queue row, by item: a document in two groups (overdue, and its tax document missing)
     /// selects the row that was clicked, not both.
     @State private var selectedQueueItem: String?
+    /// The selected export row (queue group 4), by month; it has no document, so `selection` is nil meanwhile.
+    @State private var selectedExportMonth: CalendarDay?
     @FocusState private var queueFocused: Bool
     /// Per advance in the queue's "tax document missing" group: the received money without an issued tax
     /// document. The states carry only the paid total, which also counts the payments already documented.
@@ -106,6 +108,9 @@ struct OverviewView: View {
             .onChange(of: selectedQueueItem) { _, id in
                 if let id { proxy.scrollTo(id) }
             }
+            .onChange(of: selectedExportMonth) { _, month in
+                if let month { proxy.scrollTo(month) }
+            }
         }
         .navigationTitle(Text(L.overview))
         .task(id: documents.states) {
@@ -122,7 +127,12 @@ struct OverviewView: View {
             reloadSetup()
         }
         .onChange(of: selection) { _, newValue in
-            if newValue == nil { selectedQueueItem = nil }
+            if newValue == nil {
+                selectedQueueItem = nil
+            } else {
+                // A document selected here or elsewhere ends the export row's selection.
+                selectedExportMonth = nil
+            }
         }
         .toolbar {
             // One plain New Invoice button and no search (design-system.md §8.11); ⇧⌘N makes an advance.
@@ -294,8 +304,9 @@ struct OverviewView: View {
                     Image(systemName: "checkmark.circle").foregroundStyle(Color.secondary)
                 }
                 .textRole(.body)
-            } else if !figures.queue.isEmpty {
+            } else if !figures.queue.isEmpty || !exportMonths.isEmpty {
                 let current = currentQueueItem(in: figures.queue)?.id
+                let currentExport = currentExportMonth
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(figures.queue) { item in
                         let selected = current == item.id
@@ -307,6 +318,21 @@ struct OverviewView: View {
                             }
                             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
                             .accessibilityAction { select(item) }
+                    }
+                    // The export rows (group 4) follow the documents in the keyboard list: ↩ on one does
+                    // Export Again… (§2a), like its button.
+                    if let exportAgain {
+                        ForEach(exportChanges, id: \.export.month) { change in
+                            let selected = currentExport == change.export.month
+                            ExportQueueRow(change: change, exportAgain: exportAgain, selected: selected,
+                                           focused: queueFocused)
+                                .id(change.export.month)
+                                .onTapGesture {
+                                    selectExport(change.export.month)
+                                    queueFocused = true
+                                }
+                                .accessibilityAddTraits(selected ? [.isSelected] : [])
+                        }
                     }
                 }
                 .focusable()
@@ -322,18 +348,16 @@ struct OverviewView: View {
                     return .handled
                 }
                 .onKeyPress(.return) {
+                    if let month = currentExportMonth, let exportAgain {
+                        exportAgain(month)
+                        return .handled
+                    }
                     guard let item = currentQueueItem(in: figures.queue) else { return .ignored }
                     return runQueueAction(item.kind, item.state.id) ? .handled : .ignored
                 }
             }
-            // The export rows (group 4) and the backup row (group 5) come last (§2a), each with its button.
-            if let exportAgain {
-                ForEach(exportChanges, id: \.export.month) { change in
-                    ExportQueueRow(change: change, exportAgain: exportAgain)
-                }
-            }
             // The backup group comes last (§2a). It is its own row with a button rather than a row of the
-            // keyboard list above, whose selection is a document's.
+            // keyboard list above, whose selection is a document or an exported month.
             if let backupText, let backUpNow {
                 BackupQueueRow(text: backupText, backUpNow: backUpNow)
             }
@@ -343,7 +367,7 @@ struct OverviewView: View {
     /// The selected queue row, derived from the selected document: the row that was clicked while it still
     /// shows that document, else the document's first row (a restored selection, or one made elsewhere).
     private func currentQueueItem(in items: [OverviewFigures.QueueItem]) -> OverviewFigures.QueueItem? {
-        guard let selection else { return nil }
+        guard let selection, currentExportMonth == nil else { return nil }
         if let selectedQueueItem, let clicked = items.first(where: { $0.id == selectedQueueItem }),
            clicked.state.id == selection {
             return clicked
@@ -352,21 +376,52 @@ struct OverviewView: View {
     }
 
     private func select(_ item: OverviewFigures.QueueItem) {
+        selectedExportMonth = nil
         selectedQueueItem = item.id
         selection = item.state.id
     }
 
+    /// The months of the export rows in the keyboard list; none without Export Again….
+    private var exportMonths: [CalendarDay] {
+        exportAgain == nil ? [] : exportChanges.map(\.export.month)
+    }
+
+    /// The selected export row's month, while that row is still shown.
+    private var currentExportMonth: CalendarDay? {
+        guard let selectedExportMonth, exportMonths.contains(selectedExportMonth) else { return nil }
+        return selectedExportMonth
+    }
+
+    /// An export row has no document: the detail column empties, as for no selection.
+    private func selectExport(_ month: CalendarDay) {
+        selectedExportMonth = month
+        selectedQueueItem = nil
+        selection = nil
+    }
+
+    /// ↑↓ over the document rows, then the export rows below them.
     private func move(by step: Int, in items: [OverviewFigures.QueueItem]) {
-        guard !items.isEmpty else { return }
-        let currentID = currentQueueItem(in: items)?.id
-        let current = items.firstIndex { $0.id == currentID }
+        let months = exportMonths
+        let count = items.count + months.count
+        guard count > 0 else { return }
+        let current: Int?
+        if let month = currentExportMonth, let index = months.firstIndex(of: month) {
+            current = items.count + index
+        } else {
+            let currentID = currentQueueItem(in: items)?.id
+            current = items.firstIndex { $0.id == currentID }
+        }
         let next: Int
         if let current {
-            next = min(max(current + step, 0), items.count - 1)
+            next = min(max(current + step, 0), count - 1)
         } else {
-            next = step > 0 ? 0 : items.count - 1
+            next = step > 0 ? 0 : count - 1
         }
-        select(items[next])
+        if next < items.count {
+            select(items[next])
+        } else {
+            selectExport(months[next - items.count])
+        }
     }
 
     /// The row's amount; for a missing tax document the received money without one, once loaded.
@@ -511,10 +566,13 @@ private struct BackupQueueRow: View {
     }
 }
 
-/// "October 2026 · 1 document changed after export", with Export Again… (§2a).
+/// "October 2026 · 1 document changed after export", with Export Again… (§2a); a row of the keyboard list.
 private struct ExportQueueRow: View {
     let change: MonthExportChange
     let exportAgain: @MainActor (CalendarDay) -> Void
+    let selected: Bool
+    /// The list has keyboard focus: the selection shows in the accent colour, else in the inactive grey.
+    let focused: Bool
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -530,6 +588,13 @@ private struct ExportQueueRow: View {
         }
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.s)
+        .background(background, in: RoundedRectangle(cornerRadius: Radius.m))
+        .contentShape(RoundedRectangle(cornerRadius: Radius.m))
+    }
+
+    private var background: AnyShapeStyle {
+        guard selected else { return AnyShapeStyle(Color.clear) }
+        return focused ? AnyShapeStyle(SelectionShapeStyle()) : AnyShapeStyle(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
     }
 }
 

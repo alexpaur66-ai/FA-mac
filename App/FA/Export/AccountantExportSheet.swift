@@ -125,8 +125,10 @@ struct AccountantExportSheet: View {
             try stores.exports.write(fresh, labels: .app, to: folder)
             NotificationCenter.default.post(name: .monthExported, object: nil)
         } catch {
-            self.error = String(localized: L.exportFailed(ErrorText.message(error, locale: locale)))
+            // load() clears the message, so it comes after the re-read.
+            let message = String(localized: L.exportFailed(ErrorText.message(error, locale: locale)))
             load()
+            self.error = message
             return
         }
         let name = monthTitle

@@ -274,16 +274,18 @@ public enum AccountantCSV {
         fields.map(quoted).joined(separator: delimiter) + lineEnd
     }
 
-    /// A field with the delimiter, a quote or a line break is quoted, its quotes doubled (RFC 4180).
+    /// A field with the delimiter, a quote or a line break is quoted, its quotes doubled (RFC 4180). Checked by
+    /// scalar: "\r\n" is one Character, equal to neither "\n" nor "\r".
     static func quoted(_ field: String) -> String {
-        guard field.contains(where: { $0 == ";" || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else { return field }
+        guard field.unicodeScalars.contains(where: { $0 == ";" || $0 == "\"" || $0 == "\n" || $0 == "\r" })
+        else { return field }
         return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     /// Free text (names, notes, numbers typed by the user): one that starts like a spreadsheet formula gets an
     /// apostrophe in front, so opening the file never runs it.
     static func text(_ value: String) -> String {
-        guard let first = value.first, "=+-@\t\r".contains(first) else { return value }
+        guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) else { return value }
         return "'" + value
     }
 

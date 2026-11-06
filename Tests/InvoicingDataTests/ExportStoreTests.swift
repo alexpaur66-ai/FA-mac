@@ -206,6 +206,9 @@ import InvoicingCore
     @Test func fieldsAreQuotedAndFormulasDefused() {
         #expect(AccountantCSV.quoted("Acme; s.r.o.") == "\"Acme; s.r.o.\"")
         #expect(AccountantCSV.quoted("Say \"hi\"") == "\"Say \"\"hi\"\"\"")
+        #expect(AccountantCSV.quoted("a\r\nb") == "\"a\r\nb\"")
+        #expect(AccountantCSV.quoted("a\nb") == "\"a\nb\"")
+        #expect(AccountantCSV.text("\r\nx") == "'\r\nx")
         #expect(AccountantCSV.text("=SUM(A1)") == "'=SUM(A1)")
         #expect(AccountantCSV.text("Acme") == "Acme")
         #expect(AccountantCSV.amount(Fixtures.d("-12.5"), scale: 2) == "-12,50")
