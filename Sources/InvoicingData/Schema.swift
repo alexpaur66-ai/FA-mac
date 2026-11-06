@@ -261,6 +261,68 @@ enum Schema {
                 BEGIN SELECT RAISE(ABORT, 'a stored PDF is frozen'); END
                 """)
         }
+
+        // v3 (ADR 0012): advances paid on § 64 goods, which have no payment tax document, settled on a final
+        // invoice as paid in advance; and two document columns the lists read without decoding the snapshot.
+        migrator.registerMigration("v3") { db in
+            try db.alter(table: "document") { t in
+                // What a final invoice lists as paid in advance, in minor units; NULL when nothing is (and on
+                // every row written before v3, when nothing could be).
+                t.add(column: "paidInAdvance", .integer)
+                // The distinct VAT treatments of the lines (VATTreatment.groupingKey) as a JSON array, in the order
+                // of the lines; NULL on rows written before v3, whose snapshot says it.
+                t.add(column: "treatments", .text)
+            }
+            // Which payments an issued final invoice settled as paid in advance. Written when the final invoice
+            // is issued, frozen with it; a payment is settled by one final invoice only.
+            try db.create(table: "paidAdvance") { t in
+                t.column("id", .text).primaryKey()
+                t.column("finalInvoiceID", .text).notNull().references("document", onDelete: .restrict)
+                t.column("finalInvoiceNumber", .text).notNull()
+                t.column("paymentID", .text).notNull().unique().references("documentPayment", onDelete: .restrict)
+                t.column("advanceRequestID", .text).notNull().references("document", onDelete: .restrict)
+                t.column("advanceNumber", .text).notNull()
+                // The part of the payment the final invoice lists, in minor units of `currency`.
+                t.column("amount", .integer).notNull().check(sql: "amount > 0")
+                t.column("currency", .text).notNull()
+                t.column("createdAt", .text).notNull()
+            }
+            try db.execute(sql: "CREATE INDEX paidAdvance_finalInvoiceID ON paidAdvance(finalInvoiceID)")
+            try db.execute(sql: "CREATE INDEX paidAdvance_advanceRequestID ON paidAdvance(advanceRequestID)")
+            try db.execute(sql: """
+                CREATE TRIGGER paidAdvance_frozen_update BEFORE UPDATE ON paidAdvance
+                BEGIN SELECT RAISE(ABORT, 'advances settled by an issued final invoice are frozen'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER paidAdvance_frozen_delete BEFORE DELETE ON paidAdvance
+                BEGIN SELECT RAISE(ABORT, 'advances settled by an issued final invoice are frozen'); END
+                """)
+            // REPLACE removes the conflicting row without firing the delete trigger (recursive_triggers is off), so
+            // an insert that would overwrite a link (same id) or take its payment (unique) is aborted before it starts.
+            try db.execute(sql: """
+                CREATE TRIGGER paidAdvance_frozen_replace BEFORE INSERT ON paidAdvance
+                WHEN EXISTS (SELECT 1 FROM paidAdvance WHERE id = NEW.id OR paymentID = NEW.paymentID)
+                BEGIN SELECT RAISE(ABORT, 'advances settled by an issued final invoice are frozen'); END
+                """)
+            // A settled payment rests under the final invoice: its money may not change and it may not go. Its
+            // links may (a draft tax document deleted, a bank line unmatched); the store refuses a tax document.
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_settled_update BEFORE UPDATE OF documentID, paidOn, amount, currency, kind ON documentPayment
+                WHEN EXISTS (SELECT 1 FROM paidAdvance WHERE paymentID = OLD.id)
+                BEGIN SELECT RAISE(ABORT, 'the payment is settled in an issued final invoice'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_settled_delete BEFORE DELETE ON documentPayment
+                WHEN EXISTS (SELECT 1 FROM paidAdvance WHERE paymentID = OLD.id)
+                BEGIN SELECT RAISE(ABORT, 'the payment is settled in an issued final invoice'); END
+                """)
+            // REPLACE over a settled payment (same id) is aborted too, as for the payments of issued tax documents.
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_settled_replace BEFORE INSERT ON documentPayment
+                WHEN EXISTS (SELECT 1 FROM paidAdvance WHERE paymentID = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'the payment is settled in an issued final invoice'); END
+                """)
+        }
         return migrator
     }
 }

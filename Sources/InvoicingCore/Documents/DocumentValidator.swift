@@ -20,6 +20,8 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case exchangeRateMissing, exchangeRateCurrencyMismatch, exchangeRateAfterTaxPoint, exchangeRateStale
         case advanceDeductionsOnWrongKind, advanceDeductedTwice, advanceCurrencyDiffers, advanceRateDiffers, advanceExchangeRateDiffers
         case advancesExceedSupply
+        case paidAdvancesOnWrongKind, paidAdvanceNumberMissing, paidAdvanceAmountNotPositive, paidAdvanceCurrencyDiffers
+        case paidAdvanceListedTwice, paidAdvanceTreatmentDiffers, paidInAdvanceExceedsTotal
         case documentTotalNegative, receivedAmountNotPositive
         case paymentInstructionsMissing, bankAccountCurrencyDiffers, amountsUnavailable
         case paymentQRCodeNameTooLong, paymentQRCodeUnavailable
@@ -157,6 +159,27 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case .advancesExceedSupply:
             return ("Odečtené zálohy převyšují plnění; základ daně je záporný (§ 37a odst. 2 písm. b) ZDPH).",
                     "The deducted advances exceed the supply; the tax base is negative (§ 37a(2)(b) of the VAT Act).")
+        case .paidAdvancesOnWrongKind:
+            return ("Uhrazené zálohy lze uvést jen na konečné faktuře.",
+                    "Advances paid can only be listed on a final invoice.")
+        case .paidAdvanceNumberMissing:
+            return ("U uhrazené zálohy chybí číslo zálohy.",
+                    "An advance paid has no advance number.")
+        case .paidAdvanceAmountNotPositive:
+            return ("Uhrazená záloha {detail} musí znít na kladnou částku.",
+                    "The advance paid {detail} must be a positive amount.")
+        case .paidAdvanceCurrencyDiffers:
+            return ("Uhrazená záloha {detail} je v jiné měně než doklad.",
+                    "The advance paid {detail} is in another currency than the document.")
+        case .paidAdvanceListedTwice:
+            return ("Platba zálohy {detail} je uvedena dvakrát.",
+                    "A payment of the advance {detail} is listed twice.")
+        case .paidAdvanceTreatmentDiffers:
+            return ("Záloha {detail} nebyla vystavena jen na dodání zboží do jiného členského státu (§ 64 ZDPH); prověřte s účetní, zda k platbě neměl být vystaven daňový doklad.",
+                    "The advance {detail} was not issued for EU goods (§ 64) only; check with your accountant whether the payment needed a tax document.")
+        case .paidInAdvanceExceedsTotal:
+            return ("Uhrazené zálohy převyšují částku dokladu; přeplatek je třeba vrátit nebo započíst.",
+                    "The advances paid exceed the document's total; the overpayment has to be refunded or offset.")
         case .documentTotalNegative:
             return ("Doklad nebo jeho řádek rekapitulace DPH je záporný; opravný daňový doklad (§ 45 ZDPH) zatím není podporován.",
                     "The document or a row of its VAT summary is negative; corrective tax documents (§ 45 of the VAT Act) are not supported yet.")
@@ -279,6 +302,40 @@ public enum DocumentValidator {
             }
         }
 
+        // Advances paid on § 64 goods, which have no payment tax document (ADR 0012): listed on a final invoice
+        // only, each payment once, in the document's currency. One issued under another treatment is the
+        // accountant's call, not a blocker (ACCT).
+        let paidAdvances = document.paidAdvances ?? []
+        if !paidAdvances.isEmpty && !document.kind.deductsAdvances { add(.paidAdvancesOnWrongKind, .error) }
+        // One issue per rule naming every advance it concerns, so the issues keep distinct ids.
+        var numbersByCode: [(code: ValidationIssue.Code, numbers: [String])] = []
+        func note(_ code: ValidationIssue.Code, _ number: String) {
+            if let index = numbersByCode.firstIndex(where: { $0.code == code }) {
+                if !numbersByCode[index].numbers.contains(number) { numbersByCode[index].numbers.append(number) }
+            } else {
+                numbersByCode.append((code: code, numbers: [number]))
+            }
+        }
+        var seenPayments = Set<String>()
+        var missingNumber = false
+        for paid in paidAdvances {
+            let number = paid.advanceNumber.trimmingWhitespace()
+            if number.isEmpty { missingNumber = true }
+            if paid.amount <= 0 { note(.paidAdvanceAmountNotPositive, number) }
+            if paid.currency != document.currency { note(.paidAdvanceCurrencyDiffers, number) }
+            // The same payment twice: the same stored payment, or for an advance the app does not know, the
+            // same advance, day and amount.
+            let key = paid.paymentID ?? "\(number)|\(paid.paidOn.isoString)|\(paid.amount)"
+            if !seenPayments.insert(key).inserted { note(.paidAdvanceListedTwice, number) }
+            if let treatment = paid.advanceTreatment, treatment != .intraCommunityGoods {
+                note(.paidAdvanceTreatmentDiffers, number)
+            }
+        }
+        if missingNumber { add(.paidAdvanceNumberMissing, .error) }
+        for entry in numbersByCode {
+            add(entry.code, entry.code == .paidAdvanceTreatmentDiffers ? .warning : .error, detail: entry.numbers.joined(separator: ", "))
+        }
+
         // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH. The rate is the one
         // valid on the day the obligation to declare arose: the tax point, for § 64 goods the § 22 odst. 1 day.
         do {
@@ -302,6 +359,7 @@ public enum DocumentValidator {
             }
             if document.kind.deductsAdvances {
                 if totals.rows.contains(where: { $0.taxableBase < 0 }) { add(.advancesExceedSupply, .warning) }
+                if totals.paidInAdvance > 0 && totals.amountDue < 0 { add(.paidInAdvanceExceedsTotal, .warning) }
                 // Deductions and their percentages per summary row, matched to rows by the same rule as the totals.
                 let lineTreatments = document.treatments
                 var deductionsByKey: [String: [AdvanceDeduction]] = [:]

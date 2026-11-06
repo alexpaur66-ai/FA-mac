@@ -6,5 +6,5 @@ import InvoicingCore
 /// `ProfileStore`, `StatementStore`, `AuditLog`) are the API the app uses; `DocumentStore` also keeps the PDF of each issued document.
 public enum InvoicingData {
     /// Highest migration applied by this build.
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 }

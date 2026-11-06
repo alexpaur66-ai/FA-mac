@@ -80,6 +80,15 @@ enum PDFStrings {
         return czech + " / " + english
     }
 
+    /// "Záloha ZF 2026-0003 uhrazena 12. 11. 2026" (design proposal, ACCT): an advance paid on § 64 goods,
+    /// listed under "Uhrazené zálohy" on the final invoice without a tax document (ADR 0012). The day is
+    /// printed the Czech way in the English gloss too, as on the deduction lines.
+    static func paidAdvanceLine(number: String, paidOn: CalendarDay, _ language: DocumentLanguage) -> String {
+        let czech = "Záloha \(number) uhrazena \(PDFFormat.day(paidOn))"
+        guard language == .english else { return czech }
+        return czech + " / Advance \(number) paid on \(PDFFormat.day(paidOn))"
+    }
+
     /// The unit-price caption of a document priced with VAT (a payment tax document), so quantity × price
     /// is not read as the tax base (ACCT).
     static func unitPriceIncludingVAT(_ language: DocumentLanguage) -> String {

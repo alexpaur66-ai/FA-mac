@@ -40,7 +40,8 @@ public enum DocumentAmountError: Error, Equatable, Sendable {
     case exchangeRateCurrencyMismatch(rate: Currency, document: Currency)
 }
 
-/// The amounts of a document: per line, per VAT rate, totals, advance deductions and CZK equivalents.
+/// The amounts of a document: per line, per VAT rate, totals, advance deductions, advances paid and CZK
+/// equivalents.
 ///
 /// Line and group arithmetic is `VATCalculator` (§ 37 ZDPH, docs/adr/0002). A final invoice deducts the
 /// advances per treatment: the tax base is the difference between the base of the supply and the sum of
@@ -63,9 +64,13 @@ public struct DocumentTotals: Hashable, Sendable {
     /// Sums after deduction: the tax base and the VAT of this document.
     public let taxableBase: Decimal
     public let taxableVAT: Decimal
+    /// Advances paid on § 64 goods that a final invoice lists as paid in advance (ADR 0012), in the
+    /// document's currency. They have no payment tax document and change no tax base: they only reduce
+    /// `amountDue`. Zero on every other kind.
+    public let paidInAdvance: Decimal
     /// What the customer pays: the sum of the rows' `amountDue`, which is the gross of the supply minus
-    /// the gross of the advances paid, or the taxable base plus VAT where § 37a changed the rate; negative
-    /// when the advances exceed the supply.
+    /// the gross of the advances deducted, or the taxable base plus VAT where § 37a changed the rate, less
+    /// `paidInAdvance`; negative when the advances exceed the supply.
     public let amountDue: Decimal
     public let taxableBaseCZK: Decimal?
     /// The VAT in Czech crowns (§ 29 odst. 1 písm. l) ZDPH); equals `taxableVAT` on CZK documents.
@@ -75,6 +80,10 @@ public struct DocumentTotals: Hashable, Sendable {
     public let exchangeRate: ExchangeRate?
 
     public var amountDueMoney: Money { Money(amountDue, currency) }
+
+    /// The amount due before the advances paid without a tax document: the supply after the deducted
+    /// advances, which is what the document adds to the revenue.
+    public var dueBeforePaidInAdvance: Decimal { amountDue + paidInAdvance }
 
     /// The distinct rates of the advances that rows with a negative difference were converted at, other
     /// than the document's own rate, in row order: what the document explains in a clause.
@@ -142,7 +151,15 @@ public struct DocumentTotals: Hashable, Sendable {
         let deductedVAT = rows.reduce(Decimal(0)) { $0 + $1.deductedVAT }
         let taxableBase = rows.reduce(Decimal(0)) { $0 + $1.taxableBase }
         let taxableVAT = rows.reduce(Decimal(0)) { $0 + $1.taxableVAT }
-        let amountDue = rows.reduce(Decimal(0)) { $0 + $1.amountDue }
+        // Advances paid on § 64 goods reduce only what is left to pay (ADR 0012). A row in another currency
+        // is the validator's error and counts for nothing here.
+        var paidInAdvance = Decimal(0)
+        if document.kind.deductsAdvances {
+            for paid in document.paidAdvances ?? [] where paid.currency == currency {
+                paidInAdvance += paid.amount
+            }
+        }
+        let amountDue = rows.reduce(Decimal(0)) { $0 + $1.amountDue } - paidInAdvance
 
         return DocumentTotals(
             currency: currency,
@@ -155,6 +172,7 @@ public struct DocumentTotals: Hashable, Sendable {
             deductedVAT: deductedVAT,
             taxableBase: taxableBase,
             taxableVAT: taxableVAT,
+            paidInAdvance: paidInAdvance,
             amountDue: amountDue,
             taxableBaseCZK: Self.sum(rows.map(\.taxableBaseCZK)),
             taxableVATCZK: Self.sum(rows.map(\.taxableVATCZK)),

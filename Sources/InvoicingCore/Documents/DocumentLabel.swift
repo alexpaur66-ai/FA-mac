@@ -3,7 +3,7 @@ public enum DocumentLabel: String, Sendable, CaseIterable {
     case documentNumber, issueDate, taxPointDate, paymentReceivedDate, dueDate
     case supplier, customer, identificationNumber, vatIdentifier, orderReference
     case description, quantity, unit, unitPrice, discount, base, vatRate, vat, total
-    case vatSummary, advanceDeductions, amountDue, alreadyPaid
+    case vatSummary, advanceDeductions, advancesPaid, amountDue, alreadyPaid
     case paymentDetails, bankAccount, iban, bic, variableSymbol, constantSymbol, specificSymbol, paymentReference
     case exchangeRate, inCZK, page, note
 
@@ -35,6 +35,8 @@ public enum DocumentLabel: String, Sendable, CaseIterable {
         case .total: return ("Celkem", "Total")
         case .vatSummary: return ("Rekapitulace DPH", "VAT summary")
         case .advanceDeductions: return ("Odečet záloh", "Less advance payments")
+        // Advances paid on § 64 goods, without a payment tax document (ADR 0012, ACCT).
+        case .advancesPaid: return ("Uhrazené zálohy", "Advances paid")
         case .amountDue: return ("K úhradě", "Amount due")
         case .alreadyPaid: return ("Uhrazeno", "Paid")
         case .paymentDetails: return ("Platební údaje", "Payment details")

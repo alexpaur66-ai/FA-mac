@@ -193,7 +193,7 @@ struct IssueSheet: View {
     }
 
     /// The same figures as the editor's totals bar, one per line: Total, the VAT (or why there is none),
-    /// the VAT in CZK, and on a final invoice the advances deducted and the amount due.
+    /// the VAT in CZK, and on a final invoice the advances deducted, the advances paid and the amount due.
     @ViewBuilder private func totalsGrid(_ document: Document) -> some View {
         if let totals = model.totals {
             let code = document.currency.code
@@ -222,9 +222,13 @@ struct IssueSheet: View {
                     dashRow(L.vat, clause: document.hasReverseCharge ? DocumentClause.reverseChargeNotice : nil)
                 }
                 if isFinal {
-                    let deducted = totals.totalGross - totals.amountDue
+                    let deducted = totals.totalGross - totals.dueBeforePaidInAdvance
                     if deducted != 0 {
                         moneyRow(L.advancesDeducted, -deducted, code)
+                    }
+                    // Advances paid on § 64 goods reduce only what is left to pay (ADR 0012).
+                    if totals.paidInAdvance != 0 {
+                        moneyRow(L.paidInAdvanceTitle, -totals.paidInAdvance, code)
                     }
                     moneyRow(L.amountDue, totals.amountDue, code, role: .amountStrong)
                 }

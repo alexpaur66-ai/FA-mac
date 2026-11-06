@@ -731,4 +731,55 @@ enum L {
     static func seriesNumberCollisionWith(_ name: String) -> LocalizedStringResource {
         r("series.numberCollisionWith", "Would give the same document numbers as the series \(name). Change the pattern.")
     }
+
+    // MARK: Advances paid on EU goods (ADR 0012, the design thread's spec of 5 Nov 2026)
+
+    static let paidInAdvanceTitle = r("editor.paidInAdvance", "Paid in advance")
+    static let addPaidAdvance = r("editor.addPaidAdvance", "Add Paid Advance…")
+    static let noPaidAdvances = r("editor.noPaidAdvances", "No paid EU goods advances of this client in this currency are open")
+    static func paidAdvanceRow(_ advance: String, _ day: String) -> LocalizedStringResource {
+        r("editor.paidAdvanceRow", "\(advance) · paid \(day)")
+    }
+    static func paidAdvanceMenuItem(_ advance: String, _ day: String, _ amount: String) -> LocalizedStringResource {
+        r("editor.paidAdvanceMenuItem", "\(advance) · paid \(day) · \(amount)")
+    }
+    static func paidAdvanceAlsoInDraft(_ advance: String) -> LocalizedStringResource {
+        r("editor.paidAdvanceAlsoInDraft", "A payment of advance \(advance) is also listed in another draft final invoice")
+    }
+    static func paidAdvanceAlreadySettledIn(_ advance: String, _ finalInvoice: String) -> LocalizedStringResource {
+        r("issue.paidAdvanceAlreadySettled",
+          "A payment of advance \(advance) is already settled in final invoice \(finalInvoice). Remove it from Paid in advance.")
+    }
+    static let paymentRecordedGoodsAdvance = r(
+        "rp.recordedGoodsAdvance",
+        "Payment recorded. An advance for EU goods needs no tax document: the final invoice lists it as paid in advance.")
+    static func advanceAlreadyInFinalInvoice(_ numbers: String) -> LocalizedStringResource {
+        r("finalInvoice.advanceAlreadyIn", "This advance is already in final invoice \(numbers).")
+    }
+    static let settledInLabel = r("document.settledInLabel", "Settled in")
+    static func paymentSettledBy(_ number: String) -> LocalizedStringResource {
+        r("payment.settledBy", "Payment is settled in \(number) and can't be deleted")
+    }
+    /// The lock of a settled payment row, for VoiceOver.
+    static let paymentSettledLocked = r("payment.settledLocked", "A final invoice settled this payment as paid in advance; it cannot change.")
+    static func errorRelatedPaymentSettled(_ number: String) -> LocalizedStringResource {
+        r("error.relatedPaymentSettled",
+          "Final invoice \(number) settled the other side of this credit as paid in advance, so the credit cannot be deleted.")
+    }
+    static func errorPaymentBacksSettlement(_ number: String) -> LocalizedStringResource {
+        r("error.paymentBacksSettlement",
+          "Final invoice \(number) settled this advance as paid in advance; without this payment the advance's money would no longer match it, so it cannot be deleted.")
+    }
+    static func errorPaymentSettled(_ number: String) -> LocalizedStringResource {
+        r("error.paymentSettled", "Final invoice \(number) settled this payment as paid in advance, so it cannot change and takes no tax document.")
+    }
+    static let errorPaidAdvanceInvalid = r(
+        "error.paidAdvanceInvalid",
+        "An advance under Paid in advance no longer matches its payment: the same client, currency, advance and day paid, and at most the amount received. Remove it and add it again.")
+    static func errorAdvanceSettled(_ advance: String, _ finalInvoice: String) -> LocalizedStringResource {
+        r("error.advanceSettled", "A payment of advance \(advance) is already settled in final invoice \(finalInvoice).")
+    }
+    static func errorPaidAdvancesExceed(_ advance: String, _ amount: String) -> LocalizedStringResource {
+        r("error.paidAdvancesExceed", "At most \(amount) of advance \(advance) is left to list as paid in advance.")
+    }
 }

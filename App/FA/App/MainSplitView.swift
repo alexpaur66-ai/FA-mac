@@ -362,7 +362,8 @@ struct MainSplitView: View {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
         }
         // One received payment without a tax document: the menu creates it; with several, the payment rows do.
-        if summary.kind == .advanceRequest, let payments = try? stores.documents.payments(for: id) {
+        // An advance for § 64 goods needs none (ADR 0012).
+        if summary.kind == .advanceRequest, state.taxDocumentRequired, let payments = try? stores.documents.payments(for: id) {
             let missing = TaxDocumentDraft.paymentsWithoutReceipt(payments)
             if missing.count == 1, let payment = missing.first {
                 actions.createTaxDocument = { createTaxDocument(advanceID: id, payment: payment) }
@@ -559,12 +560,25 @@ struct MainSplitView: View {
     /// with the advance's lines and client, deducting every issued tax document of its payments that no
     /// other final invoice deducts (§ 37a ZDPH; the deductions carry the advance's rate and exchange rate).
     /// Refused with the reason while a received payment has no issued tax document: its amount would not
-    /// be deducted and the customer would be billed for money already received.
+    /// be deducted and the customer would be billed for money already received. An advance for § 64 goods
+    /// has no tax documents: its payments are listed as paid in advance instead (ADR 0012). An advance with a
+    /// closing event, or one a final invoice already deducted or settled, gets none, however this is reached
+    /// (the Document menu does not offer it, Record Payment's last step neither): it would bill the supply twice.
     private func createFinalInvoice(from advanceID: String) {
         do {
             guard let advance = try stores.documents.document(id: advanceID),
                   advance.kind == .advanceRequest, advance.status != .draft else { return }
-            let pending = try stores.documents.payments(for: advanceID).filter { $0.kind == .received && !$0.receiptIssued }
+            let advanceState = try stores.documents.state(for: advanceID, today: CalendarDay(Date(), in: .current))
+            guard advanceState.closure == nil else { return }
+            guard !advanceState.deductedInFinal else {
+                report(L.advanceAlreadyInFinalInvoice(advanceState.deductedBy.joined(separator: ", ")), kind: .info)
+                return
+            }
+            let goodsOnly = advance.isIntraCommunityGoodsOnly
+            var pending: [DocumentPayment] = []
+            if !goodsOnly {
+                pending = try stores.documents.payments(for: advanceID).filter { $0.kind == .received && !$0.receiptIssued }
+            }
             guard pending.isEmpty else {
                 let days = pending.map { $0.paidOn.formatted(locale) }
                 let text = days.count == 1
@@ -585,11 +599,15 @@ struct MainSplitView: View {
                 let totals = try DocumentTotals.compute(for: receipt)
                 deductions += receipt.advanceDeductions(totals: totals)
             }
+            var paidAdvances: [PaidAdvance] = []
+            if goodsOnly {
+                paidAdvances = try stores.documents.paidAdvanceCandidates(ofAdvanceRequest: advanceID).map(\.paidAdvance)
+            }
             let final = Document(
                 kind: .finalInvoice, supplier: profile?.supplier ?? advance.supplier, customer: customer?.party ?? advance.customer,
                 customerID: advance.customerID, language: advance.language, currency: advance.currency, pricing: advance.pricing,
                 issueDate: today, taxPointDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(advance.lines),
-                advanceDeductions: deductions, relatedDocumentNumber: advance.number,
+                advanceDeductions: deductions, paidAdvances: paidAdvances.isEmpty ? nil : paidAdvances, relatedDocumentNumber: advance.number,
                 orderReference: advance.orderReference, note: advance.note, footer: advance.footer)
             try stores.documents.saveDraft(final)
             openDraft(final.id, focus: .firstLineQuantity)
@@ -716,7 +734,8 @@ struct MainSplitView: View {
         switch sheet {
         case .recordPayment(let id):
             if let state = documents.state(id: id) {
-                RecordPaymentSheet(stores: stores, state: state, mode: .payment, lastDate: $lastPaymentDate, openDraft: openDraft)
+                RecordPaymentSheet(stores: stores, state: state, mode: .payment, lastDate: $lastPaymentDate, openDraft: openDraft,
+                                   createFinalInvoice: { createFinalInvoice(from: $0) })
             }
         case .recordRefund(let id):
             if let state = documents.state(id: id) {

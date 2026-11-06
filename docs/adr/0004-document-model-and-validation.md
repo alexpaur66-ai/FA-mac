@@ -119,3 +119,15 @@ of this ADR stands.
   (ACCT).
 - **Clauses**: the § 64 reference replaces „daň odvede zákazník“ on goods; the English line adds Article
   138 of Directive 2006/112/EC.
+
+## Amendments (PR 22, advances paid on EU goods, November 2026)
+
+ADR 0012 adds the advances paid on § 64 goods, which have no payment tax document; the rest of this ADR
+stands.
+
+- **Final invoice**: `Document.paidAdvances` lists them (optional, so older snapshots decode unchanged).
+  `DocumentTotals.paidInAdvance` lowers only `amountDue`; the summary and the § 64 value stay the full
+  supply.
+- **Validator**: errors for advances paid on another kind, without a number, not positive, in another
+  currency or listed twice; warnings for an advance issued under another treatment (ACCT) and for advances
+  paid above the total.

@@ -522,11 +522,15 @@ final class DocumentPDFRenderer {
         if deducted != 0 {
             rows.append((label(.advanceDeductions), money(-deducted), false))
         }
+        // Advances paid on § 64 goods reduce only what is left to pay (ADR 0012).
+        if totals.paidInAdvance != 0 {
+            rows.append((label(.advancesPaid), money(-totals.paidInAdvance), false))
+        }
         return rows
     }
 
     /// Lays out (or only measures, when `draw` is false) the summary block: the VAT summary on the left,
-    /// the totals on the right, the deducted advances underneath. Returns the height used.
+    /// the totals on the right, the deducted advances and the advances paid underneath. Returns the height used.
     @discardableResult
     private func summaryBlock(_ writer: PDFPageWriter, top: CGFloat, draw: Bool) -> CGFloat {
         let leftWidth = writer.contentWidth * 0.58
@@ -598,6 +602,23 @@ final class DocumentPDFRenderer {
                 let text = PDFStrings.deductionLine(number: deduction.documentNumber, paymentDate: deduction.paymentDate,
                                                     ratePercent: deduction.treatment.chargesVAT ? deduction.ratePercent : nil, language)
                     + ": " + money(-deduction.gross, deduction.currency ?? currency)
+                let height = writer.height(of: text, styleSmall, width: writer.contentWidth)
+                if draw { writer.paragraph(text, styleSmall, x: writer.contentLeft, top: y, width: writer.contentWidth) }
+                y += height + 1
+            }
+        }
+        // The advances paid on § 64 goods, under their heading: each names the advance and the day it was
+        // paid; none had a tax document, so no rate or VAT (ADR 0012, ACCT).
+        let paidAdvances = document.kind.deductsAdvances ? (document.paidAdvances ?? []) : []
+        if !paidAdvances.isEmpty {
+            y += 2
+            let heading = label(.advancesPaid)
+            let headingHeight = writer.height(of: heading, styleLabel, width: writer.contentWidth)
+            if draw { writer.paragraph(heading, styleLabel, x: writer.contentLeft, top: y, width: writer.contentWidth) }
+            y += headingHeight + 1
+            for paid in paidAdvances {
+                let text = PDFStrings.paidAdvanceLine(number: paid.advanceNumber, paidOn: paid.paidOn, language)
+                    + ": " + money(-paid.amount, paid.currency)
                 let height = writer.height(of: text, styleSmall, width: writer.contentWidth)
                 if draw { writer.paragraph(text, styleSmall, x: writer.contentLeft, top: y, width: writer.contentWidth) }
                 y += height + 1
