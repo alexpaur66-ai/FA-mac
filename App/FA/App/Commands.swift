@@ -101,6 +101,20 @@ struct MainActions {
     var editor: DraftEditorModel?
     /// The selected document's own items.
     var document = DocumentActions()
+    /// File ▸ New Stock Item….
+    var newStockItem: (@MainActor () -> Void)?
+    /// The Stock menu's items for the item selected in Stock; nil otherwise.
+    var stockItem: StockMenuActions?
+}
+
+/// The Stock menu (screens-flows.md §2n): Count… · Receive… · Take Out… | Archive, for the selected item.
+struct StockMenuActions {
+    let name: String
+    let count: @MainActor () -> Void
+    let receive: @MainActor () -> Void
+    let takeOut: @MainActor () -> Void
+    /// Only for an item with movements; one without is deleted with Edit ▸ Delete.
+    let archive: (@MainActor () -> Void)?
 }
 
 private struct MainActionsKey: FocusedValueKey {
@@ -133,6 +147,8 @@ struct AppCommands: Commands {
             // No shortcut: ⌥⌘N is unassigned in v0.1 (§3.1).
             Button { actions?.newClient() } label: { Text(L.newClient) }
                 .disabled(actions == nil)
+            Button { actions?.newStockItem?() } label: { Text(L.newStockItem) }
+                .disabled(actions?.newStockItem == nil)
             Divider()
             Button { actions?.document.duplicate?() } label: {
                 Text(actions?.document.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicateAsDraft)
@@ -182,8 +198,11 @@ struct AppCommands: Commands {
                 .disabled(actions?.document.printDocument == nil)
         }
 
-        SidebarCommands()
-        ToolbarCommands()
+        // In a Group: a commands builder takes at most ten children.
+        Group {
+            SidebarCommands()
+            ToolbarCommands()
+        }
 
         // View: the sections ⌘1 … ⌘4, the Documents filters, the draft preview and the text scale. There is
         // no inspector: ⌥⌘I is never bound (§3.1).
@@ -256,6 +275,21 @@ struct AppCommands: Commands {
             Divider()
             Button { document?.deleteDraft?() } label: { Text(L.deleteDraft) }
                 .disabled(document?.deleteDraft == nil)
+        }
+
+        // Stock, after Document: the selected item's commands, named after it; disabled, never with an empty
+        // name, while no item is selected. None has a shortcut (§2n).
+        CommandMenu(Text(L.stock)) {
+            let item = actions?.stockItem
+            Button { item?.count() } label: { Text(item.map { L.stockCountNamed($0.name) } ?? L.stockCount) }
+                .disabled(item == nil)
+            Button { item?.receive() } label: { Text(item.map { L.stockReceiveNamed($0.name) } ?? L.stockReceive) }
+                .disabled(item == nil)
+            Button { item?.takeOut() } label: { Text(item.map { L.stockTakeOutNamed($0.name) } ?? L.stockTakeOut) }
+                .disabled(item == nil)
+            Divider()
+            Button { item?.archive?() } label: { Text(item.map { L.stockArchiveNamed($0.name) } ?? L.stockArchiveItem) }
+                .disabled(item?.archive == nil)
         }
 
         // Edit ▸ Jump to Search Field (⌥⌘F, the HIG's "Jump to the search field control"). Whether the system

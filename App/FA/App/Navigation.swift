@@ -20,10 +20,10 @@ enum Symbols {
     }
 }
 
-/// The four sidebar sections, ⌘1 … ⌘4 (screens-flows.md §1.2). Exchange rates, the export and the backup
-/// are File menu commands; ⌘5 waits for Stock and ⌘6 is unassigned.
+/// The five sidebar sections, ⌘1 … ⌘5 (screens-flows.md §1.2, §2n). Exchange rates, the export and the
+/// backup are File menu commands; ⌘6 is unassigned.
 enum AppSection: String, CaseIterable, Identifiable, Sendable {
-    case overview, documents, clients, payments
+    case overview, documents, clients, payments, stock
 
     var id: Self { self }
 
@@ -33,6 +33,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .documents: L.documents
         case .clients: L.clients
         case .payments: L.payments
+        case .stock: L.stock
         }
     }
 
@@ -42,6 +43,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .documents: Symbols.document
         case .clients: "person.2"
         case .payments: "banknote"
+        case .stock: "shippingbox"
         }
     }
 
@@ -51,6 +53,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .documents: "2"
         case .clients: "3"
         case .payments: "4"
+        case .stock: "5"
         }
     }
 }
