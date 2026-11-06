@@ -320,6 +320,13 @@ struct NumberCell: Hashable {
         saveTask = nil
         discarded = true
         saveState = .saved
+        dropUndo()
+    }
+
+    /// The editor goes away (another draft selected, the draft issued or deleted): the undo manager keeps its
+    /// targets unretained, so the Don't Take from Stock steps registered on this model are removed with it.
+    func dropUndo() {
+        undoManager?.removeAllActions(withTarget: self)
     }
 
     // MARK: Pure helpers (testable without SwiftUI)
@@ -1306,6 +1313,8 @@ struct NumberCell: Hashable {
     private func relink(_ lineID: String, itemID: String, actionName: LocalizedStringResource?) {
         guard !discarded else { return }
         do {
+            // Only a draft takes a link: an issued document never gets one from a late Undo.
+            guard let stored = try stores.documents.document(id: documentID), stored.status == .draft else { return }
             try stores.stock.link(documentID: documentID, lineID: lineID, itemID: itemID)
             stockError = nil
         } catch {

@@ -1218,8 +1218,10 @@ struct NewStockItemForLine: Identifiable {
 
 /// A line's Description (screens-flows.md §2c "Stock in the lines"): written as it is typed like the other
 /// cells. While typing, the stock items whose name matches list under it with their on-hand figure, and the
-/// list ends with "Add “…” to Stock…". ⇥ or ↩ picks the highlighted item and moves to Qty, ↓/↑ move, Esc
-/// closes the list (a second Esc restores the text). A linked line shows `shippingbox` at the trailing edge.
+/// list ends with "Add “…” to Stock…". ⇥ picks the highlighted item, or the first match, and moves to Qty; ↩
+/// picks only a row highlighted with ↓/↑ and otherwise commits the text and moves down. Esc closes a list the
+/// user moved into (a second Esc restores the text), else restores the text at once. A linked line shows
+/// `shippingbox` at the trailing edge.
 struct DescriptionCell: View {
     let line: DocumentLine
     let model: DraftEditorModel
@@ -1232,8 +1234,8 @@ struct DescriptionCell: View {
     @State private var original = ""
     /// True once the user typed into the focused field: the list shows.
     @State private var editing = false
-    /// The highlighted row: a match, or `matches.count` for "Add … to Stock…"; nil until ↓ when nothing matches,
-    /// so ↩ on a plain description moves down as in any other cell.
+    /// The highlighted row: a match, or `matches.count` for "Add … to Stock…"; nil until ↓, so ↩ on a typed
+    /// description moves down as in any other cell.
     @State private var highlighted: Int?
 
     private var focusValue: EditorFocus { .text(line.id) }
@@ -1241,16 +1243,22 @@ struct DescriptionCell: View {
     private var query: String { line.text.trimmingCharacters(in: .whitespaces) }
     private var showsList: Bool { model.offersStock && isFocused && editing && !query.isEmpty }
     private var matches: [StockItemState] { Self.matches(query, in: stock.states) }
-    private var linked: StockItemState? { model.stockLinks[line.id].flatMap { stock.state(id: $0) } }
+    /// The marker follows the link itself; an archived item still takes from stock, so it is looked up too.
+    private var linkHelp: LocalizedStringResource? {
+        guard let itemID = model.stockLinks[line.id] else { return nil }
+        guard let linked = stock.anyState(id: itemID) else { return L.issueTakesFromStock }
+        let figure = StockFormat.quantity(linked.onHand, unit: linked.item.unit, locale: locale)
+        if model.takesGoodsOut {
+            return L.takesFromStockHelp(linked.item.name, figure)
+        }
+        return L.leavesStockWithFinalHelp(linked.item.name, figure)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 field
-                if let linked {
-                    let figure = StockFormat.quantity(linked.onHand, unit: linked.item.unit, locale: locale)
-                    let help = model.takesGoodsOut ? L.takesFromStockHelp(linked.item.name, figure)
-                                                   : L.leavesStockWithFinalHelp(linked.item.name, figure)
+                if let help = linkHelp {
                     Image(systemName: "shippingbox")
                         .foregroundStyle(Color.secondary)
                         .help(Text(help))
@@ -1269,7 +1277,8 @@ struct DescriptionCell: View {
             model.setLine(line.id) { $0.text = newText }
             if isFocused {
                 editing = true
-                highlighted = Self.matches(newText.trimmingCharacters(in: .whitespaces), in: stock.states).isEmpty ? nil : 0
+                // Typing never highlights a row: ↩ commits the typed text and moves down until ↓ picks one.
+                highlighted = nil
             }
         })
     }
@@ -1285,10 +1294,16 @@ struct DescriptionCell: View {
                 highlighted = nil
             }
             .onKeyPress(.escape) {
-                if showsList {
+                // Esc closes the list the user moved into; otherwise it restores the text, as in any cell.
+                if showsList, highlighted != nil {
                     editing = false
-                } else if original != line.text {
-                    model.setLine(line.id) { $0.text = original }
+                    highlighted = nil
+                } else {
+                    editing = false
+                    highlighted = nil
+                    if original != line.text {
+                        model.setLine(line.id) { $0.text = original }
+                    }
                 }
                 return .handled
             }
@@ -1303,8 +1318,14 @@ struct DescriptionCell: View {
                 return .handled
             }
             .onKeyPress(.tab) {
-                guard showsList, highlighted != nil else { return .ignored }
-                pickHighlighted()
+                guard showsList else { return .ignored }
+                if highlighted != nil {
+                    pickHighlighted()
+                    return .handled
+                }
+                // ⇥ accepts the first match when none was picked with ↓/↑.
+                guard let first = matches.first else { return .ignored }
+                pick(first.item)
                 return .handled
             }
             .onSubmit {

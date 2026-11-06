@@ -357,6 +357,7 @@ struct MainSplitView: View {
         issueSheetPresented = false
         previewShown = false
         let focus = pendingEditorFocus?.documentID == id ? pendingEditorFocus?.focus : nil
+        editor?.dropUndo()
         editor = id.map { DraftEditorModel(stores: stores, documentID: $0, initialFocus: focus) }
         if let id, pendingEditorFocus?.documentID == id { pendingEditorFocus = nil }
     }
