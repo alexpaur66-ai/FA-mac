@@ -115,8 +115,9 @@ ADR stands.
   payment tax document and a final invoice with nothing due show no payment row.
 - **Payment tax document** (E022, E101): an issued payment tax document carries no payment instructions,
   the payment it documents has been received. Its draft must stay linked to its payment: the editor blocks
-  Issue when the link is gone and says to delete the draft and create the tax document again from the
-  payment's row. Deleting a payment that has a draft tax document asks whether to delete the draft too;
+  Issue when the link is gone and says to delete the draft and, if the payment was received, to record
+  it on the advance again and create the tax document from its row. Deleting a payment that has a draft
+  tax document asks whether to delete the draft too;
   the store deletes both in one transaction. The store itself does not refuse an unlinked receipt: a
   receipt issued before its payment was recorded still names its advance
   (`aReceiptIssuedBeforeItsPaymentStillNamesItsAdvance`).
@@ -141,3 +142,35 @@ ADR stands.
   banner (E025), the series-order warning (E033), Amount due on invoices and advances too (E044), E098 and
   E100 (they wait on Saša's answers), the New ▸ submenu (E001) and the "D" key (E018). The client field's
   own suggestion list is the spec (design-system.md §8.4), so `textInputSuggestions` is not planned.
+
+## Amendments (editor recheck after PR 16, November 2026)
+
+The design thread's recheck of the editor (`design/pr12-recheck-after-pr16.md`) left these follow-ups,
+taken in PR 20; the rest of this ADR stands.
+
+- **Wording** (E003, N09): File ▸ Duplicate reads "Duplicate as Draft" for a draft too. The unlinked-receipt
+  ⛔ row says to record the payment on the advance again if it was received.
+- **Payment tax document** (E023): a total that differs from the payment is a ⛔ row naming the received
+  amount, and a save the store refuses for it says why (`receiptMismatch`) instead of the generic sentence.
+- **Settings and the open draft** (E024): Settings posts a notification after it writes the company
+  profile, a bank account, a series or the document defaults, and the open editor re-reads them; Issue
+  re-reads the clients, the profile and the series as well as the rate.
+- **Totals bar** (E035): on macOS 26 the bar is a safe-area bar with the system's scroll edge effect; the
+  opaque inset with a divider stays for macOS 14 and 15. The macOS job of CI builds with Xcode 26, so that
+  branch compiles there too.
+- **Inline errors** (E042): an inline message's error symbol is `exclamationmark.triangle` in the caution
+  hue instead of red. An invalid cell keeps its red outline (N07 restores it with the text).
+- **Issue sheet** (E047, E096): the Rate row uses the amount role and shows the last rate error.
+- **Advances deducted** (E068): one row per advance, naming its tax documents, with the days received, the
+  summed VAT taxed in CZK and the summed gross; the remove button drops all of that advance's rows.
+- **Text size** (E078): the grid's fixed columns, the due-days field, the exemption reference and the rate
+  fields scale with View ▸ Bigger, so the cells keep holding their numbers and the grid scrolls sideways;
+  when the scaled rate field leaves no room, the day and the rate buttons move under it.
+- **Client suggestions** (N03, N04): each suggestion's second line reads "IČO · country · default currency ·
+  document language · VAT treatment"; names sort as the Finder sorts them; with nothing typed, the clients
+  with the latest documents come first.
+- **Enter Rate…** (N06): the command hides the preview first, and the request waits for the editor.
+- **Invalid cells** (N07): the model keeps the invalid text, so a cell rebuilt after the preview or a
+  relayout shows it again, still ⛔.
+- **Change…** (N08): a rate saved for a day the tax point does not resolve to leaves the document's rate as
+  it was, and the popover stays open to say so.

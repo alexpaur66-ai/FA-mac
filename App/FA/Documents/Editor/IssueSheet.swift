@@ -253,8 +253,12 @@ struct IssueSheet: View {
     @ViewBuilder private func rateLine(_ document: Document) -> some View {
         if let rate = document.exchangeRate {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(L.rateEquals(document.currency.code, DraftEditorView.rateText(rate, locale: locale))).textRole(.body)
+                Text(L.rateEquals(document.currency.code, DraftEditorView.rateText(rate, locale: locale))).textRole(.amount)
                 Text(L.rateDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
+                // A refresh that failed (the rates could not be read again) shows here as in the editor.
+                if let rateError = model.rateError {
+                    InlineMessage(rateError)
+                }
             }
         } else {
             // The day whose rate is needed (the last working day on a weekend or holiday), as the form prefills it.
@@ -338,6 +342,9 @@ struct IssueSheet: View {
                 }
                 if model.receiptPaymentMissing {
                     InlineMessage(L.receiptPaymentMissing)
+                }
+                if model.receiptTotalDiffers, let payment = model.receiptPayment {
+                    InlineMessage(L.receiptTotalMismatch(MoneyText.format(payment.amount.amount, currency: payment.amount.currency.code, locale: locale)))
                 }
                 if model.rateIsMissing {
                     RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)

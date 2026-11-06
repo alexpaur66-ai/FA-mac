@@ -248,6 +248,7 @@ struct CompanyPane: View {
         do {
             try stores.profile.save(profile)
             loaded = profile
+            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             isError = false
             message = L.saved
         } catch {
@@ -408,6 +409,7 @@ struct BankAccountsPane: View {
         do {
             try stores.profile.save(updated)
             profile = updated
+            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             isError = false
             message = L.saved
         } catch {
@@ -539,6 +541,7 @@ struct NumberingPane: View {
                                                          year: year, variableSymbolPrefix: prefix)
                 try stores.series.save(StoredNumberSeries(name: String(localized: name), kinds: kinds, series: numbering))
             }
+            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             isError = false
             message = L.saved
             load()
@@ -751,6 +754,7 @@ struct SeriesFormSheet: View {
             let name = draft.name.trimmingCharacters(in: .whitespaces)
             try stores.series.save(StoredNumberSeries(name: name, kinds: draft.kinds, series: numbering))
             onSave()
+            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             // A counter never goes backwards: when the store kept its own year or counter, say so and stay open.
             if let stored = try stores.series.series(id: draft.id),
                stored.series.year != numbering.year || stored.series.lastCounter != numbering.lastCounter {
@@ -763,4 +767,10 @@ struct SeriesFormSheet: View {
             self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted after Settings wrote the company profile, a bank account, a number series or the document
+    /// defaults, so an open draft editor re-reads them at once (design check E024).
+    static let settingsDidSave = Notification.Name("FA.settingsDidSave")
 }

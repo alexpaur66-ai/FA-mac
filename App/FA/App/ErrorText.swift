@@ -109,6 +109,8 @@ enum ErrorText {
             return L.errorAdvanceDeducted
         case .creditCustomerMismatch:
             return L.errorCreditCustomer
+        case .receiptMismatch:
+            return L.errorReceiptMismatch
         default:
             return L.errorGeneric
         }

@@ -122,13 +122,21 @@ struct NumberCell: Hashable {
     private(set) var rateResolution: ExchangeRateTable.Resolution?
     /// The payment a draft payment tax document is the receipt of; nil when no payment names it.
     private(set) var receiptPayment: DocumentPayment?
-    /// Cells of the lines grid holding text that is not a number; each is a ⛔ row until fixed.
-    private(set) var invalidCells: Set<NumberCell> = []
+    /// Cells of the lines grid holding text that is not a number, with that text: each is a ⛔ row until
+    /// fixed, and a cell rebuilt after the preview or a relayout shows the text again (screens-flows.md §2c:
+    /// never lose input).
+    private(set) var invalidCells: [NumberCell: String] = [:]
     /// The focus the view should apply; `focusRequestVersion` changes with every request.
     private(set) var focusRequest: EditorFocusRequest?
     private(set) var focusRequestVersion = 0
     /// Bumped by Document ▸ Enter Rate…: the view focuses the rate field, or opens Change… on a rate.
+    /// `rateFocusPending` stays set until the editor takes it, so a request made while the preview is shown
+    /// is applied when the editor comes back.
     private(set) var rateFocusRequest = 0
+    private(set) var rateFocusPending = false
+    /// Clients by the issue date of their latest document, latest first: the suggestion list shows them
+    /// first while nothing is typed (design-system.md §8.4).
+    private(set) var recentCustomerIDs: [String] = []
     /// The line holding keyboard focus, for the Document menu's line items.
     var focusedLineID: String?
 
@@ -159,6 +167,7 @@ struct NumberCell: Hashable {
             customers = try stores.customers.all()
             profile = try stores.profile.load()
             series = try stores.series.series(for: document.kind)
+            refreshRecentCustomers()
             if let first = document.lines.first?.treatment {
                 treatmentChoice = TreatmentChoice(first)
                 if case .exempt(let reference) = first { exemptReference = reference }
@@ -328,7 +337,14 @@ struct NumberCell: Hashable {
 
     /// Document ▸ Enter Rate…: the rate field takes focus, or Change… opens on a resolved rate.
     func requestRateFocus() {
+        rateFocusPending = true
         rateFocusRequest += 1
+    }
+
+    /// True once per request; the view calls it when the request changes and when the editor appears.
+    func takeRateFocusRequest() -> Bool {
+        defer { rateFocusPending = false }
+        return rateFocusPending
     }
 
     // MARK: Header fields
@@ -337,12 +353,22 @@ struct NumberCell: Hashable {
         customers.first { $0.id == document?.customerID }
     }
 
-    /// Clients whose name, IČO or VAT ID contains `query` (case- and diacritic-insensitive), at most six;
-    /// the first six by name while nothing is typed.
+    /// Clients whose name, IČO or VAT ID contains `query` (case- and diacritic-insensitive), at most six,
+    /// in the Finder's order of names; while nothing is typed, the clients with the latest documents first
+    /// (design-system.md §8.4).
     func matchingCustomers(_ query: String) -> [Customer] {
         let needle = query.trimmingCharacters(in: .whitespaces).folded
-        let sorted = customers.sorted { $0.party.name.folded < $1.party.name.folded }
-        guard !needle.isEmpty else { return Array(sorted.prefix(6)) }
+        let sorted = customers.sorted { $0.party.name.localizedStandardCompare($1.party.name) == .orderedAscending }
+        guard !needle.isEmpty else {
+            let rank = Dictionary(uniqueKeysWithValues: recentCustomerIDs.enumerated().map { ($0.element, $0.offset) })
+            let recentFirst = sorted.sorted { lhs, rhs in
+                let left = rank[lhs.id] ?? Int.max
+                let right = rank[rhs.id] ?? Int.max
+                if left != right { return left < right }
+                return lhs.party.name.localizedStandardCompare(rhs.party.name) == .orderedAscending
+            }
+            return Array(recentFirst.prefix(6))
+        }
         return Array(sorted.filter { customer in
             customer.party.name.folded.contains(needle)
                 || (customer.party.identificationNumber?.digits.contains(needle) ?? false)
@@ -387,10 +413,31 @@ struct NumberCell: Hashable {
         if let fresh = try? stores.customers.all() { customers = fresh }
         if let fresh = try? stores.profile.load() { profile = fresh }
         series = (try? stores.series.series(for: document.kind)) ?? []
+        refreshRecentCustomers()
         refreshSnapshots()
         refreshReceiptPayment()
         refreshDeductionConflicts()
         recompute()
+    }
+
+    /// The latest issue date per client over every document, latest first and the client's name breaking
+    /// a tie (recheck N04); a read error keeps the last known order. Reads `customers`, so callers assign
+    /// it first.
+    private func refreshRecentCustomers() {
+        guard let summaries = try? stores.documents.summaries() else { return }
+        var latest: [String: CalendarDay] = [:]
+        for summary in summaries {
+            guard let customerID = summary.customerID else { continue }
+            if let known = latest[customerID], known >= summary.issueDate { continue }
+            latest[customerID] = summary.issueDate
+        }
+        let names: [String: String] = Dictionary(customers.map { ($0.id, $0.party.name) }, uniquingKeysWith: { first, _ in first })
+        recentCustomerIDs = latest.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            let order = (names[lhs.key] ?? "").localizedStandardCompare(names[rhs.key] ?? "")
+            if order != .orderedSame { return order == .orderedAscending }
+            return lhs.key < rhs.key
+        }.map { $0.key }
     }
 
     /// The supplier and the client are copied onto the draft and frozen at issue. Until then the copies
@@ -504,7 +551,7 @@ struct NumberCell: Hashable {
             if case .taxable = line.treatment { return line.id }
             return nil
         })
-        let kept = invalidCells.filter { $0.column != .vatRate || taxable.contains($0.lineID) }
+        let kept = invalidCells.filter { $0.key.column != .vatRate || taxable.contains($0.key.lineID) }
         if kept != invalidCells { invalidCells = kept }
     }
 
@@ -562,6 +609,13 @@ struct NumberCell: Hashable {
         document?.kind == .paymentTaxDocument && receiptPayment == nil
     }
 
+    /// True on a draft payment tax document whose total is not the payment it documents: the store refuses
+    /// such a save (`receiptMismatch`), so the ⛔ row names the amount to return to before the store does.
+    var receiptTotalDiffers: Bool {
+        guard let document, document.kind == .paymentTaxDocument, let payment = receiptPayment, let totals else { return false }
+        return totals.amountDue != payment.amount.amount || document.currency != payment.amount.currency
+    }
+
     private func refreshReceiptPayment() {
         guard let document, document.kind == .paymentTaxDocument else {
             receiptPayment = nil
@@ -617,7 +671,7 @@ struct NumberCell: Hashable {
     /// Deleting the last line leaves one blank row (design-system.md §8.5).
     func removeLine(_ id: String) {
         update { doc in doc.lines.removeAll { $0.id == id } }
-        invalidCells = invalidCells.filter { $0.lineID != id }
+        invalidCells = invalidCells.filter { $0.key.lineID != id }
         if focusedLineID == id { focusedLineID = nil }
         if document?.lines.isEmpty == true { appendBlankLine() }
     }
@@ -660,21 +714,23 @@ struct NumberCell: Hashable {
         return issues.first { $0.lineID == id && !Self.isExcluded($0, kind: kind) }?.message(language: .english)
     }
 
-    /// A cell holds text that is not a number (or has been fixed). Each invalid cell is a ⛔ row.
-    func setCell(_ cell: NumberCell, invalid: Bool) {
-        guard invalidCells.contains(cell) != invalid else { return }
-        if invalid {
-            invalidCells.insert(cell)
-        } else {
-            invalidCells.remove(cell)
-        }
+    /// A cell holds `invalidText`, which is not a number (nil once it is fixed or reverted). Each invalid
+    /// cell is a ⛔ row, and the text comes back when the cell is rebuilt.
+    func setCell(_ cell: NumberCell, invalidText: String?) {
+        guard invalidCells[cell] != invalidText else { return }
+        invalidCells[cell] = invalidText
+    }
+
+    /// The invalid text a cell holds, for a cell that is built again.
+    func invalidText(of cell: NumberCell) -> String? {
+        invalidCells[cell]
     }
 
     /// One ⛔ row per invalid cell, in line order.
     var invalidCellMessages: [String] {
         guard let document else { return [] }
         let order = Dictionary(document.lines.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
-        return invalidCells
+        return invalidCells.keys
             .compactMap { cell in order[cell.lineID].map { (index: $0, cell: cell) } }
             .sorted { ($0.index, $0.cell.column.rawValue) < ($1.index, $1.cell.column.rawValue) }
             .map { entry in
@@ -743,10 +799,15 @@ struct NumberCell: Hashable {
                 try stores.rates.save(ExchangeRate(currency: document.currency, amount: 1, czkPerAmount: czkPerUnit, validFor: day, source: .manual))
             }
             refreshRate()
-            if rateIsMissing, rateError == nil {
+            guard rateError == nil else { return }
+            if rateIsMissing {
                 rateError = saved
                     ? String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
                     : String(localized: L.rateAlreadyStored(day.formatted(.current)))
+            } else if saved, let applied = self.document?.exchangeRate, applied.validFor != day || applied.czkPerUnit != czkPerUnit {
+                // Saved for a day the tax point does not resolve to: the document keeps the rate it had, and
+                // the popover stays open to say so instead of closing as if the rate had changed.
+                rateError = String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
             }
         } catch {
             rateError = ErrorText.message(error)
@@ -801,9 +862,11 @@ struct NumberCell: Hashable {
         refreshDeductionConflicts()
     }
 
-    func removeDeductions(ofDocumentNumber number: String) {
+    /// Removes the rows of the listed receipts (the advance's row in the editor drops all of its receipts).
+    func removeDeductions(ofDocumentNumbers numbers: [String]) {
         deductionError = nil
-        update { doc in doc.advanceDeductions.removeAll { $0.documentNumber == number } }
+        let listed = Set(numbers)
+        update { doc in doc.advanceDeductions.removeAll { listed.contains($0.documentNumber) } }
         refreshDeductionConflicts()
     }
 
@@ -831,7 +894,9 @@ struct NumberCell: Hashable {
             for other in try stores.documents.summaries(DocumentFilter(kinds: [.finalInvoice], status: .draft)) where other.id != documentID {
                 guard let draft = try stores.documents.document(id: other.id) else { continue }
                 for number in Set(draft.advanceDeductions.map(\.documentNumber)).intersection(numbers).sorted() {
-                    warnings.append(String(localized: L.receiptAlsoInDraft(number)))
+                    // One warning per receipt, however many other drafts list it (the rows are keyed by text).
+                    let warning = String(localized: L.receiptAlsoInDraft(number))
+                    if !warnings.contains(warning) { warnings.append(warning) }
                 }
             }
             deductionWarnings = warnings
@@ -895,6 +960,7 @@ struct NumberCell: Hashable {
     func blockingCount(seriesID: String?) -> Int {
         blockingErrors.count + (rateIsMissing ? 1 : 0) + (series.isEmpty ? 1 : 0) + deductionConflicts.count
             + (numberingProblem(seriesID: seriesID) == nil ? 0 : 1) + invalidCellMessages.count + (receiptPaymentMissing ? 1 : 0)
+            + (receiptTotalDiffers ? 1 : 0)
     }
 
     func predictedNumber(seriesID: String) -> String? {
@@ -903,11 +969,12 @@ struct NumberCell: Hashable {
     }
 
     /// Writes the draft, then issues it in the data layer's one transaction (ADR 0005): number, symbol,
-    /// validation, totals, hash, audit. The supplier and client copies and the rate of the tax point are
-    /// refreshed first (§ 4 odst. 8 ZDPH: a day's file may have been imported since the editor opened).
+    /// validation, totals, hash, audit. The clients, the company profile and the series are read again
+    /// first, so the supplier and client copies follow a Settings save made meanwhile, and so is the rate
+    /// of the tax point (§ 4 odst. 8 ZDPH: a day's file may have been imported since the editor opened).
     /// The returned document carries its number.
     func issue(seriesID: String) throws -> Document {
-        refreshSnapshots()
+        refreshReferenceData()
         refreshRate()
         // A draft stored before blank trailing lines were dropped is written again without them.
         if let last = document?.lines.last, Self.isBlankLine(last), saveState == .saved { saveState = .pending }

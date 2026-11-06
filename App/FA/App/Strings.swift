@@ -343,6 +343,7 @@ enum L {
 
     static let dbCannotOpen = r("error.dbCannotOpen", "Data can't be opened")
     static let errorGeneric = r("error.generic", "That did not work. Nothing was changed.")
+    static let errorReceiptMismatch = r("error.receiptMismatch", "The tax document must match its payment: the same client, currency, advance, day received and total. The change is not saved until it does.")
     static let errorNotFound = r("error.notFound", "The record no longer exists. It may have been deleted in the meantime.")
     static let errorFrozen = r("error.frozen", "The document is issued and locked. Corrections go through a credit note (Phase 2).")
     static let errorNotIssued = r("error.notIssued", "Issue the document first.")
@@ -382,6 +383,7 @@ enum L {
     static func problems(_ count: Int) -> LocalizedStringResource { r("editor.problems", "\(count) problems") }
     static let issueButton = r("editor.issueButton", "Issue")
     static let duplicate = r("menu.duplicate", "Duplicate")
+    static let duplicateAsDraft = r("menu.duplicateAsDraft", "Duplicate as Draft")
     static func duplicateNumbered(_ number: String) -> LocalizedStringResource { r("menu.duplicateNumbered", "Duplicate \(number) as Draft") }
     static let createFinalInvoice = r("menu.createFinalInvoice", "Create Final Invoice")
     static let createTaxDocument = r("menu.createTaxDocument", "Create Tax Document")
@@ -406,8 +408,11 @@ enum L {
     static let clientPrompt = r("editor.clientPrompt", "Name, IČO or VAT ID")
     static func newClientNamed(_ query: String) -> LocalizedStringResource { r("editor.newClientNamed", "New Client “\(query)”…") }
     static let newClientEllipsis = r("editor.newClient", "New Client…")
-    static func clientDefaults(_ currency: String, _ term: String, _ treatment: String) -> LocalizedStringResource {
-        r("editor.clientDefaults", "\(currency) · \(term) · \(treatment)")
+    static func clientSuggestionLine(_ ico: String, _ country: String, _ currency: String, _ language: String, _ treatment: String) -> LocalizedStringResource {
+        r("editor.clientSuggestionLine", "IČO \(ico) · \(country) · \(currency) · \(language) · \(treatment)")
+    }
+    static func clientSuggestionLineNoICO(_ country: String, _ currency: String, _ language: String, _ treatment: String) -> LocalizedStringResource {
+        r("editor.clientSuggestionLineNoICO", "\(country) · \(currency) · \(language) · \(treatment)")
     }
     static let vatIDMissing = r("editor.vatIDMissing", "VAT ID missing")
     static let addressMissing = r("editor.addressMissing", "Address missing")
@@ -442,7 +447,10 @@ enum L {
     static func receivedAmountNote(_ amount: String, _ day: String) -> LocalizedStringResource {
         r("editor.receivedAmountNote", "For the payment of \(amount) received \(day)")
     }
-    static let receiptPaymentMissing = r("editor.receiptPaymentMissing", "No payment is linked to this tax document. Delete the draft and create the tax document again from the payment's row in the advance.")
+    static let receiptPaymentMissing = r("editor.receiptPaymentMissing", "No payment is linked to this tax document. Delete the draft. If the payment was received, record it on the advance again and create the tax document from its row.")
+    static func receiptTotalMismatch(_ amount: String) -> LocalizedStringResource {
+        r("editor.receiptTotalMismatch", "The total must equal the received payment of \(amount).")
+    }
     static let treatmentDiffersFromClient = r("editor.treatmentDiffersFromClient", "The VAT treatment differs from the client's default")
     static let currencyDiffersFromClient = r("editor.currencyDiffersFromClient", "The currency differs from the client's default")
 
@@ -503,7 +511,7 @@ enum L {
     static let deductionsTitle = r("editor.deductions", "Advances deducted")
     static let addReceipt = r("editor.addReceipt", "Add Tax Document…")
     static let noReceiptsToDeduct = r("editor.noReceipts", "No issued tax documents of this client in this currency are open")
-    static func deductionRow(_ receipt: String, _ advance: String) -> LocalizedStringResource { r("editor.deductionRow", "\(receipt) · advance \(advance)") }
+    static func deductionAdvanceRow(_ advance: String, _ receipts: String) -> LocalizedStringResource { r("editor.deductionAdvanceRow", "\(advance) · \(receipts)") }
     static func vatTaxedCZK(_ amount: String) -> LocalizedStringResource { r("editor.vatTaxedCZK", "VAT taxed \(amount)") }
     static func receiptMenuItem(_ number: String, _ day: String, _ amount: String) -> LocalizedStringResource {
         r("editor.receiptMenuItem", "\(number) · \(day) · \(amount)")

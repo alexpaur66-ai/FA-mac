@@ -95,3 +95,5 @@ symbol to their n-th documents of a year (ADR 0003 addendum).
   (`receiptKept`), and the other leg of an applied credit keeps its draft, which that leg's own event names
   the same way; `DocumentState.deductedBy` names a final invoice once, however many receipts of the advance
   it deducted.
+- Amendment (PR 20, November 2026): the `payment` audit event names the payment id too, so the trail of a
+  payment deleted and restored by Undo reads as one payment.
