@@ -48,7 +48,7 @@ import InvoicingCore
         let first = try Backups.make(of: database, in: folder, now: Fixtures.now)
         let second = try Backups.make(of: database, in: folder, now: Fixtures.now)
         #expect(first != second)
-        #expect(try Backups.list(in: folder).count == 2)
+        #expect(try Backups.list(in: folder).map(\.lastPathComponent) == [first.lastPathComponent, second.lastPathComponent])
     }
 
     @Test func aMissingFolderListsNothing() throws {

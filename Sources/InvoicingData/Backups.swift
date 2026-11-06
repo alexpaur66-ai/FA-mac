@@ -32,7 +32,9 @@ public enum Backups {
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
             .filter { $0.hasPrefix(namePrefix) && $0.hasSuffix("." + nameExtension) }
-            .sorted()
+            // Compared without the extension, so a second backup in the same second ("…13-2") sorts after
+            // the first ("…13"): "-" sorts before ".", but the end of a name sorts before "-".
+            .sorted { $0.dropLast(nameExtension.count + 1) < $1.dropLast(nameExtension.count + 1) }
         return names.map { folder.appendingPathComponent($0, isDirectory: false) }
     }
 
