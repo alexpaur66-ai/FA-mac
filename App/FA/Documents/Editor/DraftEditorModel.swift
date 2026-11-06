@@ -170,6 +170,9 @@ struct NumberCell: Hashable {
     /// Clients by the issue date of their latest document, latest first: the suggestion list shows them
     /// first while nothing is typed (design-system.md §8.4).
     private(set) var recentCustomerIDs: [String] = []
+    /// The total of each client's latest issued invoice or final invoice, for the Issue sheet's
+    /// total-change check (docs-28: a fixed 50 %).
+    private(set) var lastInvoiceTotals: [String: Money] = [:]
     /// The line holding keyboard focus, for the Document menu's line items.
     var focusedLineID: String?
 
@@ -465,11 +468,18 @@ struct NumberCell: Hashable {
     private func refreshRecentCustomers() {
         guard let summaries = try? stores.documents.summaries() else { return }
         var latest: [String: CalendarDay] = [:]
+        var lastInvoices: [String: (day: CalendarDay, total: Money)] = [:]
         for summary in summaries {
             guard let customerID = summary.customerID else { continue }
+            if summary.status == .issued, summary.kind == .invoice || summary.kind == .finalInvoice,
+               let total = summary.totalGross,
+               lastInvoices[customerID].map({ $0.day <= summary.issueDate }) ?? true {
+                lastInvoices[customerID] = (summary.issueDate, total)
+            }
             if let known = latest[customerID], known >= summary.issueDate { continue }
             latest[customerID] = summary.issueDate
         }
+        lastInvoiceTotals = lastInvoices.mapValues { $0.total }
         let names: [String: String] = Dictionary(customers.map { ($0.id, $0.party.name) }, uniquingKeysWith: { first, _ in first })
         recentCustomerIDs = latest.sorted { lhs, rhs in
             if lhs.value != rhs.value { return lhs.value > rhs.value }
@@ -492,11 +502,14 @@ struct NumberCell: Hashable {
         let accountGone = profile.map { profile in
             document.payment.map { !profile.bankConnections.contains($0.bankConnection) } ?? false
         } ?? false
-        guard supplierChanged || customerChanged || accountGone else { return }
+        // Every draft prints the one company footer, set in Settings (docs-23); a copied footer is replaced.
+        let footerChanged = profile.map { $0.footer != document.footer } ?? false
+        guard supplierChanged || customerChanged || accountGone || footerChanged else { return }
         update { doc in
             if let supplier { doc.supplier = supplier }
             if let party { doc.customer = party }
             if accountGone { doc.payment = nil }
+            if footerChanged, let profile { doc.footer = profile.footer }
         }
     }
 
@@ -655,10 +668,6 @@ struct NumberCell: Hashable {
 
     func setNote(_ text: String) {
         update { $0.note = text.isEmpty ? nil : text }
-    }
-
-    func setFooter(_ text: String) {
-        update { $0.footer = text.isEmpty ? nil : text }
     }
 
     // MARK: Payment tax document
@@ -1067,17 +1076,56 @@ struct NumberCell: Hashable {
         }
     }
 
-    /// ⚠ rows the validator cannot know: a receipt listed in another draft, defaults that differ from
-    /// the client's card.
+    /// ⚠ rows the validator cannot know (docs-28): a receipt listed in another draft; one row for the
+    /// currency and treatment that differ from the client's defaults; a total more than 50 % away from the
+    /// client's last invoice in the same currency; and advances taxed under another VAT treatment.
     var extraWarnings: [String] {
         var result = deductionWarnings
-        if let document, let customer, document.kind != .paymentTaxDocument {
-            if document.currency != customer.currency { result.append(String(localized: L.currencyDiffersFromClient)) }
-            if TreatmentChoice(customer.vatStatus.defaultTreatment) != treatmentChoice {
-                result.append(String(localized: L.treatmentDiffersFromClient))
+        guard let document, document.kind != .paymentTaxDocument else { return result }
+        if let customer {
+            let clientTreatment = TreatmentChoice(customer.vatStatus.defaultTreatment)
+            let currencyDiffers = document.currency != customer.currency
+            let treatmentDiffers = clientTreatment != treatmentChoice
+            let name = customer.party.name
+            let fromTreatment = String(localized: clientTreatment.shortTitle)
+            let toTreatment = String(localized: treatmentChoice.shortTitle)
+            if currencyDiffers && treatmentDiffers {
+                result.append(String(localized: L.differsCurrencyAndTreatment(
+                    name, customer.currency.code, document.currency.code, fromTreatment, toTreatment)))
+            } else if currencyDiffers {
+                result.append(String(localized: L.differsCurrency(name, customer.currency.code, document.currency.code)))
+            } else if treatmentDiffers {
+                result.append(String(localized: L.differsTreatment(name, fromTreatment, toTreatment)))
+            }
+            if document.kind != .advanceRequest, let last = lastInvoiceTotals[customer.id], last.currency == document.currency,
+               last.amount > 0, let total = totals?.totalGross, Self.changesByMoreThanHalf(total, from: last.amount) {
+                let format = { (amount: Decimal) in MoneyText.format(amount, currency: document.currency.code, locale: .current) }
+                result.append(String(localized: L.totalChangedFromLast(format(total), format(last.amount))))
+            }
+        }
+        if document.kind == .finalInvoice {
+            var numbers: [String] = []
+            for deduction in document.advanceDeductions
+            where TreatmentChoice(deduction.treatment) != treatmentChoice && !numbers.contains(deduction.documentNumber) {
+                numbers.append(deduction.documentNumber)
+            }
+            // Advances paid without a tax document are EU goods advances (ADR 0012).
+            if treatmentChoice != .intraCommunityGoods {
+                for paid in document.paidAdvances ?? [] where !numbers.contains(paid.advanceNumber) {
+                    numbers.append(paid.advanceNumber)
+                }
+            }
+            for number in numbers {
+                result.append(String(localized: L.advanceOtherTreatment(number)))
             }
         }
         return result
+    }
+
+    /// The fixed total-change check (docs-28; not a setting).
+    nonisolated static func changesByMoreThanHalf(_ total: Decimal, from last: Decimal) -> Bool {
+        let change = total - last
+        return (change < 0 ? -change : change) * 2 > last
     }
 
     /// The errors that block Issue; a missing rate counts once, as the inline form.

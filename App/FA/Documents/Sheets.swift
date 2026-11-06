@@ -22,6 +22,8 @@ struct RecordPaymentSheet: View {
     let openDraft: @MainActor (String) -> Void
     /// Creates the final invoice of an advance for § 64 goods, which needs no tax document (ADR 0012).
     let createFinalInvoice: (@MainActor (String) -> Void)?
+    /// The result line for a document that is not an advance: the sheet closes and reports (docs-30).
+    let reportRecorded: (@MainActor (String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
@@ -31,15 +33,18 @@ struct RecordPaymentSheet: View {
     @State private var error: String?
     /// The payment just recorded on an advance request; it needs its own tax document.
     @State private var recorded: DocumentPayment?
+    /// The document's payments so far, for the possible-duplicate warning.
+    @State private var existing: [DocumentPayment] = []
 
     init(stores: Stores, state: DocumentState, mode: Mode, lastDate: Binding<Date?>, openDraft: @escaping @MainActor (String) -> Void,
-         createFinalInvoice: (@MainActor (String) -> Void)? = nil) {
+         createFinalInvoice: (@MainActor (String) -> Void)? = nil, reportRecorded: (@MainActor (String) -> Void)? = nil) {
         self.stores = stores
         self.state = state
         self.mode = mode
         self._lastDate = lastDate
         self.openDraft = openDraft
         self.createFinalInvoice = createFinalInvoice
+        self.reportRecorded = reportRecorded
         _date = State(initialValue: min(lastDate.wrappedValue ?? Date(), Date()))
         // What is left to pay, or what was paid too much.
         let outstanding = state.outstanding.amount
@@ -62,6 +67,7 @@ struct RecordPaymentSheet: View {
         }
         .padding(Spacing.xl)
         .formSheetSized(minWidth: 460, maxWidth: 560)
+        .onAppear { existing = (try? stores.documents.payments(for: state.id)) ?? [] }
     }
 
     private var form: some View {
@@ -75,6 +81,12 @@ struct RecordPaymentSheet: View {
                     Text(mode == .payment ? L.rpDate : L.rpRefundDate)
                 }
                 MoneyField(amount: $amount, currency: state.summary.currency.code, label: L.rpAmount)
+                if let outcome {
+                    Text(outcome).textRole(.rowSecondary)
+                }
+                ForEach(warnings, id: \.self) { warning in
+                    InlineMessage(warning, kind: .problem)
+                }
                 TextField(text: $note) { Text(L.rpNote) }
                 if let error {
                     InlineMessage(error)
@@ -91,6 +103,34 @@ struct RecordPaymentSheet: View {
                     .disabled(amount == nil)
             }
         }
+    }
+
+    /// "Document will be: Paid", "Partly paid – 600,00 € left" or "Overpaid by 50,00 € – kept as client
+    /// credit" (docs-30): the open balance after the typed amount. The fixed payment tolerance waits until the
+    /// data layer applies it to the settlement, so the line never promises a state the badge won't show.
+    private var outcome: LocalizedStringResource? {
+        guard let amount, amount > 0 else { return nil }
+        let currency = state.summary.currency
+        let after = mode == .payment ? state.outstanding.amount - amount : state.outstanding.amount + amount
+        let format = { (value: Decimal) in MoneyText.format(value, currency: currency.code, locale: locale) }
+        if after == 0 { return L.outcomePaid }
+        if after > 0 { return L.outcomePartlyPaid(format(after)) }
+        return L.outcomeOverpaid(format(-after))
+    }
+
+    /// A payment dated before the document's issue date, and one with the same day and amount as a
+    /// payment already recorded (screens-flows.md §2f edge cases).
+    private var warnings: [String] {
+        guard mode == .payment else { return [] }
+        var result: [String] = []
+        let day = CalendarDay(date, in: .current)
+        if day < state.summary.issueDate {
+            result.append(String(localized: L.paymentBeforeIssueDate(state.summary.issueDate.formatted(locale))))
+        }
+        if let amount, existing.contains(where: { $0.kind == .received && $0.paidOn == day && $0.amount.amount == amount }) {
+            result.append(String(localized: L.possibleDuplicatePayment))
+        }
+        return result
     }
 
     /// Step 2 of the advance flow: the money is in, and the tax document for it is due within 15 days of
@@ -154,7 +194,11 @@ struct RecordPaymentSheet: View {
                 try stores.documents.recordRefund(documentID: state.id, on: day, amount: money, note: text.isEmpty ? nil : text)
                 lastDate = date
             }
+            let formatted = MoneyText.format(amount, currency: state.summary.currency.code, locale: locale)
+            let number = state.summary.number ?? ""
+            let line = mode == .payment ? L.paymentRecordedResult(formatted, number) : L.refundRecordedResult(formatted, number)
             dismiss()
+            reportRecorded?(String(localized: line))
         } catch {
             self.error = ErrorText.message(error, locale: locale)
         }

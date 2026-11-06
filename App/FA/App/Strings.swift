@@ -177,10 +177,10 @@ enum L {
 
     // MARK: Sheets
 
-    static let rpTitle = r("recordPayment.title", "Record payment")
+    static let rpTitle = r("recordPayment.title", "Record Payment")
     static let rpDate = r("recordPayment.date", "Payment date")
     static let rpRefundDate = r("recordPayment.refundDate", "Refund date")
-    static let rpRefundTitle = r("recordPayment.refundTitle", "Record refund")
+    static let rpRefundTitle = r("recordPayment.refundTitle", "Record Refund")
     static let rpRecordRefund = r("recordPayment.recordRefund", "Record Refund")
     static let rpRefundNote = r("recordPayment.refundNote", "The overpaid part goes back to the client; the document keeps its payments.")
     static let rpAmount = r("recordPayment.amount", "Amount")
@@ -316,7 +316,6 @@ enum L {
     static let pdfFileMoved = r("pdf.fileMoved", "File moved – use Save PDF…")
     static func pdfSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.savedTo", "PDF saved to \(path)") }
     static func pdfSaveFailed(_ folder: String) -> LocalizedStringResource { r("pdf.saveFailed", "PDF couldn't be saved to \(folder).") }
-    static func pdfWillBeSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.willBeSavedTo", "Will be saved to \(path)") }
     static let pdfNoFolder = r("pdf.noFolder", "No PDF folder chosen: the PDF stays in the app until you use Save PDF….")
     static let pdfAutoSaveOff = r("pdf.autoSaveOff", "Automatic saving is off: the PDF stays in the app until you use Save PDF….")
     static let pdfSection = r("pdf.section", "PDF")
@@ -450,8 +449,6 @@ enum L {
     static func receiptTotalMismatch(_ amount: String) -> LocalizedStringResource {
         r("editor.receiptTotalMismatch", "The total must equal the received payment of \(amount).")
     }
-    static let treatmentDiffersFromClient = r("editor.treatmentDiffersFromClient", "The VAT treatment differs from the client's default")
-    static let currencyDiffersFromClient = r("editor.currencyDiffersFromClient", "The currency differs from the client's default")
 
     static let linesTitle = r("editor.lines", "Lines")
     static let colDescription = r("editor.col.description", "Description")
@@ -492,7 +489,6 @@ enum L {
     static let saveRate = r("editor.saveRate", "Save Rate")
     static let changeRate = r("editor.changeRate", "Change…")
     static func rateEquals(_ code: String, _ rate: String) -> LocalizedStringResource { r("editor.rateEquals", "1 \(code) = \(rate) CZK") }
-    static func rateDetails(_ day: String, _ source: String) -> LocalizedStringResource { r("editor.rateDetails", "for \(day) · \(source)") }
     static func rateFallback(_ wanted: String, _ used: String) -> LocalizedStringResource {
         r("editor.rateFallback", "No rate is published for \(wanted) (weekend or holiday); the last published rate, for \(used), applies")
     }
@@ -535,7 +531,6 @@ enum L {
     static let issueTaxDocumentTitleNoNumber = r("issue.taxDocumentTitleNoNumber", "Issue the tax document?")
     static let issueFinalTitleNoNumber = r("issue.finalTitleNoNumber", "Issue the final invoice?")
     static let issueSubtitle = r("issue.subtitle", "Once issued, the document can't be edited or deleted.")
-    static let seriesLabel = r("issue.series", "Numbering series")
     static let noSeriesForKind = r("issue.noSeries", "No numbering series numbers this document type. Set one up in Settings ▸ Numbering.")
     static let summaryType = r("issue.type", "Type")
     static let summaryClient = r("issue.client", "Client")
@@ -544,7 +539,6 @@ enum L {
     static let summaryTotal = r("issue.total", "Total")
     static let summaryRate = r("issue.rate", "Rate")
     static let summaryPayment = r("issue.payment", "Payment")
-    static let summaryLegal = r("issue.legal", "Legal notes")
     static func clientSummary(_ name: String, _ treatment: String) -> LocalizedStringResource { r("issue.clientSummary", "\(name) · \(treatment)") }
     static func clientSummaryWithVATID(_ name: String, _ vatID: String, _ treatment: String) -> LocalizedStringResource {
         r("issue.clientSummaryWithVATID", "\(name) · VAT ID \(vatID) · \(treatment)")
@@ -555,25 +549,23 @@ enum L {
     static func datesSummaryNoTaxPoint(_ issued: String, _ due: String) -> LocalizedStringResource {
         r("issue.datesSummaryNoTaxPoint", "Issued \(issued) · Due \(due)")
     }
-    static func paymentSummary(_ account: String, _ qr: String) -> LocalizedStringResource { r("issue.paymentSummary", "\(account) · \(qr)") }
+    /// "EPC QR (SEPA) · Raiffeisenbank · CZ65 … · VS 20260042": QR type, account, predicted VS (docs-27).
+    static func paymentSummary(_ account: String, _ qr: String) -> LocalizedStringResource { r("issue.paymentSummary", "\(qr) · \(account)") }
     static func paymentSummaryWithVS(_ account: String, _ qr: String, _ vs: String) -> LocalizedStringResource {
-        r("issue.paymentSummaryWithVS", "\(account) · \(qr) · VS \(vs)")
+        r("issue.paymentSummaryWithVS", "\(qr) · \(account) · VS \(vs)")
     }
     static let qrKindQRPlatba = r("qr.qrPlatba", "QR Platba")
     static let qrKindSEPA = r("qr.sepa", "EPC QR (SEPA)")
     static let qrKindNone = r("qr.none", "No QR code")
-    static let paymentFromProfile = r("issue.paymentFromProfile", "the company's account for this currency")
     static let noPayment = r("issue.noPayment", "no bank account for this currency")
     static let blockingTitle = r("issue.blocking", "Fix before issuing")
     static let checkTitle = r("issue.check", "Check before issuing")
-    static let infoTitle = r("issue.info", "Notes")
     static let checkedLabel = r("issue.checked", "Checked")
     static func issueDateNotToday(_ day: String) -> LocalizedStringResource { r("issue.dateNotToday", "The issue date \(day) is not today") }
     static let setToToday = r("issue.setToToday", "Set to today")
     static func issueFailed(_ error: String) -> LocalizedStringResource { r("issue.failed", "Issue failed: \(error)") }
     static func issuedResult(_ number: String) -> LocalizedStringResource { r("issue.result", "Issued \(number)") }
     static let draftGone = r("editor.gone", "This draft no longer exists.")
-    static let taxPointOtherMonth = r("issue.taxPointOtherMonth", "DUZP is in a different month from the issue date")
     static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {
         r("error.dayBeforeSeriesYear", "The issue date is before the series year \(year). Change the issue date or pick another series.")
     }
@@ -853,4 +845,67 @@ enum L {
     static func rateLineDetails(_ day: String, _ source: String) -> LocalizedStringResource { r("editor.rateLineDetails", "· for \(day) · \(source)") }
     static let addDiscount = r("editor.addDiscount", "Add Discount")
     static let menuBankAccount = r("menu.bankAccount", "Bank Account")
+
+    // MARK: Lean Issue sheet (docs-27..29)
+
+    /// "today" in "Issued today · DUZP …".
+    static let todayWord = r("issue.today", "today")
+    static func typeNotTaxDocument(_ type: String) -> LocalizedStringResource { r("issue.typeNotTaxDocument", "\(type) · Not a tax document") }
+    static func datesSummaryNoDue(_ issued: String, _ taxPoint: String) -> LocalizedStringResource {
+        r("issue.datesSummaryNoDue", "Issued \(issued) · DUZP \(taxPoint)")
+    }
+    static func paymentReceivedAgainst(_ day: String, _ advance: String) -> LocalizedStringResource {
+        r("issue.paymentReceivedAgainst", "Payment received \(day) against \(advance)")
+    }
+    static func paymentReceivedOn(_ day: String) -> LocalizedStringResource { r("issue.paymentReceivedOn", "Payment received \(day)") }
+    static func vatAtRate(_ percent: String) -> LocalizedStringResource { r("issue.vatAtRate", "VAT \(percent)") }
+    static func vatAfterAdvancesAtRate(_ percent: String) -> LocalizedStringResource { r("issue.vatAfterAdvancesAtRate", "VAT after advances \(percent)") }
+    /// "DD 2026-0001 at 24,315": a deducted tax document with its advance's rate.
+    static func deductionAtRate(_ number: String, _ rate: String) -> LocalizedStringResource { r("issue.deductionAtRate", "\(number) at \(rate)") }
+    static func rateSummary(_ rate: String, _ day: String, _ source: String) -> LocalizedStringResource {
+        r("issue.rateSummary", "\(rate) · for \(day) · \(source)")
+    }
+    static func rateSummaryFallback(_ rate: String, _ day: String, _ source: String) -> LocalizedStringResource {
+        r("issue.rateSummaryFallback", "\(rate) · for \(day) · \(source) · last published")
+    }
+    static let noPaymentRequest = r("issue.noPaymentRequest", "No payment request")
+    static func differsCurrencyAndTreatment(_ client: String, _ fromCurrency: String, _ toCurrency: String,
+                                            _ fromTreatment: String, _ toTreatment: String) -> LocalizedStringResource {
+        r("issue.differsCurrencyAndTreatment",
+          "Differs from \(client)'s defaults: currency \(fromCurrency) → \(toCurrency) · VAT treatment \(fromTreatment) → \(toTreatment)")
+    }
+    static func differsCurrency(_ client: String, _ from: String, _ to: String) -> LocalizedStringResource {
+        r("issue.differsCurrency", "Differs from \(client)'s defaults: currency \(from) → \(to)")
+    }
+    static func differsTreatment(_ client: String, _ from: String, _ to: String) -> LocalizedStringResource {
+        r("issue.differsTreatment", "Differs from \(client)'s defaults: VAT treatment \(from) → \(to)")
+    }
+    static func totalChangedFromLast(_ total: String, _ last: String) -> LocalizedStringResource {
+        r("issue.totalChangedFromLast", "The total \(total) differs by more than half from the client's last invoice, \(last)")
+    }
+    static func advanceOtherTreatment(_ number: String) -> LocalizedStringResource {
+        r("issue.advanceOtherTreatment", "\(number) was taxed under another VAT treatment than this invoice")
+    }
+    /// The result line after Issue (docs-29): one sentence with the saved PDF's path.
+    static func issuedResultWithPDF(_ number: String, _ path: String) -> LocalizedStringResource {
+        r("issue.resultWithPDF", "Issued \(number) · PDF saved to \(path)")
+    }
+
+    // MARK: Lean Record Payment (docs-30)
+
+    static let outcomePaid = r("recordPayment.outcomePaid", "Document will be: Paid")
+    static func outcomePartlyPaid(_ left: String) -> LocalizedStringResource { r("recordPayment.outcomePartlyPaid", "Document will be: Partly paid – \(left) left") }
+    static func outcomeOverpaid(_ surplus: String) -> LocalizedStringResource {
+        r("recordPayment.outcomeOverpaid", "Document will be: Overpaid by \(surplus) – kept as client credit")
+    }
+    static func paymentBeforeIssueDate(_ day: String) -> LocalizedStringResource {
+        r("recordPayment.beforeIssueDate", "The payment date is before the document's issue date, \(day)")
+    }
+    static let possibleDuplicatePayment = r("recordPayment.possibleDuplicate", "Possible duplicate: a payment of this amount on this day is already recorded")
+    static func paymentRecordedResult(_ amount: String, _ number: String) -> LocalizedStringResource {
+        r("recordPayment.result", "Payment of \(amount) recorded on \(number)")
+    }
+    static func refundRecordedResult(_ amount: String, _ number: String) -> LocalizedStringResource {
+        r("recordPayment.refundResult", "Refund of \(amount) recorded on \(number)")
+    }
 }
