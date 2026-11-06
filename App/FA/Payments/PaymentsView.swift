@@ -172,9 +172,11 @@ struct PaymentsView: View {
         var collected: [PaymentRow] = []
         do {
             for state in documents.states where state.summary.status == .issued {
-                // Payments of a § 64 advance a final invoice settled as paid in advance are locked too.
+                // Payments of a § 64 advance a final invoice settled as paid in advance are locked too. Every
+                // issued advance is read: one with a pre-v3 payment tax document requires tax documents, yet
+                // its other payments can still be listed (DocumentLinks.paidAdvanceLinks reads them the same way).
                 var settled: [String: String] = [:]
-                if state.summary.kind == .advanceRequest && !state.taxDocumentRequired {
+                if state.summary.kind == .advanceRequest {
                     for link in try stores.documents.paidAdvances(ofAdvanceRequest: state.id) {
                         settled[link.paymentID] = link.finalInvoiceNumber
                     }

@@ -19,8 +19,8 @@ struct OverviewView: View {
     let showOverdue: @MainActor () -> Void
     let newDocument: @MainActor (DocumentKind) -> Void
     /// ↩ on a queue row: Record Payment… for an overdue document, Create Tax Document for a payment
-    /// without one (other-03).
-    let runQueueAction: @MainActor (OverviewFigures.QueueItem.Kind, String) -> Void
+    /// without one (other-03). False when the row has no action, so ↩ is not swallowed.
+    let runQueueAction: @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool
 
     @State private var month: CalendarDay
     /// Nil until the first load, so a set-up database never shows the card for a moment.
@@ -39,7 +39,7 @@ struct OverviewView: View {
     init(stores: Stores, documents: DocumentListModel, selection: Binding<String?>, forced: Binding<Bool>,
          show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
          newDocument: @escaping @MainActor (DocumentKind) -> Void,
-         runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Void) {
+         runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
@@ -56,31 +56,40 @@ struct OverviewView: View {
         let placeholder = documents.loaded ? RedactionReasons() : RedactionReasons.placeholder
         let setupIncomplete = setup.map { !$0.isComplete } ?? false
         let noDocuments = documents.loaded && documents.states.isEmpty
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.section) {
-                // One state at a time (other-15): the data error wins over everything, the card included.
-                if let error = documents.error {
-                    dataError(error)
-                } else {
-                    if let setup, setupIncomplete || forced {
-                        gettingStarted(setup)
-                    }
-                    if setupIncomplete && noDocuments {
-                        // First run: the card alone.
-                        EmptyView()
-                    } else if noDocuments {
-                        noDocumentsView
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.section) {
+                    // One state at a time (other-15): the data error wins over everything, the card included.
+                    if let error = documents.error {
+                        dataError(error)
                     } else {
-                        // Placeholder tiles until the first states arrive (screens-flows.md §2a, Loading).
-                        todayTiles(figures).redacted(reason: placeholder)
-                        queue(figures).redacted(reason: placeholder)
-                        monthBar
-                        monthTiles(figures).redacted(reason: placeholder)
+                        if let setup, setupIncomplete || forced {
+                            gettingStarted(setup)
+                        }
+                        if setupIncomplete && noDocuments {
+                            // First run: the card alone.
+                            EmptyView()
+                        } else if noDocuments {
+                            // Undecided until the setup check ran, so a first run never shows this for a moment.
+                            if setup != nil {
+                                noDocumentsView
+                            }
+                        } else {
+                            // Placeholder tiles until the first states arrive (screens-flows.md §2a, Loading).
+                            todayTiles(figures).redacted(reason: placeholder)
+                            queue(figures).redacted(reason: placeholder)
+                            monthBar
+                            monthTiles(figures).redacted(reason: placeholder)
+                        }
                     }
                 }
+                .padding(Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Spacing.xl)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // ↑↓ in the queue keep the selected row visible; without an anchor it scrolls only when needed.
+            .onChange(of: selectedQueueItem) { _, id in
+                if let id { proxy.scrollTo(id) }
+            }
         }
         .navigationTitle(Text(L.overview))
         .task(id: documents.states) {
@@ -275,10 +284,12 @@ struct OverviewView: View {
                 }
                 .textRole(.body)
             } else {
+                let current = currentQueueItem(in: figures.queue)?.id
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(figures.queue) { item in
-                        let selected = selectedQueueItem == item.id
+                        let selected = current == item.id
                         QueueRow(item: item, amount: amount(of: item), selected: selected, focused: queueFocused)
+                            .id(item.id)
                             .onTapGesture {
                                 select(item)
                                 queueFocused = true
@@ -288,6 +299,8 @@ struct OverviewView: View {
                     }
                 }
                 .focusable()
+                // The selected row shows the focus in the accent colour; no ring around the whole queue.
+                .focusEffectDisabled()
                 .focused($queueFocused)
                 .onKeyPress(.downArrow) {
                     move(by: 1, in: figures.queue)
@@ -298,12 +311,22 @@ struct OverviewView: View {
                     return .handled
                 }
                 .onKeyPress(.return) {
-                    guard let item = figures.queue.first(where: { $0.id == selectedQueueItem }) else { return .ignored }
-                    runQueueAction(item.kind, item.state.id)
-                    return .handled
+                    guard let item = currentQueueItem(in: figures.queue) else { return .ignored }
+                    return runQueueAction(item.kind, item.state.id) ? .handled : .ignored
                 }
             }
         }
+    }
+
+    /// The selected queue row, derived from the selected document: the row that was clicked while it still
+    /// shows that document, else the document's first row (a restored selection, or one made elsewhere).
+    private func currentQueueItem(in items: [OverviewFigures.QueueItem]) -> OverviewFigures.QueueItem? {
+        guard let selection else { return nil }
+        if let selectedQueueItem, let clicked = items.first(where: { $0.id == selectedQueueItem }),
+           clicked.state.id == selection {
+            return clicked
+        }
+        return items.first { $0.state.id == selection }
     }
 
     private func select(_ item: OverviewFigures.QueueItem) {
@@ -313,7 +336,8 @@ struct OverviewView: View {
 
     private func move(by step: Int, in items: [OverviewFigures.QueueItem]) {
         guard !items.isEmpty else { return }
-        let current = items.firstIndex { $0.id == selectedQueueItem }
+        let currentID = currentQueueItem(in: items)?.id
+        let current = items.firstIndex { $0.id == currentID }
         let next: Int
         if let current {
             next = min(max(current + step, 0), items.count - 1)

@@ -490,17 +490,31 @@ struct MainSplitView: View {
         }
     }
 
-    /// Edit ▸ Jump to Search Field: from Overview it switches to Documents first.
     /// ↩ on an Overview queue row (other-03): Record Payment… on an overdue document, Create Tax Document
-    /// for the oldest payment without one on an advance.
-    private func runQueueAction(_ kind: OverviewFigures.QueueItem.Kind, documentID: String) {
+    /// for the oldest payment without one on an advance, else Open Tax Document on the oldest payment whose
+    /// tax document is still a draft (as the payment row offers). False when the row has no action, so the
+    /// key is not swallowed.
+    private func runQueueAction(_ kind: OverviewFigures.QueueItem.Kind, documentID: String) -> Bool {
         let actions = documentActions(for: documentID)
         switch kind {
-        case .overdue: actions.paymentAction?()
-        case .taxDocumentMissing: actions.createTaxDocument?()
+        case .overdue:
+            guard let action = actions.paymentAction else { return false }
+            action()
+            return true
+        case .taxDocumentMissing:
+            if let action = actions.createTaxDocument {
+                action()
+                return true
+            }
+            guard let payments = try? stores.documents.payments(for: documentID) else { return false }
+            let drafts = payments.filter { $0.kind == .received && !$0.receiptIssued && $0.receiptDocumentID != nil }
+            guard let receiptID = drafts.min(by: { $0.paidOn < $1.paidOn })?.receiptDocumentID else { return false }
+            openDraft(receiptID)
+            return true
         }
     }
 
+    /// Edit ▸ Jump to Search Field: from Overview it switches to Documents first.
     private func jumpToDocumentsSearch() {
         if sidebar.section != .documents { show(.filter(.all)) }
         documentsSearchPresented = true
