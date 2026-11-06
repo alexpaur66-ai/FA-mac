@@ -4,10 +4,10 @@ The UI design for FA: how the app looks, how it is laid out, and how it stays fa
 
 | File | What it holds |
 | --- | --- |
-| [design-system.md](design-system.md) | Principles, platform baseline, typography, colour and status styles, spacing and layout, Liquid Glass rules, icons, components, writing and localisation, accessibility checklist, sources. |
-| [screens-flows.md](screens-flows.md) | Information architecture, menus, every screen and flow (Overview, Documents, draft editor and Issue, Clients, payments, exchange rates, bank import, Settings, iPhone companion, Repair mode), the keyboard map, speed budgets, open questions. |
+| [design-system.md](design-system.md) | Principles, platform baseline, typography, colour and status styles, spacing and layout, materials (no custom glass), icons, components, writing and localisation, accessibility checklist, sources. |
+| [screens-flows.md](screens-flows.md) | Information architecture, menus, every screen and flow (Overview, Documents, draft editor and Issue, Clients, payments, Stock, exchange rates, bank import, Settings, iPhone companion, Repair mode), the keyboard map, speed budgets, open questions. |
 | [review-log.md](review-log.md) | The review findings on both specs and what was changed for each. |
-| `App/FA/DesignSystem/` | The code: tokens, status styles, `StatusBadge`, `MoneyText`, `FloatingSurface`, a debug gallery, and the `DesignSystem` string table (English; the Czech entries are a free bonus). |
+| `App/FA/DesignSystem/` | The code: tokens, status styles, `StatusBadge`, `MoneyText`, a debug gallery, and the `DesignSystem` string table (English; the Czech entries are a free bonus). |
 
 The interactive mockups (a design canvas with sample data) are linked from the project thread.
 
@@ -26,16 +26,15 @@ Saša's Mac runs **macOS 27.2** with English as the system language (Saša's ans
 so the question about the macOS version is answered. The decision, agreed with the build:
 
 - The deployment target stays **macOS 14.0** for now.
-- CI builds with the default Xcode of the `macos-15` runner, so any API from a newer SDK sits behind
-  `#if compiler(>=6.2)` (Swift 6.2 ships with the macOS 26 SDK; a macOS 27 API needs the Swift version of that SDK)
-  and an `if #available(macOS NN, *)` check for the API's own version, with a macOS 14 fallback.
-- Today that applies to one call: `glassEffect(_:in:)` in `FloatingSurface`. On macOS 14 and 15 the surface is an
-  opaque capsule, the same as with Reduce Transparency.
-- The runner's Xcode 16.4 (Swift 6.1) compiles only the fallback. The glass branch is first compiled by Xcode 26 or
-  later, on the Mac.
-- The minimum rises once CI builds with Xcode 26 or later. For that raise the specs recommend **macOS 27.0**
-  (design-system.md §2, screens-flows.md §0.1). The macOS 27.0 APIs need the macOS 27 SDK, which ships with Xcode 27
-  (design-system.md §2), so a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1).
+- CI builds on the `macos-15` runner with **Xcode 26.3** (the macOS 26 SDK, Swift 6.2) since the build's PR 20
+  (`DEVELOPER_DIR` in `.github/workflows/ci.yml`). Any API newer than macOS 14 sits behind
+  `#if compiler(>=6.2)` and an `if #available(macOS NN, *)` check for the API's own version, with a macOS 14
+  fallback. A macOS 27 API needs the macOS 27 SDK, which ships with Xcode 27, so CI can't compile one yet.
+- Today the gated calls are `safeAreaBar` under the editor's totals bar (`DraftEditorView.swift`) and
+  `glassEffect(_:in:)` in `FloatingSurface`. The lean design (6 Nov 2026) has no custom glass and no
+  `FloatingSurface` (design-system.md §6), so the build removes that one.
+- When to raise the minimum is the build's call. For that raise the specs recommend **macOS 27.0**
+  (design-system.md §2, screens-flows.md §0.1); a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1).
 - When the target is raised, the gated branches become the only branch, and the macOS 27 items in design-system.md §2
   (bordered text fields, `.tabs` pickers, `reorderable()`, concentric radii) can be adopted.
 
