@@ -73,6 +73,22 @@ import InvoicingCore
         #expect(twice.map(\.lane) == [.alreadyRecorded, .suggested])
     }
 
+    @Test func twoInstalmentsRecordedByHandAreBothAlreadyRecorded() throws {
+        let database = try twoInvoices()
+        let store = DocumentStore(database)
+        let first = try store.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-01"),
+                                            amount: Money(Fixtures.d("6050"), .czk), now: Fixtures.now)
+        let second = try store.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-06"),
+                                             amount: Money(Fixtures.d("6050"), .czk), now: Fixtures.now)
+        // The 4 Nov line is closest to the second payment, but the 9 Nov line can only be the second one: each
+        // line confirms one payment instead of the later line overpaying the invoice.
+        let proposals = try propose(database, [line("a", "6050", vs: "2026001", on: "2026-11-04"),
+                                               line("b", "6050", vs: "2026001", on: "2026-11-09")])
+        #expect(proposals.map(\.lane) == [.alreadyRecorded, .alreadyRecorded])
+        let paired: [[String?]] = [[first.id], [second.id]]
+        #expect(proposals.map { $0.candidates.map(\.paymentID) } == paired)
+    }
+
     @Test func aKnownPayerAccountSuggestsItsClientsDocuments() throws {
         let database = try twoInvoices()
         let account = try #require(BankMatcher.normalizedAccount(Self.payer))
@@ -105,6 +121,27 @@ import InvoicingCore
         #expect(proposals.last?.candidates.isEmpty == true)
     }
 
+    @Test func anAdvanceAFinalInvoiceSettledIsNoRefundCandidate() throws {
+        // 1 000 EUR of § 64 goods, 1 100 received: the 100 surplus is a refund candidate until a final invoice
+        // settles all 1 100 as paid in advance, after which the store refuses the refund.
+        let (database, advance) = try PaidAdvanceStoreTests.preparedWithGoodsAdvance()
+        let store = DocumentStore(database)
+        _ = try store.recordPayment(documentID: advance.id, on: Fixtures.day("2026-11-02"), amount: Money(Fixtures.d("1100"), .eur),
+                                    now: Fixtures.now)
+        let refund = line("a", "-100", currency: .eur)
+        #expect(try propose(database, [refund]).first?.candidates == [BankMatchCandidate(documentID: advance.id, reason: .amountOnly)])
+
+        let paid = try store.paidAdvanceCandidates(ofAdvanceRequest: advance.id).map(\.paidAdvance)
+        var invoice = PaidAdvanceStoreTests.finalInvoiceDraft(paid: paid)
+        invoice.lines = [DocumentLine(id: "l1", text: "Spindle bearing SKF 7014", quantity: 20, unit: "pcs", unitPrice: 100,
+                                      treatment: .intraCommunityGoods)]
+        try store.saveDraft(invoice, now: Fixtures.now)
+        _ = try store.issue(id: "final", seriesID: "fv", now: Fixtures.now)
+        let proposals = try propose(database, [refund])
+        #expect(proposals.first?.lane == .outgoing)
+        #expect(proposals.first?.candidates.isEmpty == true)
+    }
+
     @Test func resolvedLinesAndOtherCurrenciesAreLeftAlone() throws {
         let database = try twoInvoices()
         let proposals = try propose(database, [line("a", "12100", vs: "2026001", state: .ignored),
@@ -134,5 +171,17 @@ import InvoicingCore
         let proposals = try store.proposals(statementID: "st-1", today: Self.today)
         #expect(proposals.map(\.lane) == [.resolved, .resolved, .matched])
         #expect(throws: DataError.statementNotFound("nope")) { try store.proposals(statementID: "nope", today: Self.today) }
+    }
+
+    @Test func aRefundSentToAnAccountDoesNotConfirmIt() throws {
+        let database = try twoInvoices()
+        let store = StatementStore(database)
+        try store.importStatement(StatementStoreTests.statement(), transactions: [
+            line("a", "12100", vs: "2026001", on: "2026-11-10", account: Self.payer),
+            line("b", "-100", on: "2026-11-11", account: Self.payer),
+        ], now: Fixtures.now)
+        try store.setMatch(transactionID: "a", documentID: "doc-cz", state: .automatic, now: Fixtures.now)
+        try store.setMatch(transactionID: "b", documentID: "doc-2", state: .manual, now: Fixtures.now)
+        #expect(try store.confirmedAccounts() == ["DE89370400440532013000": ["cust-cz": 1]])
     }
 }

@@ -64,7 +64,8 @@ public struct BankMatchProposal: Hashable, Sendable, Identifiable {
 /// stored until the user accepts a line. The rules, checked in this order for each incoming line:
 /// 1. Already recorded: a payment typed in by hand, not linked to a bank line yet, on a document with the
 ///    line's variable symbol, same amount within the tolerance, at most `recordedWindowDays` apart. Each
-///    payment confirms one line; the closest day wins.
+///    payment confirms one line; the closest day wins unless that leaves another line without its payment
+///    (`recordedPayments` pairs the whole statement).
 /// 2. Matched: exactly one open document with the line's variable symbol whose open balance equals the amount
 ///    within the tolerance. The matched amount comes off that balance for the lines after it, so a second
 ///    identical line becomes a suggestion (an overpayment) instead of a second exact match.
@@ -90,8 +91,9 @@ public enum BankMatcher {
         let ordered = transactions.sorted { ($0.bookedOn, $0.id) < ($1.bookedOn, $1.id) }
         var remaining: [String: Decimal] = [:]
         for document in documents { remaining[document.id] = document.outstanding.amount }
-        var unlinked = payments.filter { $0.kind == .received && $0.bankTransactionID == nil }
+        let unlinked = payments.filter { $0.kind == .received && $0.bankTransactionID == nil }
             .sorted { ($0.paidOn, $0.id) < ($1.paidOn, $1.id) }
+        let recorded = recordedPayments(ordered, documents: documents, payments: unlinked)
         var proposals: [BankMatchProposal] = []
 
         for transaction in ordered {
@@ -119,17 +121,8 @@ public enum BankMatcher {
                 continue
             }
 
-            // 1. Already recorded by hand.
-            let symbolDocuments = Set(bySymbol.map(\.id))
-            let recorded = unlinked.indices
-                .filter { index in
-                    let payment = unlinked[index]
-                    return symbolDocuments.contains(payment.documentID) && PaymentTolerance.matches(payment.amount, amount)
-                        && abs(payment.paidOn.days(since: transaction.bookedOn)) <= recordedWindowDays
-                }
-                .min { abs(unlinked[$0].paidOn.days(since: transaction.bookedOn)) < abs(unlinked[$1].paidOn.days(since: transaction.bookedOn)) }
-            if let recorded {
-                let payment = unlinked.remove(at: recorded)
+            // 1. Already recorded by hand (paired for the whole statement in `recordedPayments`).
+            if let payment = recorded[transaction.id] {
                 proposals.append(BankMatchProposal(transaction: transaction, lane: .alreadyRecorded,
                                                    candidates: [BankMatchCandidate(documentID: payment.documentID, reason: .recordedPayment,
                                                                                    paymentID: payment.id)]))
@@ -178,13 +171,73 @@ public enum BankMatcher {
         return proposals
     }
 
+    /// Rule 1 for the whole statement: the hand-recorded payment each incoming unmatched line confirms, by line
+    /// id. A line may take a payment on a document with its variable symbol, in its currency, with its amount
+    /// within the tolerance, at most `recordedWindowDays` apart. Lines take their closest payment in booking
+    /// order; a line whose payments are all taken moves an earlier line to another of its payments when it can,
+    /// so two instalments are both confirmed whatever order their lines come in. Each payment confirms one line.
+    private static func recordedPayments(_ ordered: [BankTransaction], documents: [DocumentState],
+                                         payments: [DocumentPayment]) -> [String: DocumentPayment] {
+        var lineIDs: [String] = []
+        // For each line in `lineIDs`, the indices of the payments it may take, closest first.
+        var options: [[Int]] = []
+        for transaction in ordered {
+            let amount = transaction.amount
+            guard transaction.matchState == .unmatched, amount.amount > 0,
+                  let symbol = canonicalSymbol(transaction.variableSymbol) else { continue }
+            let symbolDocuments = Set(documents
+                .filter { $0.summary.currency == amount.currency && canonicalSymbol($0.summary.variableSymbol) == symbol }
+                .map(\.id))
+            var fitting: [(distance: Int, index: Int)] = []
+            for index in payments.indices {
+                let payment = payments[index]
+                guard symbolDocuments.contains(payment.documentID), PaymentTolerance.matches(payment.amount, amount) else { continue }
+                let distance = abs(payment.paidOn.days(since: transaction.bookedOn))
+                if distance <= recordedWindowDays {
+                    fitting.append((distance: distance, index: index))
+                }
+            }
+            guard !fitting.isEmpty else { continue }
+            lineIDs.append(transaction.id)
+            options.append(fitting.sorted { ($0.distance, $0.index) < ($1.distance, $1.index) }.map { $0.index })
+        }
+        // Payment index → the line (index into `lineIDs`) that confirms it.
+        var owner: [Int: Int] = [:]
+        for line in options.indices {
+            var visited: Set<Int> = []
+            _ = assignRecordedPayment(line, options: options, owner: &owner, visited: &visited)
+        }
+        var byLine: [String: DocumentPayment] = [:]
+        for (payment, line) in owner {
+            byLine[lineIDs[line]] = payments[payment]
+        }
+        return byLine
+    }
+
+    /// Gives `line` one of its payments, closest first; a payment another line holds is taken over when that
+    /// line can move to another of its own (an augmenting path). False when no payment can be freed.
+    private static func assignRecordedPayment(_ line: Int, options: [[Int]], owner: inout [Int: Int],
+                                              visited: inout Set<Int>) -> Bool {
+        for payment in options[line] where !visited.contains(payment) {
+            visited.insert(payment)
+            if let holder = owner[payment] {
+                guard assignRecordedPayment(holder, options: options, owner: &owner, visited: &visited) else { continue }
+            }
+            owner[payment] = line
+            return true
+        }
+        return false
+    }
+
     /// Overpaid documents whose surplus equals the outgoing amount: those with the line's symbol, else the
-    /// only one with that surplus.
+    /// only one with that surplus. An advance a final invoice deducted or settled is left out: what it holds
+    /// may be the final invoice's, and the store refuses a refund of that (`refundExceedsAvailable`).
     private static func refundCandidates(_ transaction: BankTransaction, _ sameCurrency: [DocumentState],
                                          _ bySymbol: [DocumentState]) -> [BankMatchCandidate] {
         let paidOut = Money(-transaction.amount.amount, transaction.amount.currency)
         func surplusFits(_ document: DocumentState) -> Bool {
-            document.acceptsRefund && PaymentTolerance.matches(Money(-document.outstanding.amount, document.outstanding.currency), paidOut)
+            document.acceptsRefund && !(document.summary.kind == .advanceRequest && document.deductedInFinal)
+                && PaymentTolerance.matches(Money(-document.outstanding.amount, document.outstanding.currency), paidOut)
         }
         let withSymbol = bySymbol.filter(surplusFits)
         if !withSymbol.isEmpty {

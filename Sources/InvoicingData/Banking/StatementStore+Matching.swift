@@ -19,8 +19,9 @@ extension StatementStore {
         }
     }
 
-    /// Payer accounts of matched lines (`BankMatcher.normalizedAccount`) → the clients of the documents they
-    /// were matched to → how many lines. A payer that paid a client twice is a known account for that client.
+    /// Payer accounts of matched incoming lines (`BankMatcher.normalizedAccount`) → the clients of the documents
+    /// they were matched to → how many lines. A payer that paid a client twice is a known account for that
+    /// client; a refund sent to the account does not count.
     public func confirmedAccounts() throws -> [String: [String: Int]] {
         try database.queue.read { db in try Self.confirmedAccounts(db) }
     }
@@ -29,7 +30,7 @@ extension StatementStore {
         let rows = try Row.fetchAll(db, sql: """
             SELECT t.counterpartyAccount AS account, d.customerID AS customerID
             FROM bankTransaction t JOIN document d ON d.id = t.matchedDocumentID
-            WHERE t.matchState IN (?, ?) AND t.counterpartyAccount IS NOT NULL AND d.customerID IS NOT NULL
+            WHERE t.matchState IN (?, ?) AND t.amount > 0 AND t.counterpartyAccount IS NOT NULL AND d.customerID IS NOT NULL
             """, arguments: [TransactionMatchState.automatic.rawValue, TransactionMatchState.manual.rawValue])
         var accounts: [String: [String: Int]] = [:]
         for row in rows {
