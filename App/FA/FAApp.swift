@@ -29,7 +29,8 @@ struct RootView: View {
         Group {
             if let stores = model.stores {
                 // A restore bumps the generation: the content is rebuilt on the restored data.
-                MainSplitView(stores: stores, restoreFromBackup: restoreAction, takeNotice: { model.takeNotice() })
+                MainSplitView(stores: stores, repairMode: model.repairMode, restoreFromBackup: restoreAction,
+                              takeNotice: { model.takeNotice() })
                     .id(model.generation)
             } else {
                 DatabaseErrorView(detail: model.openError ?? "", databaseURL: model.databaseURL,

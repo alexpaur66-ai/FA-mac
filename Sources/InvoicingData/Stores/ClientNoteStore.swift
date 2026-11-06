@@ -134,6 +134,7 @@ public struct ClientNoteStore: Sendable {
         }
     }
 
-    /// The document events that belong in a client's history; the PDF renders and saves stay on the document.
-    static let clientActions = ["issue", "payment", "paymentDeleted", "close", "reopen"]
+    /// The document events that belong in a client's history, Repair mode changes included (§2m); the PDF
+    /// renders and saves stay on the document.
+    static let clientActions = ["issue", "payment", "paymentDeleted", "close", "reopen", "repair"]
 }

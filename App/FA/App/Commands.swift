@@ -33,6 +33,8 @@ struct DocumentActions {
     var printDocument: (@MainActor () -> Void)?
     /// Selects the document's client in Clients.
     var showClient: (@MainActor () -> Void)?
+    /// Repair… on an issued document while Repair mode is on (§2m); nil otherwise.
+    var repair: (@MainActor () -> Void)?
     /// Document ▸ Show Related Documents ▸: the chain's other documents, in chain line order (§2d).
     var related: [RelatedDocumentAction] = []
 
@@ -98,6 +100,9 @@ struct MainActions {
     var editClient: (@MainActor () -> Void)?
     /// File ▸ Add Note to “…”…: the same client's Activity tab with the composer focused.
     var addNote: (@MainActor () -> Void)?
+    /// File ▸ Repair Mode…: the entry sheet in this window (§2m); while the mode is on, End Repair Mode.
+    var turnOnRepairMode: (@MainActor () -> Void)?
+    var endRepairMode: (@MainActor () -> Void)?
     /// View ▸ Show/Hide Preview on a draft in the editor; `previewShown` picks the title.
     var togglePreview: (@MainActor () -> Void)?
     var previewShown = false
@@ -194,6 +199,14 @@ struct AppCommands: Commands {
                 .disabled(!model.canRestore)
             Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
                 .disabled(actions?.showDataFolder == nil)
+            Divider()
+            // No shortcut on purpose: it unlocks every record (§2m, §3.1). While on, it ends the mode.
+            if let end = actions?.endRepairMode {
+                Button { end() } label: { Text(L.repairEnd) }
+            } else {
+                Button { actions?.turnOnRepairMode?() } label: { Text(L.menuRepairMode) }
+                    .disabled(actions?.turnOnRepairMode == nil)
+            }
         }
 
         // File ▸ Save PDF…, Show PDF in Finder and Print… (⌘P) follow the selected document (§1.4); ⌘S
@@ -285,6 +298,8 @@ struct AppCommands: Commands {
                 .disabled(document?.closeAdvanceAction == nil)
             Button { document?.creditNoteAction?() } label: { Text(document?.creditNoteTitle ?? L.markForCreditNote) }
                 .disabled(document?.creditNoteAction == nil)
+            Button { document?.repair?() } label: { Text(L.repairDocument) }
+                .disabled(document?.repair == nil)
             Divider()
             Button { document?.showClient?() } label: { Text(L.showClient) }
                 .disabled(document?.showClient == nil)

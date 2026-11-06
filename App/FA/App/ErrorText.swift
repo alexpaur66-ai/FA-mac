@@ -42,6 +42,15 @@ enum ErrorText {
             case .noteNotFound: return String(localized: L.noteMissing)
             }
         }
+        if let repairError = error as? RepairError {
+            switch repairError {
+            case .reasonRequired: return String(localized: L.repairReasonRequired)
+            case .nothingChanged: return String(localized: L.repairNothingChanged)
+            }
+        }
+        if error is RepairModeError {
+            return String(localized: L.repairModeOff)
+        }
         if let backupError = error as? BackupError {
             switch backupError {
             case .unreadable: return String(localized: L.backupUnreadable)
