@@ -118,8 +118,9 @@ extension Document {
         return lines
     }
 
-    /// "DPH 21 %", "VAT 12 %", "reverse charge" …: which part of a split payment a line is.
-    private static func treatmentNote(_ treatment: VATTreatment, rate: VATRate?, language: DocumentLanguage) -> String {
+    /// "DPH 21 %", "VAT 12 %", "reverse charge" …: which part of a split payment a line is, and the VAT
+    /// treatment column of the accountant's export.
+    public static func treatmentNote(_ treatment: VATTreatment, rate: VATRate?, language: DocumentLanguage) -> String {
         switch (treatment, language) {
         case (.taxable, .czech):
             return "DPH " + (rate.map { $0.percent.plainString } ?? "") + " %"

@@ -20,6 +20,7 @@ struct Stores: Sendable {
     var statements: StatementStore { StatementStore(database) }
     var audit: AuditLog { AuditLog(database) }
     var stock: StockStore { StockStore(database) }
+    var exports: ExportStore { ExportStore(database) }
 }
 
 @MainActor @Observable

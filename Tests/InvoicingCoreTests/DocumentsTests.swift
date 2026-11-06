@@ -592,6 +592,25 @@ enum DocumentFixtures {
         #expect(receipt.exchangeRateDay == day("2026-11-04"))
     }
 
+    @Test func theExportMonthFollowsTheDUZPTheSection22DayOrTheIssueDate() {
+        // screens-flows.md §2h: tax documents by DUZP, § 64 goods by the § 22 odst. 1 day, advances by issue date.
+        var goods = DocumentFixtures.euGoodsInvoice()
+        goods.issueDate = day("2026-12-20")
+        #expect(goods.exportDay == day("2026-12-15"))
+        var mixed = goods
+        mixed.lines.append(DocumentLine(id: "l2", text: "Fitting advice", quantity: 1, unit: "h", unitPrice: 50, treatment: .reverseChargeEU))
+        #expect(mixed.exportDay == day("2026-11-04"))
+        var receipt = goods
+        receipt.kind = .paymentTaxDocument
+        #expect(receipt.exportDay == day("2026-11-04"))
+        var advance = goods
+        advance.kind = .advanceRequest
+        advance.taxPointDate = nil
+        #expect(advance.exportDay == day("2026-12-20"))
+        let services = DocumentFixtures.euInvoice()
+        #expect(services.exportDay == day("2026-11-04"))
+    }
+
     @Test func goodsCountOnTheFifteenthOrTheEarlierIssueDate() {
         // § 22 odst. 1 ZDPH: delivered on 20 November and invoiced before 15 December → the issue date.
         #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-11-25")) == day("2026-11-25"))

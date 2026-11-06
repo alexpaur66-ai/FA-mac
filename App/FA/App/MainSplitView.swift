@@ -205,7 +205,8 @@ struct MainSplitView: View {
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
                 show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) },
-                backUpNow: stores.databaseURL == nil ? nil : backUpNow, restoreFromBackup: restoreFromBackup)
+                backUpNow: stores.databaseURL == nil ? nil : backUpNow, restoreFromBackup: restoreFromBackup,
+                exportAgain: { sheet = .exportForAccountant($0) })
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
@@ -378,6 +379,7 @@ struct MainSplitView: View {
             actions.backUpNow = backUpNow
         }
         actions.newStockItem = newStockItem
+        actions.exportForAccountant = { sheet = .exportForAccountant(nil) }
         // View ▸ Client Tab ▸, while a client page is shown (§1.4); Items once a stock item exists.
         if sidebar.section == .clients, clientSelection != nil {
             actions.clientTab = stock.hasItems ? clientTab : .documents
@@ -1003,6 +1005,10 @@ struct MainSplitView: View {
             })
         case .exchangeRates:
             ExchangeRatesSheet(stores: stores)
+        case .exportForAccountant(let month):
+            AccountantExportSheet(stores: stores, month: month) { text, problem in
+                report(text, kind: problem ? .problem : .done)
+            }
         case .newClientForDraft(let name):
             // New Client “X”… from the editor's client field: the saved client becomes the draft's.
             ClientFormSheet(clients: clients, customer: nil, initialName: name, onSaved: { id in
@@ -1029,6 +1035,8 @@ enum MainSheet: Identifiable, Hashable {
     case newClientForDraft(String)
     /// File ▸ Exchange Rates.
     case exchangeRates
+    /// File ▸ Export for Accountant…, on the previous month (nil) or on the month of the Overview's row.
+    case exportForAccountant(CalendarDay?)
 
     var id: String {
         switch self {
@@ -1038,6 +1046,7 @@ enum MainSheet: Identifiable, Hashable {
         case .client(let id): "client:" + (id ?? "new")
         case .newClientForDraft: "newClientForDraft"
         case .exchangeRates: "exchangeRates"
+        case .exportForAccountant(let month): "export:" + (month?.isoString ?? "previous")
         }
     }
 }

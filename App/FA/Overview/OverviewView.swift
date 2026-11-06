@@ -26,6 +26,8 @@ struct OverviewView: View {
     /// The Getting started card's "Moving from another Mac? Restore from Backup…" (§2j); nil for the
     /// in-memory database.
     let restoreFromBackup: (@MainActor () -> Void)?
+    /// The export row's Export Again… (§2a, §2h): the export sheet on that month.
+    let exportAgain: (@MainActor (CalendarDay) -> Void)?
 
     @State private var month: CalendarDay
     /// Nil until the first load, so a set-up database never shows the card for a moment.
@@ -37,6 +39,8 @@ struct OverviewView: View {
     /// Per advance in the queue's "tax document missing" group: the received money without an issued tax
     /// document. The states carry only the paid total, which also counts the payments already documented.
     @State private var untaxedReceived: [String: Money] = [:]
+    /// Exported months with documents issued after their export (§2a, queue group 4), latest first.
+    @State private var exportChanges: [MonthExportChange] = []
     @AppStorage(SettingsPane.storageKey) private var settingsPane: SettingsPane = .general
     @AppStorage(BackupSettings.lastSuccessKey) private var backupLastSuccess: Double = 0
     @AppStorage(BackupSettings.lastFailureKey) private var backupFailure: String = ""
@@ -47,7 +51,8 @@ struct OverviewView: View {
          show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
          newDocument: @escaping @MainActor (DocumentKind) -> Void,
          runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool,
-         backUpNow: (@MainActor () -> Void)? = nil, restoreFromBackup: (@MainActor () -> Void)? = nil) {
+         backUpNow: (@MainActor () -> Void)? = nil, restoreFromBackup: (@MainActor () -> Void)? = nil,
+         exportAgain: (@MainActor (CalendarDay) -> Void)? = nil) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
@@ -58,6 +63,7 @@ struct OverviewView: View {
         self.runQueueAction = runQueueAction
         self.backUpNow = backUpNow
         self.restoreFromBackup = restoreFromBackup
+        self.exportAgain = exportAgain
         _month = State(initialValue: CalendarDay(Date(), in: .current).startOfMonth)
     }
 
@@ -88,7 +94,7 @@ struct OverviewView: View {
                             // Placeholder tiles until the first states arrive (screens-flows.md §2a, Loading).
                             todayTiles(figures).redacted(reason: placeholder)
                             queue(figures).redacted(reason: placeholder)
-                            monthBar
+                            MonthBar(month: $month)
                             monthTiles(figures).redacted(reason: placeholder)
                         }
                     }
@@ -105,6 +111,10 @@ struct OverviewView: View {
         .task(id: documents.states) {
             reloadSetup()
             reloadUntaxedReceived()
+            reloadExportChanges()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .monthExported).receive(on: RunLoop.main)) { _ in
+            reloadExportChanges()
         }
         // Saving the company, a bank account or a series in the Settings window changes no document
         // state, so the steps reload when the main window becomes key again.
@@ -142,6 +152,10 @@ struct OverviewView: View {
             }
         }
         untaxedReceived = amounts
+    }
+
+    private func reloadExportChanges() {
+        exportChanges = (try? stores.exports.changedAfterExport()) ?? []
     }
 
     // MARK: Getting started (screens-flows.md §2j, other-04)
@@ -239,26 +253,6 @@ struct OverviewView: View {
         return L.unpaidAdvancesLine(figures.unpaidAdvancesCount, amounts)
     }
 
-    private var monthBar: some View {
-        HStack(spacing: Spacing.m) {
-            Button { month = month.adding(months: -1).startOfMonth } label: {
-                Label { Text(L.previousMonth) } icon: { Image(systemName: "chevron.left") }
-            }
-            .labelStyle(.iconOnly)
-            .help(Text(L.previousMonth))
-            Text(verbatim: monthAndYear(month)).textRole(.screenTitle).frame(minWidth: 160)
-            Button { month = month.adding(months: 1).startOfMonth } label: {
-                Label { Text(L.nextMonth) } icon: { Image(systemName: "chevron.right") }
-            }
-            .labelStyle(.iconOnly)
-            .help(Text(L.nextMonth))
-        }
-    }
-
-    private func monthAndYear(_ day: CalendarDay) -> String {
-        day.midnight(in: .current).formatted(Date.FormatStyle(locale: locale).month(.wide).year())
-    }
-
     private func monthOnly(_ day: CalendarDay) -> String {
         day.midnight(in: .current).formatted(Date.FormatStyle(locale: locale).month(.wide))
     }
@@ -293,7 +287,7 @@ struct OverviewView: View {
             : BackupStatus.queueText(lastSuccess: backupLastSuccess, failure: backupFailure)
         return VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.needsAttention).textRole(.sectionTitle)
-            if figures.queue.isEmpty && backupText == nil {
+            if figures.queue.isEmpty && backupText == nil && exportChanges.isEmpty {
                 Label {
                     Text(L.allCaughtUp)
                 } icon: {
@@ -330,6 +324,12 @@ struct OverviewView: View {
                 .onKeyPress(.return) {
                     guard let item = currentQueueItem(in: figures.queue) else { return .ignored }
                     return runQueueAction(item.kind, item.state.id) ? .handled : .ignored
+                }
+            }
+            // The export rows (group 4) and the backup row (group 5) come last (§2a), each with its button.
+            if let exportAgain {
+                ForEach(exportChanges, id: \.export.month) { change in
+                    ExportQueueRow(change: change, exportAgain: exportAgain)
                 }
             }
             // The backup group comes last (§2a). It is its own row with a button rather than a row of the
@@ -505,6 +505,28 @@ private struct BackupQueueRow: View {
             Text(verbatim: text).textRole(.body)
             Spacer()
             Button { backUpNow() } label: { Text(L.backUpNow) }
+        }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
+    }
+}
+
+/// "October 2026 · 1 document changed after export", with Export Again… (§2a).
+private struct ExportQueueRow: View {
+    let change: MonthExportChange
+    let exportAgain: @MainActor (CalendarDay) -> Void
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        HStack(spacing: Spacing.m) {
+            Image(systemName: "square.and.arrow.up.trianglebadge.exclamationmark")
+                .foregroundStyle(StatusTone.caution.tint)
+                .accessibilityHidden(true)
+            Text(L.exportQueueRow(MonthBar.title(change.export.month, locale: locale),
+                                  AccountantExportFiles.changedText(change.changedCount)))
+                .textRole(.body)
+            Spacer()
+            Button { exportAgain(change.export.month) } label: { Text(L.exportAgain) }
         }
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.s)
