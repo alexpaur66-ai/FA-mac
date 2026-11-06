@@ -244,51 +244,20 @@ struct ClientDetailView: View {
                     figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
                 // The tabs show once a stock item exists; until then the page has its documents only.
+                // §2e "The control": a SwiftUI TabView, never `.segmented`. The macOS 27 `Picker` with
+                // `PickerStyle.tabs` waits for an SDK that has it (CI builds with the macOS 26 SDK).
                 if stock.hasItems {
-                    Picker(selection: $tab) {
-                        ForEach(ClientTab.allCases) { tab in
-                            Text(tab.title).tag(tab)
-                        }
-                    } label: {
-                        Text(L.menuClientTab)
+                    TabView(selection: $tab) {
+                        documentsTable(own)
+                            .tabItem { Text(ClientTab.documents.title) }
+                            .tag(ClientTab.documents)
+                        itemsTable
+                            .tabItem { Text(ClientTab.items.title) }
+                            .tag(ClientTab.items)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
                 } else {
                     Text(L.clientDocuments).textRole(.sectionTitle)
-                }
-                if stock.hasItems, tab == .items {
-                    itemsTable
-                } else {
-                Table(own, selection: $documentSelection) {
-                    TableColumn(Text(L.colStatus)) { row in
-                        StatusBadge(row.badgeInputs, detail: row.badgeDetail(locale: locale))
-                    }
-                    .width(min: 110, ideal: 180)
-                    TableColumn(Text(L.colNumber)) { row in DocumentNumberText(row: row) }
-                    TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName).textRole(.body) }
-                    TableColumn(Text(L.colIssued)) { row in DayText(row.issueDate) }.alignment(.trailing)
-                    TableColumn(Text(L.colDue)) { row in DayText(row.dueDate) }.alignment(.trailing)
-                    TableColumn(Text(L.colTotal)) { row in
-                        if let total = row.totalOrNil {
-                            MoneyText(amount: total, currency: row.currencyCode, locale: locale)
-                        } else {
-                            Text(verbatim: "—").textRole(.amountSecondary)
-                        }
-                    }
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colOpen)) { row in
-                        MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
-                                  role: row.outstanding > 0 ? .amountStrong : .amount)
-                    }
-                    .alignment(.trailing)
-                }
-                .contextMenu(forSelectionType: String.self) { _ in
-                    EmptyView()
-                } primaryAction: { ids in
-                    if ids.count == 1, let id = ids.first { openDocument?(id) }
-                }
+                    documentsTable(own)
                 }
             }
             .padding(Spacing.xl)
@@ -323,6 +292,38 @@ struct ClientDetailView: View {
             ContentUnavailableView {
                 Label { Text(L.noClientSelected) } icon: { Image(systemName: "person.2") }
             }
+        }
+    }
+
+    /// The Documents tab: the client's documents, newest first; ↩ or a double-click shows one in Documents.
+    private func documentsTable(_ own: [DocumentRow]) -> some View {
+        Table(own, selection: $documentSelection) {
+            TableColumn(Text(L.colStatus)) { row in
+                StatusBadge(row.badgeInputs, detail: row.badgeDetail(locale: locale))
+            }
+            .width(min: 110, ideal: 180)
+            TableColumn(Text(L.colNumber)) { row in DocumentNumberText(row: row) }
+            TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName).textRole(.body) }
+            TableColumn(Text(L.colIssued)) { row in DayText(row.issueDate) }.alignment(.trailing)
+            TableColumn(Text(L.colDue)) { row in DayText(row.dueDate) }.alignment(.trailing)
+            TableColumn(Text(L.colTotal)) { row in
+                if let total = row.totalOrNil {
+                    MoneyText(amount: total, currency: row.currencyCode, locale: locale)
+                } else {
+                    Text(verbatim: "—").textRole(.amountSecondary)
+                }
+            }
+            .alignment(.trailing)
+            TableColumn(Text(L.colOpen)) { row in
+                MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
+                          role: row.outstanding > 0 ? .amountStrong : .amount)
+            }
+            .alignment(.trailing)
+        }
+        .contextMenu(forSelectionType: String.self) { _ in
+            EmptyView()
+        } primaryAction: { ids in
+            if ids.count == 1, let id = ids.first { openDocument?(id) }
         }
     }
 

@@ -669,6 +669,7 @@ enum L {
     static let noStockItems = r("stock.empty", "No stock items yet")
     static let noStockItemsDescription = r("stock.emptyDescription", "Add the things you keep on the shelf to see what's running low.")
     static let stockSelectItem = r("stock.selectItem", "Select an item")
+    static let stockItemArchived = r("stock.itemArchived", "Archived: this item is no longer listed in Stock. Its history stays.")
     static let colItem = r("stock.colItem", "Item")
     // The client page's Items tab (screens-flows.md §2n "On the client page")
     static let clientTabItems = r("client.tabItems", "Items")

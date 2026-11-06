@@ -498,8 +498,10 @@ struct MainSplitView: View {
         return actions
     }
 
-    /// An Items row of a client page: the item in Stock.
+    /// An Items row of a client page: the item in Stock, past an earlier search so the list shows it. An
+    /// archived item has no row there; its detail shows read-only (StockItemDetailView).
     private func showStockItem(_ id: String) {
+        stockSearch = ""
         stockSelection = id
         show(.section(.stock))
     }
