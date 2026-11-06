@@ -173,7 +173,7 @@ struct MainSplitView: View {
         case .overview:
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
-                show: show, showOverdue: showOverdue, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
+                show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) })
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
@@ -491,6 +491,16 @@ struct MainSplitView: View {
     }
 
     /// Edit ▸ Jump to Search Field: from Overview it switches to Documents first.
+    /// ↩ on an Overview queue row (other-03): Record Payment… on an overdue document, Create Tax Document
+    /// for the oldest payment without one on an advance.
+    private func runQueueAction(_ kind: OverviewFigures.QueueItem.Kind, documentID: String) {
+        let actions = documentActions(for: documentID)
+        switch kind {
+        case .overdue: actions.paymentAction?()
+        case .taxDocumentMissing: actions.createTaxDocument?()
+        }
+    }
+
     private func jumpToDocumentsSearch() {
         if sidebar.section != .documents { show(.filter(.all)) }
         documentsSearchPresented = true

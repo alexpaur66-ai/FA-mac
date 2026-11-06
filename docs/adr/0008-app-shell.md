@@ -53,8 +53,9 @@ existing data to import.
 - **Settings** is the standard Settings scene: General, Company, Bank accounts, Numbering (defaults
   FV `{YYYY}-{NNNN}` with VS prefix 1 for invoices and final invoices, ZF with prefix 2, DD without a
   prefix), Documents & PDF, VAT defaults, Backup; the window reopens on the pane viewed last. The Overview
-  shows a "Getting started" card until company, bank account and series exist; the ČNB rates are optional,
-  because the rate is typed on the document.
+  shows a "Getting started" card until company, bank account and series exist. *Amended by the lean pass
+  (other-04, other-15):* the card has those three steps only and one Open Settings… button for the first
+  unfinished pane; on a first run it is the Overview's only content, and a data error replaces it.
 - **Accent colour** is the asset-catalog colour `AccentColor` (light, dark, both high-contrast
   variants, the same values as `Brand.accent`), named by `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME`,
   so system controls and the design system agree.
