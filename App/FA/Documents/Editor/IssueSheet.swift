@@ -222,6 +222,11 @@ struct IssueSheet: View {
                             moneyRow(vatLabel(vatRow, afterAdvances: isFinal), isFinal ? vatRow.taxableVAT : vatRow.vat, code)
                         }
                     }
+                    // Lines without Czech VAT beside a Czech-VAT deduction (a final invoice deducting an advance
+                    // taxed under another treatment): the PDF still prints their clause.
+                    ForEach(Array(document.treatments.filter { !$0.chargesVAT }.enumerated()), id: \.offset) { _, treatment in
+                        dashRow(L.vat, clause: clause(for: treatment, language: document.language))
+                    }
                     if document.currency != .czk, model.needsExchangeRate {
                         if let czk = totals.taxableVATCZK {
                             moneyRow(L.vatInCZK, czk, "CZK")
@@ -275,6 +280,17 @@ struct IssueSheet: View {
         }
     }
 
+    /// The clause one line treatment prints (DocumentClause.clauses), nil under Czech VAT.
+    private func clause(for treatment: VATTreatment, language: DocumentLanguage) -> String? {
+        switch treatment {
+        case .taxable: return nil
+        case .reverseChargeEU: return DocumentClause.reverseChargeNotice
+        case .intraCommunityGoods: return DocumentClause.intraCommunitySupply.text(language: language)
+        case .outsideEU: return DocumentClause.outsideScope.text(language: language)
+        case .exempt(let reference): return DocumentClause.exempt(reference: reference).text(language: language)
+        }
+    }
+
     /// "DD 2026-0001, DD 2026-0002", each with the advance's rate on a EUR or USD document.
     private func deductedNumbers(_ document: Document) -> String {
         var seen: Set<String> = []
@@ -309,7 +325,7 @@ struct IssueSheet: View {
     }
 
     /// "24,315 · for 30. 10. 2026 · Typed", or "… · last published" for a rule-6 fallback; the inline form
-    /// shows under "Fix before issuing" while the rate is missing (docs-27).
+    /// shows here while the rate is missing (docs-27 row 6), and "Fix before issuing" names the missing rate.
     @ViewBuilder private func rateLine(_ document: Document) -> some View {
         if let rate = document.exchangeRate {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -324,8 +340,8 @@ struct IssueSheet: View {
                 }
             }
         } else {
-            // The day whose rate is needed (the last working day on a weekend or holiday), as the form prefills it.
-            Text(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale))).textRole(.body)
+            // The form names the day whose rate is needed (the last working day on a weekend or holiday).
+            RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)
         }
     }
 
@@ -379,7 +395,7 @@ struct IssueSheet: View {
 
     @ViewBuilder private func problems(_ document: Document) -> some View {
         let today = CalendarDay(Date(), in: .current)
-        // The missing rate shows as the inline form, not as a second row.
+        // The missing rate is typed in the Rate row's inline form; this section only names it.
         let errors = model.blockingErrors
         let numberingProblem = model.numberingProblem(seriesID: seriesID)
         let rows = checkRows(document)
@@ -404,7 +420,7 @@ struct IssueSheet: View {
                     InlineMessage(L.receiptTotalMismatch(MoneyText.format(payment.amount.amount, currency: payment.amount.currency.code, locale: locale)))
                 }
                 if model.rateIsMissing {
-                    RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)
+                    InlineMessage(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale)))
                 }
                 if model.series.isEmpty {
                     HStack(spacing: Spacing.m) {

@@ -170,8 +170,8 @@ struct NumberCell: Hashable {
     /// Clients by the issue date of their latest document, latest first: the suggestion list shows them
     /// first while nothing is typed (design-system.md §8.4).
     private(set) var recentCustomerIDs: [String] = []
-    /// The total of each client's latest issued invoice or final invoice, for the Issue sheet's
-    /// total-change check (docs-28: a fixed 50 %).
+    /// The total of each client's latest issued invoice or final invoice per currency, keyed by
+    /// `lastInvoiceKey`, for the Issue sheet's total-change check (docs-28: a fixed 50 %).
     private(set) var lastInvoiceTotals: [String: Money] = [:]
     /// The line holding keyboard focus, for the Document menu's line items.
     var focusedLineID: String?
@@ -472,9 +472,11 @@ struct NumberCell: Hashable {
         for summary in summaries {
             guard let customerID = summary.customerID else { continue }
             if summary.status == .issued, summary.kind == .invoice || summary.kind == .finalInvoice,
-               let total = summary.totalGross,
-               lastInvoices[customerID].map({ $0.day <= summary.issueDate }) ?? true {
-                lastInvoices[customerID] = (summary.issueDate, total)
+               let total = summary.totalGross {
+                let key = Self.lastInvoiceKey(customerID, total.currency)
+                if lastInvoices[key].map({ $0.day <= summary.issueDate }) ?? true {
+                    lastInvoices[key] = (summary.issueDate, total)
+                }
             }
             if let known = latest[customerID], known >= summary.issueDate { continue }
             latest[customerID] = summary.issueDate
@@ -1097,7 +1099,7 @@ struct NumberCell: Hashable {
             } else if treatmentDiffers {
                 result.append(String(localized: L.differsTreatment(name, fromTreatment, toTreatment)))
             }
-            if document.kind != .advanceRequest, let last = lastInvoiceTotals[customer.id], last.currency == document.currency,
+            if document.kind != .advanceRequest, let last = lastInvoiceTotals[Self.lastInvoiceKey(customer.id, document.currency)],
                last.amount > 0, let total = totals?.totalGross, Self.changesByMoreThanHalf(total, from: last.amount) {
                 let format = { (amount: Decimal) in MoneyText.format(amount, currency: document.currency.code, locale: .current) }
                 result.append(String(localized: L.totalChangedFromLast(format(total), format(last.amount))))
@@ -1120,6 +1122,12 @@ struct NumberCell: Hashable {
             }
         }
         return result
+    }
+
+    /// The key of `lastInvoiceTotals`: the client and the currency, so an invoice in another currency
+    /// does not hide the client's last one in this currency.
+    private static func lastInvoiceKey(_ customerID: String, _ currency: Currency) -> String {
+        "\(customerID)|\(currency.code)"
     }
 
     /// The fixed total-change check (docs-28; not a setting).

@@ -894,9 +894,9 @@ enum L {
     // MARK: Lean Record Payment (docs-30)
 
     static let outcomePaid = r("recordPayment.outcomePaid", "Document will be: Paid")
-    static func outcomePartlyPaid(_ left: String) -> LocalizedStringResource { r("recordPayment.outcomePartlyPaid", "Document will be: Partly paid – \(left) left") }
+    static func outcomePartlyPaid(_ left: String) -> LocalizedStringResource { r("recordPayment.outcomePartlyPaid", "Partly paid – \(left) left") }
     static func outcomeOverpaid(_ surplus: String) -> LocalizedStringResource {
-        r("recordPayment.outcomeOverpaid", "Document will be: Overpaid by \(surplus) – kept as client credit")
+        r("recordPayment.outcomeOverpaid", "Overpaid by \(surplus) – kept as client credit")
     }
     static func paymentBeforeIssueDate(_ day: String) -> LocalizedStringResource {
         r("recordPayment.beforeIssueDate", "The payment date is before the document's issue date, \(day)")
