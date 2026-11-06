@@ -175,7 +175,8 @@ struct MainSplitView: View {
         case .overview:
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
-                show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) })
+                show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) },
+                backUpNow: stores.databaseURL == nil ? nil : backUpNow)
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
@@ -277,6 +278,15 @@ struct MainSplitView: View {
         report(ErrorText.message(error, locale: locale), kind: .problem)
     }
 
+    /// File ▸ Back Up Now and the Overview's backup row: "Backup made at 9:02", or why it failed (§2h).
+    private func backUpNow() {
+        switch BackupService.backUp(stores) {
+        case .success?: report(L.backupMadeAt(BackupStatus.timeText(Date(), locale: locale)))
+        case .failure(let error)?: report(L.backupFailed(ErrorText.message(error, locale: locale)), kind: .problem)
+        case nil: break
+        }
+    }
+
     // MARK: Selection and actions
 
     /// The one document the detail column shows in the current section, if any.
@@ -325,6 +335,7 @@ struct MainSplitView: View {
             showGettingStarted: showGettingStarted)
         if let url = stores.databaseURL {
             actions.showDataFolder = { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            actions.backUpNow = backUpNow
         }
         actions.currentFilter = sidebar.section == .documents ? sidebar.documentFilter : nil
         if sidebar.section == .documents {

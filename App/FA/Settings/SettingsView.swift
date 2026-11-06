@@ -39,7 +39,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $pane) {
-            GeneralPane()
+            GeneralPane(databaseURL: stores.databaseURL)
                 .tabItem { Label(String(localized: L.settingsGeneral), systemImage: "gearshape") }
                 .tag(SettingsPane.general)
             CompanyPane(stores: stores)
@@ -60,11 +60,18 @@ struct SettingsView: View {
 
 /// The PDF folder (set-03, set-04): a chosen folder means each issued document's PDF is saved there at
 /// Issue, as ‹folder›/‹year›/‹number› ‹client›.pdf; without one the PDF stays in the app until Save PDF….
-/// The folder is a security-scoped bookmark the user grants through the open panel (ADR 0010). The backup
-/// folder joins this pane with the backup step.
+/// The folder is a security-scoped bookmark the user grants through the open panel (ADR 0010). Under it,
+/// the backup folder (§2h): a "Backups" folder next to the data file unless another was chosen, with the
+/// last backup's outcome in its caption.
 struct GeneralPane: View {
+    /// The data file; nil for the in-memory database, which has no backups.
+    let databaseURL: URL?
     @State private var folderURL: URL?
     @State private var message: String?
+    @State private var backupFolderURL: URL?
+    @State private var backupMessage: String?
+    @AppStorage(BackupSettings.lastSuccessKey) private var backupLastSuccess: Double = 0
+    @AppStorage(BackupSettings.lastFailureKey) private var backupFailure: String = ""
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -90,9 +97,42 @@ struct GeneralPane: View {
                     InlineMessage(message)
                 }
             }
+            if databaseURL != nil {
+                Section {
+                    LabeledContent {
+                        VStack(alignment: .trailing, spacing: Spacing.xs) {
+                            if let backupFolderURL {
+                                Text(verbatim: PDFSettings.displayPath(backupFolderURL)).textRole(.caption).textSelection(.enabled)
+                            }
+                            Button { chooseBackupFolder() } label: { Text(L.chooseFolder) }
+                        }
+                    } label: {
+                        Text(L.backupFolder)
+                    }
+                    Text(verbatim: BackupStatus.caption(lastSuccess: backupLastSuccess, failure: backupFailure, locale: locale))
+                        .textRole(.caption)
+                    if let backupMessage {
+                        InlineMessage(backupMessage)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
-        .onAppear { folderURL = PDFSettings.folderURL() }
+        .onAppear {
+            folderURL = PDFSettings.folderURL()
+            backupFolderURL = BackupSettings.folderURL(databaseURL: databaseURL)
+        }
+    }
+
+    private func chooseBackupFolder() {
+        do {
+            if let url = try BackupSettings.chooseFolder() {
+                backupFolderURL = url
+                backupMessage = nil
+            }
+        } catch {
+            backupMessage = ErrorText.message(error, locale: locale)
+        }
     }
 
     /// "Issued documents are saved as 2026/FV 2026-0042 Acme GmbH.pdf." with the current year, or the line

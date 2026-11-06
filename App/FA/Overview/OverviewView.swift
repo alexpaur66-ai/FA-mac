@@ -21,6 +21,8 @@ struct OverviewView: View {
     /// ↩ on a queue row: Record Payment… for an overdue document, Create Tax Document for a payment
     /// without one (other-03). False when the row has no action, so ↩ is not swallowed.
     let runQueueAction: @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool
+    /// The backup row's Back Up Now (§2a, §2h); nil for the in-memory database, which shows no backup row.
+    let backUpNow: (@MainActor () -> Void)?
 
     @State private var month: CalendarDay
     /// Nil until the first load, so a set-up database never shows the card for a moment.
@@ -33,13 +35,16 @@ struct OverviewView: View {
     /// document. The states carry only the paid total, which also counts the payments already documented.
     @State private var untaxedReceived: [String: Money] = [:]
     @AppStorage(SettingsPane.storageKey) private var settingsPane: SettingsPane = .general
+    @AppStorage(BackupSettings.lastSuccessKey) private var backupLastSuccess: Double = 0
+    @AppStorage(BackupSettings.lastFailureKey) private var backupFailure: String = ""
     @Environment(\.openSettings) private var openSettings
     @Environment(\.locale) private var locale
 
     init(stores: Stores, documents: DocumentListModel, selection: Binding<String?>, forced: Binding<Bool>,
          show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
          newDocument: @escaping @MainActor (DocumentKind) -> Void,
-         runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool) {
+         runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool,
+         backUpNow: (@MainActor () -> Void)? = nil) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
@@ -48,6 +53,7 @@ struct OverviewView: View {
         self.showOverdue = showOverdue
         self.newDocument = newDocument
         self.runQueueAction = runQueueAction
+        self.backUpNow = backUpNow
         _month = State(initialValue: CalendarDay(Date(), in: .current).startOfMonth)
     }
 
@@ -274,16 +280,18 @@ struct OverviewView: View {
     /// A keyboard list: ↑↓ select, ↩ runs the selected row's action; no other key acts. Selecting a row
     /// shows its document in the detail column, so ⌘R and the Document menu work on it.
     private func queue(_ figures: OverviewFigures) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
+        let backupText = backUpNow == nil ? nil
+            : BackupStatus.queueText(lastSuccess: backupLastSuccess, failure: backupFailure)
+        return VStack(alignment: .leading, spacing: Spacing.s) {
             Text(L.needsAttention).textRole(.sectionTitle)
-            if figures.queue.isEmpty {
+            if figures.queue.isEmpty && backupText == nil {
                 Label {
                     Text(L.allCaughtUp)
                 } icon: {
                     Image(systemName: "checkmark.circle").foregroundStyle(Color.secondary)
                 }
                 .textRole(.body)
-            } else {
+            } else if !figures.queue.isEmpty {
                 let current = currentQueueItem(in: figures.queue)?.id
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(figures.queue) { item in
@@ -314,6 +322,11 @@ struct OverviewView: View {
                     guard let item = currentQueueItem(in: figures.queue) else { return .ignored }
                     return runQueueAction(item.kind, item.state.id) ? .handled : .ignored
                 }
+            }
+            // The backup group comes last (§2a). It is its own row with a button rather than a row of the
+            // keyboard list above, whose selection is a document's.
+            if let backupText, let backUpNow {
+                BackupQueueRow(text: backupText, backUpNow: backUpNow)
             }
         }
     }
@@ -467,6 +480,25 @@ private struct KPIMoney: View {
                 }
             }
         }
+    }
+}
+
+/// "Backup failed: ‹reason›", "No backup yet" or "Last backup 9 days ago", with Back Up Now (§2a).
+private struct BackupQueueRow: View {
+    let text: String
+    let backUpNow: @MainActor () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.m) {
+            Image(systemName: "externaldrive.badge.exclamationmark")
+                .foregroundStyle(StatusTone.caution.tint)
+                .accessibilityHidden(true)
+            Text(verbatim: text).textRole(.body)
+            Spacer()
+            Button { backUpNow() } label: { Text(L.backUpNow) }
+        }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
     }
 }
 

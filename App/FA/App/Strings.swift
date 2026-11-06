@@ -658,6 +658,26 @@ enum L {
     // Exports and the database error
     static let backUpNow = r("exports.backUpNow", "Back Up Now")
     static let restoreFromBackup = r("exports.restore", "Restore from Backup…")
+    // Backups (screens-flows.md §2h, §2a, §2i)
+    static let backupFolder = r("backup.folder", "Backup folder")
+    static let backupFolderPrompt = r("backup.folderPrompt", "Choose the folder where backups are kept.")
+    /// The General caption: "Daily and on quit; the last 30 are kept. Last backup: today 9:02."
+    static func backupCaption(_ last: String) -> LocalizedStringResource {
+        r("backup.caption", "Daily and on quit; the last 30 are kept. Last backup: \(last).")
+    }
+    static let backupCaptionNone = r("backup.captionNone", "Daily and on quit; the last 30 are kept. No backup yet.")
+    static func backupCaptionFailed(_ reason: String, _ lastDay: String) -> LocalizedStringResource {
+        r("backup.captionFailed", "Daily and on quit; the last 30 are kept. Last backup failed: \(reason) · last successful \(lastDay)")
+    }
+    static func backupCaptionFailedNever(_ reason: String) -> LocalizedStringResource {
+        r("backup.captionFailedNever", "Daily and on quit; the last 30 are kept. Last backup failed: \(reason)")
+    }
+    /// "today 9:02"; another day reads "3. 11. 2026 9:02".
+    static func backupWhen(_ day: String, _ time: String) -> LocalizedStringResource { r("backup.when", "\(day) \(time)") }
+    static func backupMadeAt(_ time: String) -> LocalizedStringResource { r("backup.madeAt", "Backup made at \(time)") }
+    static func backupFailed(_ reason: String) -> LocalizedStringResource { r("backup.failed", "Backup failed: \(reason)") }
+    static let backupNone = r("backup.none", "No backup yet")
+    static func backupDaysAgo(_ days: Int) -> LocalizedStringResource { r("backup.daysAgo", "Last backup \(days) days ago") }
     static let menuExportAccountant = r("menu.exportAccountant", "Export for Accountant…")
 
     // Follow-ups (PR 18): the setup card, the tiles, the detail banners, the client header, the series sheet
