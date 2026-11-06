@@ -34,13 +34,15 @@ struct OverviewView: View {
     @Environment(\.locale) private var locale
 
     init(stores: Stores, documents: DocumentListModel, selection: Binding<String?>, forced: Binding<Bool>,
-         show: @escaping @MainActor (SidebarItem) -> Void, newDocument: @escaping @MainActor (DocumentKind) -> Void,
+         show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
+         newDocument: @escaping @MainActor (DocumentKind) -> Void,
          newClient: @escaping @MainActor () -> Void, importRates: @escaping @MainActor () -> Void) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
         self._forced = forced
         self.show = show
+        self.showOverdue = showOverdue
         self.newDocument = newDocument
         self.newClient = newClient
         self.importRates = importRates
