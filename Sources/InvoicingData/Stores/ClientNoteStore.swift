@@ -107,13 +107,16 @@ public struct ClientNoteStore: Sendable {
         }
     }
 
-    /// Undo of a delete: the note comes back as it was, under its id. Nothing happens when its client is gone.
-    public func restore(_ note: ClientNote, now: Date = Date()) throws {
-        try database.queue.write { db in
+    /// Undo of a delete: the note comes back as it was, under its id. Nothing happens when its client is gone
+    /// or the note is already there; false then, so the Undo registers no Redo.
+    @discardableResult
+    public func restore(_ note: ClientNote, now: Date = Date()) throws -> Bool {
+        try database.queue.write { db -> Bool in
             guard try CustomerRecord.exists(db, key: note.customerID),
-                  try !ClientNoteRecord.exists(db, key: note.id) else { return }
+                  try !ClientNoteRecord.exists(db, key: note.id) else { return false }
             try ClientNoteRecord(note).insert(db)
             try AuditLog.append(db, entity: "clientNote", id: note.id, action: "restore", at: Timestamps.string(now))
+            return true
         }
     }
 

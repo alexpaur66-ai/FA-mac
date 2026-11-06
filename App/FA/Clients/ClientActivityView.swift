@@ -48,9 +48,13 @@ struct ClientActivityEntry: Identifiable, Hashable {
         return midnight.addingTimeInterval(max(0, written.timeIntervalSince(writtenMidnight)))
     }
 
-    /// Newest first; equal times by id, so the order never flickers.
+    /// Newest first; equal times by id, so the order never flickers. Two events by their audit row (the later
+    /// one first), as numbers: "event:10" is newer than "event:9".
     static func newestFirst(_ lhs: ClientActivityEntry, _ rhs: ClientActivityEntry) -> Bool {
         if lhs.sortDate != rhs.sortDate { return lhs.sortDate > rhs.sortDate }
+        if case .event(let left, _, _, _) = lhs.kind, case .event(let right, _, _, _) = rhs.kind, left.id != right.id {
+            return left.id > right.id
+        }
         return lhs.id > rhs.id
     }
 }
@@ -103,7 +107,7 @@ final class ClientActivityModel {
         do {
             let note = try notes.add(customerID: customerID, text: text, day: day)
             changed()
-            register(name: L.undoAddNote) { model in model.remove(note) }
+            register(name: L.undoAddNote) { model in model.remove(note, name: L.undoAddNote) }
             return true
         } catch {
             self.error = ErrorText.message(error)
@@ -113,6 +117,8 @@ final class ClientActivityModel {
 
     /// The edit sheet's Save: nil when saved, else the reason for the sheet to show.
     func update(_ note: ClientNote, text: String, day: CalendarDay, undoManager: UndoManager?) -> String? {
+        // Saved unchanged: nothing to write and nothing to undo (the stored text is already trimmed).
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == note.text && day == note.day { return nil }
         self.undoManager = undoManager
         do {
             try change(id: note.id, text: text, day: day)
@@ -125,7 +131,7 @@ final class ClientActivityModel {
     /// ⌫ or Delete Note: no confirmation, an Undo instead (screens-flows.md §4).
     func delete(_ note: ClientNote, undoManager: UndoManager?) {
         self.undoManager = undoManager
-        remove(note)
+        remove(note, name: L.undoDeleteNote)
     }
 
     /// Writes the text and day; the Undo writes back what was there, and its Redo this again.
@@ -141,21 +147,23 @@ final class ClientActivityModel {
         }
     }
 
-    private func remove(_ note: ClientNote) {
+    /// Deletes the note; `name` is the action the Undo or Redo this registers names (Add Note or Delete Note).
+    private func remove(_ note: ClientNote, name: LocalizedStringResource) {
         do {
             try notes.delete(id: note.id)
             changed()
-            register(name: L.undoDeleteNote) { model in model.putBack(note) }
+            register(name: name) { model in model.putBack(note, name: name) }
         } catch {
             self.error = ErrorText.message(error)
         }
     }
 
-    private func putBack(_ note: ClientNote) {
+    /// Puts the note back; registers nothing when the store did not (its client is gone, or it is already there).
+    private func putBack(_ note: ClientNote, name: LocalizedStringResource) {
         do {
-            try notes.restore(note)
+            guard try notes.restore(note) else { return }
             changed(highlighting: note.id)
-            register(name: L.undoDeleteNote) { model in model.remove(note) }
+            register(name: name) { model in model.remove(note, name: name) }
         } catch {
             self.error = ErrorText.message(error)
         }
@@ -195,6 +203,10 @@ struct ClientActivityView: View {
     @State private var pickedDay: Date?
     @State private var selection: Set<String> = []
     @State private var editing: ClientNote?
+    /// The model's last highlight, applied by the reload that follows it, once the row is among `entries`.
+    @State private var pendingHighlight: ClientActivityModel.Highlight?
+    /// The row the list scrolls to once it shows the reloaded entries.
+    @State private var scrollTarget: String?
     @FocusState private var composerFocused: Bool
     @Environment(\.undoManager) private var undoManager
     @Environment(\.locale) private var locale
@@ -217,6 +229,10 @@ struct ClientActivityView: View {
             } else {
                 timeline
             }
+        }
+        // Here rather than on the list, which is not there while the tab is empty (the Undo of its only note).
+        .onChange(of: model.highlight) { _, highlight in
+            pendingHighlight = highlight
         }
         .task(id: LoadKey(customerID: customerID, version: model.version, documents: documents)) { load() }
         .onChange(of: model.pendingFocus, initial: true) { _, client in
@@ -268,10 +284,11 @@ struct ClientActivityView: View {
             }
             // ⌫ deletes the selected note; any other selection installs no action, so Delete is disabled.
             .onDeleteCommand(perform: deleteSelectedNote)
-            .onChange(of: model.highlight) { _, highlight in
-                guard let highlight else { return }
-                selection = [highlight.entryID]
-                withAnimation { proxy.scrollTo(highlight.entryID) }
+            // Set by the reload, so the row is in the list; initial, for a list that appears with it.
+            .onChange(of: scrollTarget, initial: true) { _, target in
+                guard let target else { return }
+                scrollTarget = nil
+                withAnimation { proxy.scrollTo(target) }
             }
         }
     }
@@ -346,6 +363,14 @@ struct ClientActivityView: View {
             loadError = ErrorText.message(error, locale: locale)
         }
         selection = selection.filter { id in entries.contains { $0.id == id } }
+        // The note a change or an Undo brought back: selected and scrolled to now that it is a row (§8.15).
+        if let highlight = pendingHighlight {
+            pendingHighlight = nil
+            if entries.contains(where: { $0.id == highlight.entryID }) {
+                selection = [highlight.entryID]
+                scrollTarget = highlight.entryID
+            }
+        }
     }
 }
 

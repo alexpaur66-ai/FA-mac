@@ -62,10 +62,10 @@ import InvoicingCore
         let deleted = try store.delete(id: "n1")
         #expect(deleted == note)
         #expect(try store.notes(customerID: "cust-cz").isEmpty)
-        try store.restore(deleted)
+        #expect(try store.restore(deleted) == true)
         #expect(try store.notes(customerID: "cust-cz") == [note])
         // A second restore changes nothing.
-        try store.restore(deleted)
+        #expect(try store.restore(deleted) == false)
         #expect(try store.notes(customerID: "cust-cz").count == 1)
         let actions = try AuditLog(database).events(entity: "clientNote", id: "n1").map(\.action)
         #expect(actions == ["create", "delete", "restore"])
@@ -78,7 +78,7 @@ import InvoicingCore
         try CustomerStore(database).delete(id: "cust-de")
         #expect(try store.notes(customerID: "cust-de").isEmpty)
         // Undo of a note's delete does nothing once its client is gone.
-        try store.restore(note)
+        #expect(try store.restore(note) == false)
         #expect(try store.notes(customerID: "cust-de").isEmpty)
     }
 
