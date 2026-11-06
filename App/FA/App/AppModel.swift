@@ -1,5 +1,6 @@
 // The app model: opens the one database file and holds the stores (ADR 0008).
 
+import AppKit
 import Foundation
 import InvoicingCore
 import InvoicingData
@@ -36,6 +37,9 @@ final class AppModel {
     /// The database file, known even when opening it failed, so the error view can show the folder.
     let databaseURL: URL?
 
+    /// The quit observer that makes the on-quit backup (screens-flows.md §2h).
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+
     init() {
         let saved = CGFloat(UserDefaults.standard.double(forKey: Self.textScaleKey))
         textScale = Self.textScaleSteps.contains(saved) ? saved : 1
@@ -59,6 +63,14 @@ final class AppModel {
             openError = String(describing: error)
         }
         databaseURL = url
+        if let stores {
+            // A backup on the first launch of each day and on quit (§2h, set-05).
+            BackupService.backUpOnFirstLaunchOfDay(stores)
+            terminationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { _ = BackupService.backUp(stores) }
+            }
+        }
     }
 
     func setTextScale(_ scale: CGFloat) {

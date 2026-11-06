@@ -80,6 +80,8 @@ struct MainActions {
     /// Help ▸ Getting Started: the Overview with the setup card shown again.
     var showGettingStarted: @MainActor () -> Void
     var showDataFolder: (@MainActor () -> Void)?
+    /// File ▸ Back Up Now; nil for the in-memory database.
+    var backUpNow: (@MainActor () -> Void)?
     /// The Documents filter shown, for the checkmark in View ▸ Filter ▸; nil outside Documents.
     var currentFilter: DocumentSmartFilter?
     /// View ▸ Sort By ▸; nil where no table can sort from the menu yet.
@@ -150,10 +152,10 @@ struct AppCommands: Commands {
             Button {} label: { Text(L.menuExportAccountant) }
                 .disabled(true)
             Divider()
-            // The backup step brings these two; listed, disabled, until then. Show Data Folder is the one
-            // place the data file is reachable from.
-            Button {} label: { Text(L.backUpNow) }
-                .disabled(true)
+            // Back Up Now runs at once (§2h); Restore from Backup… comes with the restore step and stays
+            // disabled until then. Show Data Folder is the one place the data file is reachable from.
+            Button { actions?.backUpNow?() } label: { Text(L.backUpNow) }
+                .disabled(actions?.backUpNow == nil)
             Button {} label: { Text(L.restoreFromBackup) }
                 .disabled(true)
             Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
