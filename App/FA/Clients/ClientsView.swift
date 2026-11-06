@@ -193,16 +193,16 @@ struct ClientsView: View {
     }
 }
 
-/// The client page's tabs (screens-flows.md §2e): Documents, and Items once a stock item exists (§2n). Activity
-/// comes with the client notes.
+/// The client page's tabs (screens-flows.md §2e): Documents · Activity, and Items once a stock item exists (§2n).
 enum ClientTab: String, CaseIterable, Identifiable {
-    case documents, items
+    case documents, activity, items
 
     var id: Self { self }
 
     var title: LocalizedStringResource {
         switch self {
         case .documents: L.clientDocuments
+        case .activity: L.clientTabActivity
         case .items: L.clientTabItems
         }
     }
@@ -213,6 +213,8 @@ struct ClientDetailView: View {
     let documents: DocumentListModel
     /// The window's stock, for the Items tab (§2n "On the client page").
     let stock: StockModel
+    /// The window's notes and activity, for the Activity tab.
+    let activity: ClientActivityModel
     @Binding var tab: ClientTab
     let customerID: String
     let editClient: @MainActor () -> Void
@@ -233,8 +235,8 @@ struct ClientDetailView: View {
     var body: some View {
         if let customer = clients.customer(id: customerID) {
             let row = ClientRow(customer: customer, states: documents.states)
-            let own = documents.states.filter { $0.summary.customerID == customerID }
-                .map { DocumentRow(state: $0, today: documents.today) }
+            let ownStates = documents.states.filter { $0.summary.customerID == customerID }
+            let own = ownStates.map { DocumentRow(state: $0, today: documents.today) }
                 .sorted(using: [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)])
             VStack(alignment: .leading, spacing: Spacing.l) {
                 header(customer)
@@ -243,21 +245,24 @@ struct ClientDetailView: View {
                     figure(L.clientOpenBalance, row.open, overdue: row.overdue)
                     figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
-                // The tabs show once a stock item exists; until then the page has its documents only.
                 // §2e "The control": a SwiftUI TabView, never `.segmented`. The macOS 27 `Picker` with
-                // `PickerStyle.tabs` waits for an SDK that has it (CI builds with the macOS 26 SDK).
-                if stock.hasItems {
-                    TabView(selection: $tab) {
-                        documentsTable(own)
-                            .tabItem { Text(ClientTab.documents.title) }
-                            .tag(ClientTab.documents)
+                // `PickerStyle.tabs` waits for an SDK that has it (CI builds with the macOS 26 SDK). Items
+                // comes third once a stock item exists.
+                TabView(selection: shownTab) {
+                    documentsTable(own)
+                        .tabItem { Text(ClientTab.documents.title) }
+                        .tag(ClientTab.documents)
+                    ClientActivityView(model: activity, customerID: customerID,
+                                       documents: ownStates,
+                                       openDocument: openDocument)
+                        .id(customerID)
+                        .tabItem { Text(ClientTab.activity.title) }
+                        .tag(ClientTab.activity)
+                    if stock.hasItems {
                         itemsTable
                             .tabItem { Text(ClientTab.items.title) }
                             .tag(ClientTab.items)
                     }
-                } else {
-                    Text(L.clientDocuments).textRole(.sectionTitle)
-                    documentsTable(own)
                 }
             }
             .padding(Spacing.xl)
@@ -293,6 +298,11 @@ struct ClientDetailView: View {
                 Label { Text(L.noClientSelected) } icon: { Image(systemName: "person.2") }
             }
         }
+    }
+
+    /// The tab shown: Items falls back to Documents while no stock item exists.
+    private var shownTab: Binding<ClientTab> {
+        Binding(get: { tab == .items && !stock.hasItems ? .documents : tab }, set: { tab = $0 })
     }
 
     /// The Documents tab: the client's documents, newest first; ↩ or a double-click shows one in Documents.

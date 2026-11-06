@@ -96,6 +96,8 @@ struct MainActions {
     /// File ▸ Edit Client “…”…: the client selected in Clients, or the client of the selected document.
     var editClientName: String?
     var editClient: (@MainActor () -> Void)?
+    /// File ▸ Add Note to “…”…: the same client's Activity tab with the composer focused.
+    var addNote: (@MainActor () -> Void)?
     /// View ▸ Show/Hide Preview on a draft in the editor; `previewShown` picks the title.
     var togglePreview: (@MainActor () -> Void)?
     var previewShown = false
@@ -165,6 +167,11 @@ struct AppCommands: Commands {
                 Text(actions?.editClientName.map { L.editClientNamed($0) } ?? L.editClientEmpty)
             }
             .disabled(actions?.editClient == nil)
+            // No shortcut on purpose (screens-flows.md §3.1).
+            Button { actions?.addNote?() } label: {
+                Text(actions?.editClientName.map { L.menuAddNote($0) } ?? L.menuAddNoteEmpty)
+            }
+            .disabled(actions?.addNote == nil)
             Divider()
             Button { actions?.showExchangeRates() } label: { Text(L.menuRates) }
                 .disabled(actions == nil)

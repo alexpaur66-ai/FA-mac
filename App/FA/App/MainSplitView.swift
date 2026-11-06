@@ -15,6 +15,8 @@ struct MainSplitView: View {
     @State private var documents: DocumentListModel
     @State private var clients: ClientsModel
     @State private var stock: StockModel
+    /// The client notes and the Activity tab; kept with the window so an Undo outlives the page.
+    @State private var activity: ClientActivityModel
     @SceneStorage("stock.selection") private var stockSelection: String?
     @State private var stockSearch = ""
     /// The selections are kept per window (screens-flows.md §1.1, Restore); Documents as joined ids.
@@ -79,6 +81,7 @@ struct MainSplitView: View {
         _documents = State(initialValue: DocumentListModel(stores: stores))
         _clients = State(initialValue: ClientsModel(stores: stores))
         _stock = State(initialValue: StockModel(stores: stores))
+        _activity = State(initialValue: ClientActivityModel(stores: stores))
     }
 
     private var sidebarSelection: Binding<SidebarItem?> {
@@ -245,7 +248,8 @@ struct MainSplitView: View {
         case .clients:
             if let id = clientSelection {
                 let last = lastInvoice(ofClient: id)
-                ClientDetailView(clients: clients, documents: documents, stock: stock, tab: $clientTab, customerID: id,
+                ClientDetailView(clients: clients, documents: documents, stock: stock, activity: activity,
+                                 tab: $clientTab, customerID: id,
                                  editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) },
                                  lastInvoiceNumber: last?.summary.number,
                                  duplicateLastInvoice: duplicateAction(last),
@@ -382,7 +386,7 @@ struct MainSplitView: View {
         actions.exportForAccountant = { sheet = .exportForAccountant(nil) }
         // View ▸ Client Tab ▸, while a client page is shown (§1.4); Items once a stock item exists.
         if sidebar.section == .clients, clientSelection != nil {
-            actions.clientTab = stock.hasItems ? clientTab : .documents
+            actions.clientTab = clientTab == .items && !stock.hasItems ? .documents : clientTab
             actions.hasStockItems = stock.hasItems
             actions.showClientTab = { tab in clientTab = tab }
         }
@@ -412,6 +416,7 @@ struct MainSplitView: View {
         if let clientID = menuClientID, let customer = clients.customer(id: clientID) {
             actions.editClientName = customer.party.name
             actions.editClient = { sheet = .client(clientID) }
+            actions.addNote = { addNote(customerID: clientID) }
         }
         // Client context (screens-flows.md §1.4): the New items name and prefill the selected client, and
         // Duplicate copies the client's last invoice.
@@ -629,6 +634,15 @@ struct MainSplitView: View {
         show(.filter(.all))
         documentsSearch = ""
         documentSelection = [id]
+    }
+
+    /// File ▸ Add Note to “…”…: the client's page on its Activity tab, with "Add a note…" focused (§2e).
+    private func addNote(customerID: String) {
+        clientsSearch = ""
+        clientSelection = customerID
+        clientTab = .activity
+        activity.pendingFocus = customerID
+        show(.section(.clients))
     }
 
     private func showClient(ofDocument id: String) {

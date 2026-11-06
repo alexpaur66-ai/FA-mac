@@ -563,7 +563,7 @@ struct DocumentActivityList: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             ForEach(events.reversed()) { event in
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(verbatim: activity(event, currency: currency)).textRole(.body).textSelection(.enabled)
+                    Text(verbatim: Self.sentence(event, currency: currency, locale: locale)).textRole(.body).textSelection(.enabled)
                     Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
                 }
                 .help(Text(verbatim: Self.timestamp(event.at, locale: locale, full: true)))
@@ -574,8 +574,8 @@ struct DocumentActivityList: View {
     }
 
     /// One audit event as a sentence, with no kind symbol (design-system.md §8.15). An action the shell
-    /// does not know shows its key.
-    private func activity(_ event: AuditEvent, currency: Currency) -> String {
+    /// does not know shows its key. The client's Activity tab uses the same sentences (§2e).
+    static func sentence(_ event: AuditEvent, currency: Currency, locale: Locale) -> String {
         let details = event.details ?? [:]
         func paymentKind() -> String {
             let raw = details["kind"] ?? ""
@@ -616,7 +616,7 @@ struct DocumentActivityList: View {
 
     /// The stored ISO 8601 timestamp in the UI locale (with seconds in the tooltip); the raw text when it
     /// cannot be parsed.
-    private static func timestamp(_ iso: String, locale: Locale, full: Bool = false) -> String {
+    static func timestamp(_ iso: String, locale: Locale, full: Bool = false) -> String {
         guard let date = try? Date(iso, strategy: .iso8601) else { return iso }
         return date.formatted(Date.FormatStyle(date: .numeric, time: full ? .standard : .shortened, locale: locale))
     }

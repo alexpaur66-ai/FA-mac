@@ -390,6 +390,19 @@ enum Schema {
                 t.column("documents", .text).notNull()
             }
         }
+
+        // v8 (screens-flows.md §2e, other-07): notes on a client's Activity tab, each dated by the day it is
+        // about (today by default, editable). A client's notes go with the client.
+        migrator.registerMigration("v8") { db in
+            try db.create(table: "clientNote") { t in
+                t.column("id", .text).primaryKey()
+                t.column("customerID", .text).notNull().indexed().references("customer", onDelete: .cascade)
+                t.column("day", .text).notNull()
+                t.column("text", .text).notNull()
+                t.column("createdAt", .text).notNull()
+                t.column("updatedAt", .text).notNull()
+            }
+        }
         return migrator
     }
 }

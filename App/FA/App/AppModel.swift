@@ -21,6 +21,7 @@ struct Stores: Sendable {
     var audit: AuditLog { AuditLog(database) }
     var stock: StockStore { StockStore(database) }
     var exports: ExportStore { ExportStore(database) }
+    var clientNotes: ClientNoteStore { ClientNoteStore(database) }
 }
 
 @MainActor @Observable
