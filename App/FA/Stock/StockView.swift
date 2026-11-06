@@ -554,7 +554,10 @@ struct StockQuantitySheet: View {
 /// New Stock Item…: name, unit, on hand now (a count for today) and reorder at.
 struct NewStockItemSheet: View {
     let stock: StockModel
-    /// The item was added: the list selects it.
+    /// Opened from a draft's "Add “…” to Stock…": the typed name and the line's unit.
+    var initialName = ""
+    var initialUnit = "ks"
+    /// The item was added: the list selects it, or the draft's line links to it.
     let added: @MainActor (StockItem) -> Void
 
     @State private var name = ""
@@ -596,7 +599,11 @@ struct NewStockItemSheet: View {
         }
         .padding(Spacing.xl)
         .formSheetSized(minWidth: 420, maxWidth: 520)
-        .onAppear { nameFocused = true }
+        .onAppear {
+            if name.isEmpty { name = initialName }
+            if !initialUnit.isEmpty { unit = initialUnit }
+            nameFocused = true
+        }
     }
 
     /// A name a listed item already has, ignoring case, keeps Add Item disabled (§2n).

@@ -48,6 +48,8 @@ enum FixIt {
 struct DraftEditorView: View {
     let stores: Stores
     let documents: DocumentListModel
+    /// The window's stock, for the Description suggestions and New Stock Item… (screens-flows.md §2c, §2n).
+    let stock: StockModel
     let model: DraftEditorModel
     let onIssued: @MainActor (Document) -> Void
     /// New Client “X”… from the client field: the New Client sheet opens with the typed name.
@@ -68,6 +70,9 @@ struct DraftEditorView: View {
     @State private var notesExpanded = false
     /// The width the line grid fills when its columns need less (it scrolls sideways when they need more).
     @State private var gridViewportWidth: CGFloat = 0
+    /// "Add “…” to Stock…" from a line's Description: New Stock Item… opens prefilled and links that line.
+    @State private var newStockItem: NewStockItemForLine?
+    @Environment(\.undoManager) private var undoManager
 
     private static let units = ["hod", "h", "ks", "pcs", "den", "day", "MD", "km"]
     private static let markerWidth: CGFloat = 20
@@ -163,6 +168,16 @@ struct DraftEditorView: View {
         }
         .navigationTitle(Text(verbatim: title))
         .navigationSubtitle(Text(subtitle))
+        .onAppear { model.undoManager = undoManager }
+        // An item deleted, or brought back by Undo, changes the links of the draft's lines.
+        .onChange(of: stock.states) { _, _ in model.refreshStockLinks() }
+        .sheet(item: $newStockItem) { request in
+            NewStockItemSheet(stock: stock, initialName: request.name, initialUnit: request.unit) { item in
+                // The draft stays in place: the line takes the new item, and its Qty takes focus.
+                model.linkLine(request.lineID, to: item)
+                Task { @MainActor in focus = .quantity(request.lineID) }
+            }
+        }
         .toolbar {
             // Fixed items (design-system.md §8.11): the Preview toggle, then the one prominent action,
             // Issue…, text only and declared last so it is trailing. ⌘D duplicates from the File menu.
@@ -645,6 +660,9 @@ struct DraftEditorView: View {
                         .onChange(of: proxy.size.width) { _, width in gridViewportWidth = width }
                 }
             }
+            if let stockError = model.stockError {
+                InlineMessage(stockError)
+            }
             // ⌘L lives in the Document menu, which reaches the editor through the focused scene.
             Button { model.addLineAndFocus() } label: {
                 Label { Text(L.addLine) } icon: { Image(systemName: "plus") }
@@ -685,9 +703,11 @@ struct DraftEditorView: View {
 
     private func lineRow(_ line: DocumentLine, index: Int, document: Document) -> some View {
         HStack(spacing: Spacing.s) {
-            LineTextCell(label: L.colDescription, value: line.text, focus: $focus, focusValue: .text(line.id),
-                         commit: { value in model.setLine(line.id) { $0.text = value } },
-                         onSubmit: { moveDown(from: .text(line.id)) })
+            DescriptionCell(line: line, model: model, stock: stock, focus: $focus,
+                            onSubmit: { moveDown(from: .text(line.id)) },
+                            addToStock: { name in
+                                newStockItem = NewStockItemForLine(lineID: line.id, name: name, unit: line.unit ?? "ks")
+                            })
                 .frame(minWidth: 200, maxWidth: .infinity)
             AmountField(cell: NumberCell(lineID: line.id, column: .quantity), label: L.colQty, value: line.quantity, fractionLength: 0...3,
                         model: model, focus: $focus, focusValue: .quantity(line.id),
@@ -747,6 +767,9 @@ struct DraftEditorView: View {
             Button { model.moveLine(line.id, by: 1) } label: { Text(L.moveLineDown) }
                 .disabled(index == document.lines.count - 1)
             Button { model.requestDiscount(on: line.id) } label: { Text(L.addDiscount) }
+            if model.stockLinks[line.id] != nil {
+                Button { model.unlinkLine(line.id) } label: { Text(L.dontTakeFromStock) }
+            }
             Divider()
             Button(role: .destructive) { model.removeLine(line.id) } label: { Text(L.deleteLine) }
         }
@@ -1181,6 +1204,207 @@ struct DueDaysField: View {
                 if !focusedNow { text = String(model.dueDays) }
             }
             .onSubmit { text = String(model.dueDays) }
+    }
+}
+
+/// The line that "Add “…” to Stock…" links once New Stock Item… adds the item.
+struct NewStockItemForLine: Identifiable {
+    let lineID: String
+    let name: String
+    let unit: String
+
+    var id: String { lineID }
+}
+
+/// A line's Description (screens-flows.md §2c "Stock in the lines"): written as it is typed like the other
+/// cells. While typing, the stock items whose name matches list under it with their on-hand figure, and the
+/// list ends with "Add “…” to Stock…". ⇥ picks the highlighted item, or the first match, and moves to Qty; ↩
+/// picks only a row highlighted with ↓/↑ and otherwise commits the text and moves down. Esc closes a list the
+/// user moved into (a second Esc restores the text), else restores the text at once. A linked line shows
+/// `shippingbox` at the trailing edge.
+struct DescriptionCell: View {
+    let line: DocumentLine
+    let model: DraftEditorModel
+    let stock: StockModel
+    let focus: FocusState<EditorFocus?>.Binding
+    let onSubmit: @MainActor () -> Void
+    let addToStock: @MainActor (String) -> Void
+
+    @Environment(\.locale) private var locale
+    @State private var original = ""
+    /// True once the user typed into the focused field: the list shows.
+    @State private var editing = false
+    /// The highlighted row: a match, or `matches.count` for "Add … to Stock…"; nil until ↓, so ↩ on a typed
+    /// description moves down as in any other cell.
+    @State private var highlighted: Int?
+
+    private var focusValue: EditorFocus { .text(line.id) }
+    private var isFocused: Bool { focus.wrappedValue == focusValue }
+    private var query: String { line.text.trimmingCharacters(in: .whitespaces) }
+    private var showsList: Bool { model.offersStock && isFocused && editing && !query.isEmpty }
+    private var matches: [StockItemState] { Self.matches(query, in: stock.states) }
+    /// The marker follows the link itself; an archived item still takes from stock, so it is looked up too.
+    private var linkHelp: LocalizedStringResource? {
+        guard let itemID = model.stockLinks[line.id] else { return nil }
+        guard let linked = stock.anyState(id: itemID) else { return L.issueTakesFromStock }
+        let figure = StockFormat.quantity(linked.onHand, unit: linked.item.unit, locale: locale)
+        if model.takesGoodsOut {
+            return L.takesFromStockHelp(linked.item.name, figure)
+        }
+        return L.leavesStockWithFinalHelp(linked.item.name, figure)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                field
+                if let help = linkHelp {
+                    Image(systemName: "shippingbox")
+                        .foregroundStyle(Color.secondary)
+                        .help(Text(help))
+                        .accessibilityLabel(Text(help))
+                }
+            }
+            if showsList {
+                suggestions
+            }
+        }
+    }
+
+    private var text: Binding<String> {
+        Binding(get: { line.text }, set: { newText in
+            guard newText != line.text else { return }
+            model.setLine(line.id) { $0.text = newText }
+            if isFocused {
+                editing = true
+                // Typing never highlights a row: ↩ commits the typed text and moves down until ↓ picks one.
+                highlighted = nil
+            }
+        })
+    }
+
+    private var field: some View {
+        TextField(text: text) { Text(L.colDescription) }
+            .labelsHidden()
+            .textRole(.body)
+            .focused(focus, equals: focusValue)
+            .onChange(of: isFocused) { _, focusedNow in
+                if focusedNow { original = line.text }
+                editing = false
+                highlighted = nil
+            }
+            .onKeyPress(.escape) {
+                // Esc closes the list the user moved into; otherwise it restores the text, as in any cell.
+                if showsList, highlighted != nil {
+                    editing = false
+                    highlighted = nil
+                } else {
+                    editing = false
+                    highlighted = nil
+                    if original != line.text {
+                        model.setLine(line.id) { $0.text = original }
+                    }
+                }
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                guard showsList else { return .ignored }
+                highlighted = min(matches.count, (highlighted ?? -1) + 1)
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                guard showsList, let current = highlighted else { return .ignored }
+                highlighted = current > 0 ? current - 1 : nil
+                return .handled
+            }
+            .onKeyPress(.tab) {
+                guard showsList else { return .ignored }
+                if highlighted != nil {
+                    pickHighlighted()
+                    return .handled
+                }
+                // ⇥ accepts the first match when none was picked with ↓/↑.
+                guard let first = matches.first else { return .ignored }
+                pick(first.item)
+                return .handled
+            }
+            .onSubmit {
+                if showsList, highlighted != nil {
+                    pickHighlighted()
+                } else {
+                    onSubmit()
+                }
+            }
+    }
+
+    private var suggestions: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(matches.enumerated()), id: \.element.id) { index, state in
+                Button { pick(state.item) } label: {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(verbatim: state.item.name).textRole(.body)
+                        Text(L.stockInStock(StockFormat.quantity(state.onHand, unit: state.item.unit, locale: locale)))
+                            .textRole(.rowSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, Spacing.s)
+                .padding(.vertical, Spacing.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(SuggestionHighlight(isOn: index == highlighted))
+            }
+            Button { add() } label: {
+                Label {
+                    Text(L.addToStockNamed(query)).textRole(.body)
+                } icon: {
+                    Image(systemName: "shippingbox")
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Spacing.s)
+            .padding(.vertical, Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(SuggestionHighlight(isOn: highlighted == matches.count))
+        }
+        .padding(Spacing.xs)
+        .frame(maxWidth: 360)
+        .background(.background, in: RoundedRectangle(cornerRadius: Radius.m))
+        .overlay(RoundedRectangle(cornerRadius: Radius.m).stroke(.separator))
+    }
+
+    /// Stock items whose name contains the typed text, ignoring case and accents; names that start with it
+    /// first. At most six.
+    static func matches(_ query: String, in states: [StockItemState]) -> [StockItemState] {
+        guard !query.isEmpty else { return [] }
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        let hits = states.filter { $0.item.name.range(of: query, options: options) != nil }
+        let leading = hits.filter { $0.item.name.range(of: query, options: options.union(.anchored)) != nil }
+        let others = hits.filter { $0.item.name.range(of: query, options: options.union(.anchored)) == nil }
+        return Array((leading + others).prefix(6))
+    }
+
+    private func pickHighlighted() {
+        guard let index = highlighted else { return }
+        let current = matches
+        if index < current.count {
+            pick(current[index].item)
+        } else {
+            add()
+        }
+    }
+
+    private func pick(_ item: StockItem) {
+        editing = false
+        highlighted = nil
+        model.linkLine(line.id, to: item)
+        focus.wrappedValue = .quantity(line.id)
+    }
+
+    private func add() {
+        let name = query
+        editing = false
+        highlighted = nil
+        addToStock(name)
     }
 }
 

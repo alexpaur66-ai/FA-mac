@@ -10,6 +10,9 @@ import Observation
 @MainActor @Observable
 final class StockModel {
     private(set) var states: [StockItemState] = []
+    /// Every item by id, the archived ones too: a draft's line linked to an archived item still takes from
+    /// stock and shows its marker (§2n "Edge cases").
+    private var allStates: [String: StockItemState] = [:]
     private(set) var error: String?
     /// False until a load succeeded, so a failed first load is not shown as "no stock items yet".
     private(set) var loaded = false
@@ -26,7 +29,9 @@ final class StockModel {
 
     func reload() {
         do {
-            states = try stock.states()
+            let all = try stock.states(includeArchived: true)
+            states = all.filter { !$0.item.isArchived }
+            allStates = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             error = nil
             loaded = true
         } catch {
@@ -36,6 +41,11 @@ final class StockModel {
 
     func state(id: String) -> StockItemState? {
         states.first { $0.id == id }
+    }
+
+    /// An item by id whether archived or not: what a linked line takes from.
+    func anyState(id: String) -> StockItemState? {
+        allStates[id]
     }
 
     /// The sidebar badge: the items running low.

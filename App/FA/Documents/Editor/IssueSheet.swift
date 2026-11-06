@@ -167,6 +167,12 @@ struct IssueSheet: View {
             row(L.summaryPayment) {
                 paymentLine(document)
             }
+            // Only when the document takes goods out; information, never a blocker (§2n rule 2).
+            if let stock = stockText {
+                row(L.issueTakesFromStock) {
+                    Text(verbatim: stock).textRole(.body).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if let notice = pdfNotice {
                 row(L.pdfRow) {
                     Text(notice).textRole(.body).fixedSize(horizontal: false, vertical: true)
@@ -182,6 +188,18 @@ struct IssueSheet: View {
                 .textSelection(.enabled)
                 .gridColumnAlignment(.leading)
         }
+    }
+
+    /// "Bolt M8 −25 (95 left) · Nut M8 −50 (−10 left)": each item once, with on hand after Issue (§2n).
+    private var stockText: String? {
+        let rows = model.stockIssueRows()
+        guard !rows.isEmpty else { return nil }
+        return rows.map { row in
+            let change = StockFormat.change(row.quantity, sign: -1, locale: locale)
+            let left = StockFormat.number(row.leftAfter, locale: locale)
+            return String(localized: row.countedAfterTaxPoint ? L.issueStockItemCounted(row.name, change, left)
+                                                              : L.issueStockItem(row.name, change, left))
+        }.joined(separator: " · ")
     }
 
     /// The PDF row appears only when no PDF folder is chosen (set-04): it says where the PDF stays and where
