@@ -6,18 +6,17 @@ import SwiftUI
 
 // MARK: - Tone
 
-/// The colour family of a status. Orange means "the amount doesn't match, or a step is missing;
-/// decide something". Red is only for Overdue.
+/// The colour family of a status (design-system.md §4.3): three tones and no green. Neutral covers the
+/// waiting and the settled states alike, each told apart by its symbol and word. Orange means "the amount
+/// doesn't match, or a step is missing; decide something". Red is only for Overdue.
 enum StatusTone: CaseIterable, Sendable {
-    case neutral, pending, caution, success, danger
+    case neutral, caution, danger
 
     /// SwiftUI system colours, which carry their own dark and increased-contrast variants.
     var tint: Color {
         switch self {
         case .neutral: return .secondary
-        case .pending: return .primary
         case .caution: return .orange
-        case .success: return .green
         case .danger: return .red
         }
     }
@@ -80,7 +79,7 @@ struct DocumentStateInputs: Hashable, Sendable {
         if settlement == .closedUnpaid { return .closedUnpaid }
         if kind == .advanceRequest && deductedInFinal { return .settledInFinal }
         // A payment tax document records money already received, so it is paid by definition.
-        if kind == .paymentTaxDocument { return .issuedPaid }
+        if kind == .paymentTaxDocument { return .paid }
         // Money received on an advance needs its tax document within the § 28 ZDPH deadline. That step is
         // the supplier's to take, so it wins over Overdue; an overpaid advance with its tax documents shows Overpaid.
         if kind == .advanceRequest && taxDocumentRequired && !taxDocumentIssued {
@@ -107,7 +106,8 @@ struct DocumentStateInputs: Hashable, Sendable {
         case (_, .overpaid):
             return .overpaid
         case (_, .settledByAdvances):
-            return .paidByAdvances
+            // A final invoice settled by its advances: the detail says "by advances".
+            return .paid
         case (_, .draft), (_, .closedUnpaid):
             // Both are handled above; listed so the switch stays exhaustive.
             return .draft
@@ -115,10 +115,11 @@ struct DocumentStateInputs: Hashable, Sendable {
     }
 }
 
-/// One label per displayable document state. English defaults use sentence case (design-system.md §9).
+/// The thirteen labels of design-system.md §4.3. English defaults use sentence case (§9). A payment tax
+/// document and a final invoice settled by its advances both read Paid.
 enum DocumentStateLabel: String, CaseIterable, Sendable {
     case draft, issued, awaitingPayment, partlyPaid, partlyPaidTaxDocumentMissing, paid, paidTaxDocumentMissing
-    case taxDocumentIssued, settledInFinal, closedUnpaid, issuedPaid, paidByAdvances, overpaid, overdue
+    case taxDocumentIssued, settledInFinal, closedUnpaid, overpaid, overdue
     case markedForCreditNote
 
     var style: StatusStyle {
@@ -129,11 +130,11 @@ enum DocumentStateLabel: String, CaseIterable, Sendable {
                 label: LocalizedStringResource("status.document.draft", defaultValue: "Draft", table: "DesignSystem"))
         case .issued:
             return StatusStyle(
-                tone: .pending, symbol: "clock",
+                tone: .neutral, symbol: "clock",
                 label: LocalizedStringResource("status.document.issued", defaultValue: "Issued", table: "DesignSystem"))
         case .awaitingPayment:
             return StatusStyle(
-                tone: .pending, symbol: "clock",
+                tone: .neutral, symbol: "clock",
                 label: LocalizedStringResource(
                     "status.document.awaitingPayment", defaultValue: "Awaiting payment", table: "DesignSystem"))
         case .partlyPaid:
@@ -149,7 +150,7 @@ enum DocumentStateLabel: String, CaseIterable, Sendable {
                     table: "DesignSystem"))
         case .paid:
             return StatusStyle(
-                tone: .success, symbol: "checkmark.circle.fill",
+                tone: .neutral, symbol: "checkmark.circle.fill",
                 label: LocalizedStringResource("status.document.paid", defaultValue: "Paid", table: "DesignSystem"))
         case .paidTaxDocumentMissing:
             return StatusStyle(
@@ -159,7 +160,7 @@ enum DocumentStateLabel: String, CaseIterable, Sendable {
                     table: "DesignSystem"))
         case .taxDocumentIssued:
             return StatusStyle(
-                tone: .success, symbol: "checkmark.circle.fill",
+                tone: .neutral, symbol: "checkmark.circle.fill",
                 label: LocalizedStringResource(
                     "status.document.taxDocumentIssued", defaultValue: "Tax document issued", table: "DesignSystem"))
         case .settledInFinal:
@@ -173,16 +174,6 @@ enum DocumentStateLabel: String, CaseIterable, Sendable {
                 tone: .neutral, symbol: "xmark.circle",
                 label: LocalizedStringResource(
                     "status.document.closedUnpaid", defaultValue: "Closed unpaid", table: "DesignSystem"))
-        case .issuedPaid:
-            return StatusStyle(
-                tone: .success, symbol: "checkmark.circle.fill",
-                label: LocalizedStringResource(
-                    "status.document.issuedPaid", defaultValue: "Issued (paid)", table: "DesignSystem"))
-        case .paidByAdvances:
-            return StatusStyle(
-                tone: .success, symbol: "checkmark.circle.fill",
-                label: LocalizedStringResource(
-                    "status.document.paidByAdvances", defaultValue: "Paid (by advances)", table: "DesignSystem"))
         case .overpaid:
             return StatusStyle(
                 tone: .caution, symbol: "plus.circle.fill",
@@ -218,12 +209,12 @@ enum BankMatchState: String, CaseIterable, Sendable {
         switch self {
         case .alreadyRecorded:
             return StatusStyle(
-                tone: .success, symbol: "checkmark.circle",
+                tone: .neutral, symbol: "checkmark.circle",
                 label: LocalizedStringResource(
                     "status.match.alreadyRecorded", defaultValue: "Already recorded", table: "DesignSystem"))
         case .matched:
             return StatusStyle(
-                tone: .success, symbol: "checkmark.circle.fill",
+                tone: .neutral, symbol: "checkmark.circle.fill",
                 label: LocalizedStringResource("status.match.matched", defaultValue: "Matched", table: "DesignSystem"))
         case .suggested:
             return StatusStyle(
@@ -231,7 +222,7 @@ enum BankMatchState: String, CaseIterable, Sendable {
                 label: LocalizedStringResource("status.match.suggested", defaultValue: "Suggested", table: "DesignSystem"))
         case .unmatched:
             return StatusStyle(
-                tone: .pending, symbol: "circle.dashed",
+                tone: .neutral, symbol: "circle.dashed",
                 label: LocalizedStringResource("status.match.unmatched", defaultValue: "Unmatched", table: "DesignSystem"))
         case .ignored:
             return StatusStyle(

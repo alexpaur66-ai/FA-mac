@@ -39,6 +39,12 @@ struct MainSplitView: View {
     /// The Documents search; cleared when a draft is opened, so the search cannot hide the row of the
     /// draft being edited.
     @State private var documentsSearch = ""
+    /// Edit ▸ Jump to Search Field presents the Documents search through this.
+    @State private var documentsSearchPresented = false
+    /// Each Documents filter's sort, kept with the window (`DocumentSortMemory`).
+    @SceneStorage("documents.sort") private var documentsSortStored = ""
+    /// ↩ on an issued document in the table: its issued view takes keyboard focus.
+    @State private var detailFocusRequest = false
     /// Where the editor of the draft being opened puts the cursor: the client of a new draft without one,
     /// else its first line. Consumed by the editor of that draft only.
     @State private var pendingEditorFocus: PendingEditorFocus?
@@ -78,6 +84,20 @@ struct MainSplitView: View {
         Binding(get: { documentSelection }, set: { documentSelection = $0 })
     }
 
+    /// The shown filter's sort; a header click stores it for that filter.
+    private var documentsSortBinding: Binding<[KeyPathComparator<DocumentRow>]> {
+        let filter = sidebar.documentFilter
+        return Binding(
+            get: { DocumentSortMemory.sort(for: filter, in: documentsSortStored).comparators },
+            set: { comparators in
+                if let sort = DocumentSort(comparators) { setDocumentsSort(sort, for: filter) }
+            })
+    }
+
+    private func setDocumentsSort(_ sort: DocumentSort, for filter: DocumentSmartFilter) {
+        documentsSortStored = DocumentSortMemory.setting(sort, for: filter, in: documentsSortStored)
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selection: sidebarSelection, badges: documents.badges)
@@ -108,12 +128,12 @@ struct MainSplitView: View {
             guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
             // An open draft takes the imported rate at once, as the editor's own rate form does.
             if outcome.count != nil { editor?.refreshRate() }
-            report(outcome.line, kind: outcome.count == nil ? .error : .success)
+            report(outcome.line, kind: outcome.count == nil ? .problem : .done)
         }
         .onChange(of: documents.restoreOutcome) { _, outcome in
             guard let outcome else { return }
             if let error = outcome.error {
-                report(error, kind: .error)
+                report(error, kind: .problem)
             } else if let note = outcome.note {
                 report(note, kind: .info)
             } else if result?.undo != nil {
@@ -153,12 +173,14 @@ struct MainSplitView: View {
         case .overview:
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
-                show: show, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
+                show: show, showOverdue: showOverdue, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
-                search: $documentsSearch, editingID: editor?.documentID,
-                newDocument: newDraft, documentActions: documentActions(for:), deleteDrafts: deleteDrafts)
+                search: $documentsSearch, searchPresented: $documentsSearchPresented, sortOrder: documentsSortBinding,
+                editingID: editor?.documentID,
+                newDocument: newDraft, documentActions: documentActions(for:), deleteDrafts: deleteDrafts,
+                open: openFromList)
         case .clients:
             ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) },
                         newInvoice: { newDraft(.invoice, customerID: $0) },
@@ -176,7 +198,7 @@ struct MainSplitView: View {
             if let id = overviewSelection {
                 documentDetail(id)
             } else {
-                placeholder(L.noSelection, symbol: "square.grid.2x2")
+                placeholder(L.noSelection)
             }
         case .documents:
             if documentSelection.count == 1, let id = documentSelection.first {
@@ -184,7 +206,7 @@ struct MainSplitView: View {
             } else if documentSelection.count > 1 {
                 MultiSelectionView(rows: selectedRows)
             } else {
-                placeholder(L.noSelection, symbol: Symbols.document)
+                placeholder(L.noSelection)
             }
         case .clients:
             if let id = clientSelection {
@@ -194,13 +216,13 @@ struct MainSplitView: View {
                                  lastInvoiceNumber: last?.summary.number,
                                  duplicateLastInvoice: duplicateAction(last))
             } else {
-                placeholder(L.noClientSelected, symbol: "person.2")
+                placeholder(L.noClientSelected)
             }
         case .payments:
             if let id = paymentDocumentSelection {
                 documentDetail(id)
             } else {
-                placeholder(L.noSelection, symbol: "banknote")
+                placeholder(L.noSelection)
             }
         }
     }
@@ -224,30 +246,29 @@ struct MainSplitView: View {
             DocumentDetailView(
                 stores: stores, documents: documents, documentID: id, actions: documentActions(for: id),
                 deletePayment: deletePayment,
-                createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, openDraft: openDraft,
-                openDocument: openDocument(id:),
-                pdfVersion: $pdfVersion, pdfSaveFailure: $pdfSaveFailure)
+                createTaxDocument: { createTaxDocument(advanceID: id, payment: $0) }, chainAction: performChainStep,
+                openDraft: openDraft, openDocument: openDocument(id:),
+                pdfVersion: $pdfVersion, pdfSaveFailure: $pdfSaveFailure, focusRequest: $detailFocusRequest)
         }
     }
 
-    private func placeholder(_ title: LocalizedStringResource, symbol: String) -> some View {
-        ContentUnavailableView {
-            Label { Text(title) } icon: { Image(systemName: symbol) }
-        }
+    /// "Select a document": title only, no symbol (design-system.md §8.10); real empty states keep theirs.
+    private func placeholder(_ title: LocalizedStringResource) -> some View {
+        ContentUnavailableView { Text(title) }
     }
 
     // MARK: Result line
 
-    private func report(_ text: String, kind: ResultLineModel.Kind = .success, undo: (@MainActor () -> Void)? = nil) {
+    private func report(_ text: String, kind: ResultLineModel.Kind = .done, undo: (@MainActor () -> Void)? = nil) {
         result = ResultLineModel(text, kind: kind, undo: undo)
     }
 
-    private func report(_ resource: LocalizedStringResource, kind: ResultLineModel.Kind = .success, undo: (@MainActor () -> Void)? = nil) {
+    private func report(_ resource: LocalizedStringResource, kind: ResultLineModel.Kind = .done, undo: (@MainActor () -> Void)? = nil) {
         report(String(localized: resource), kind: kind, undo: undo)
     }
 
     private func report(_ error: Error) {
-        report(ErrorText.message(error, locale: locale), kind: .error)
+        report(ErrorText.message(error, locale: locale), kind: .problem)
     }
 
     // MARK: Selection and actions
@@ -279,7 +300,7 @@ struct MainSplitView: View {
     private func syncEditor(_ id: String?) {
         guard editor?.documentID != id else { return }
         if let old = editor, !old.saveNow() {
-            report(L.draftChangesNotSaved(old.saveError ?? ""), kind: .error)
+            report(L.draftChangesNotSaved(old.saveError ?? ""), kind: .problem)
         }
         issueSheetPresented = false
         previewShown = false
@@ -300,6 +321,16 @@ struct MainSplitView: View {
             actions.showDataFolder = { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
         actions.currentFilter = sidebar.section == .documents ? sidebar.documentFilter : nil
+        if sidebar.section == .documents {
+            let filter = sidebar.documentFilter
+            actions.sort = SortMenuActions(
+                current: DocumentSortMemory.sort(for: filter, in: documentsSortStored),
+                set: { setDocumentsSort($0, for: filter) })
+        }
+        // Clients and Payments get theirs with their own searchable(isPresented:).
+        if sidebar.section == .documents || sidebar.section == .overview {
+            actions.jumpToSearch = jumpToDocumentsSearch
+        }
         if let clientID = menuClientID, let customer = clients.customer(id: clientID) {
             actions.editClientName = customer.party.name
             actions.editClient = { sheet = .client(clientID) }
@@ -334,6 +365,7 @@ struct MainSplitView: View {
         }
         if summary.status == .draft {
             actions.deleteDraft = { deleteDrafts([id]) }
+            actions.related = relatedDocuments(of: id)
             if let editor, editor.documentID == id {
                 actions.issue = { requestIssue(id) }
                 // A draft prints as its watermarked preview (screens-flows.md §1.4).
@@ -353,6 +385,7 @@ struct MainSplitView: View {
         if let path = PDFActions.existingFile(stores, documentID: id) {
             actions.showPDFInFinder = { PDFFiles.reveal(path: path) }
         }
+        actions.related = relatedDocuments(of: id)
         // An issued advance with a payment, not closed, and not yet deducted or settled by a final invoice.
         if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal && state.paid.amount > 0 {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
@@ -416,6 +449,50 @@ struct MainSplitView: View {
         if kept != documentSelection { documentSelection = kept }
         if let id = overviewSelection, !known.contains(id) { overviewSelection = nil }
         if let id = clientSelection, clients.customer(id: id) == nil { clientSelection = nil }
+    }
+
+    /// Document ▸ Show Related Documents ▸: the chain's other documents; empty outside a chain.
+    private func relatedDocuments(of id: String) -> [RelatedDocumentAction] {
+        guard let chain = try? AdvanceChain.of(id, stores: stores, states: documents.states) else { return [] }
+        return chain.relatedDocuments.compactMap { item in
+            guard let documentID = item.documentID else { return nil }
+            let isDraft = item.isDraft
+            return RelatedDocumentAction(id: item.id, title: item.menuTitle) {
+                if isDraft { openDraft(documentID) } else { openDocument(id: documentID) }
+            }
+        }
+    }
+
+    /// The chain line's next-step button (screens-flows.md §2d).
+    private func performChainStep(_ step: ChainNextStep) {
+        switch step {
+        case .createTaxDocument(let advanceID, let payment): createTaxDocument(advanceID: advanceID, payment: payment)
+        case .createFinalInvoice(let advanceID): createFinalInvoice(from: advanceID)
+        }
+    }
+
+    /// ↩ or a double-click in the Documents table: a draft's editor takes the cursor at its first line, an
+    /// issued document's view takes keyboard focus (screens-flows.md §2b).
+    private func openFromList(_ id: String) {
+        guard let state = documents.state(id: id) else { return }
+        if state.summary.status == .draft {
+            if let editor, editor.documentID == id { editor.requestFocus(.firstLineQuantity) }
+        } else {
+            detailFocusRequest = true
+        }
+    }
+
+    /// Edit ▸ Jump to Search Field: from Overview it switches to Documents first.
+    private func jumpToDocumentsSearch() {
+        if sidebar.section != .documents { show(.filter(.all)) }
+        documentsSearchPresented = true
+    }
+
+    /// The Overview's Overdue tile: Unpaid, sorted by due date with the oldest first, whatever sort Unpaid
+    /// had before (screens-flows.md §2a).
+    private func showOverdue() {
+        setDocumentsSort(DocumentSmartFilter.unpaid.defaultSort, for: .unpaid)
+        show(.filter(.unpaid))
     }
 
     /// Shows an issued document in Documents (the chain, a locked payment's tax document).
@@ -548,7 +625,7 @@ struct MainSplitView: View {
     private func duplicate(_ id: String) {
         // The open draft's last edits are still waiting for autosave: the copy is made of what the editor shows.
         if let editor, editor.documentID == id, !editor.saveNow() {
-            report(L.draftChangesNotSaved(editor.saveError ?? ""), kind: .error)
+            report(L.draftChangesNotSaved(editor.saveError ?? ""), kind: .problem)
             return
         }
         do {

@@ -35,47 +35,54 @@ struct DocumentRow: Identifiable, Hashable {
     var outstanding: Decimal { state.outstanding.amount }
     var currencyCode: String { summary.currency.code }
     var variableSymbol: String { summary.variableSymbol ?? "" }
+
+    /// The DUZP as its sort key: ISO text, empty when the document has none, so those sort first.
+    var taxPointKey: String { summary.taxPointDate?.isoString ?? "" }
     var badgeInputs: DocumentStateInputs { DocumentStateInputs(state) }
 
-    /// The badge detail (design-system.md §4.3): the days late and the open balance when overdue, the due
-    /// date of an open document, what is left on a partly paid one, the surplus of an overpaid one, the
-    /// final invoice numbers of a deducted advance, the reason of a closing event.
-    func badgeDetail(locale: Locale) -> String? {
-        if let closure = state.closure {
-            return closure.reason
-        }
-        if state.deductedInFinal, !state.deductedBy.isEmpty {
-            return state.deductedBy.joined(separator: ", ")
-        }
-        guard isIssued, kind != .paymentTaxDocument else { return nil }
-        let left = MoneyText.format(state.outstanding.amount, currency: currencyCode, locale: locale)
-        switch state.settlement {
-        case .open, .partlyPaid:
-            if state.isOverdue {
-                return state.daysOverdue == 1
-                    ? String(localized: L.overdueDetailOne(left))
-                    : String(localized: L.overdueDetail(state.daysOverdue, left))
-            }
-            if state.settlement == .partlyPaid {
-                return String(localized: L.amountLeft(left))
-            }
+    /// The badge detail (design-system.md §4.3), chosen by the label the badge shows (R097): the days late
+    /// and the open balance on Overdue, the due day of an issued or awaiting document, what is left on a
+    /// partly paid one, the surplus on Overpaid, "by advances" on a final invoice its advances settled, the
+    /// advance of a payment tax document, the final invoices of a settled advance, and the reason of a
+    /// closing event. `withReason` false leaves the reason out: the issued view gives it its own line.
+    func badgeDetail(locale: Locale, withReason: Bool = true) -> String? {
+        switch badgeInputs.label {
+        case .closedUnpaid, .markedForCreditNote:
+            return withReason ? state.closure?.reason : nil
+        case .settledInFinal:
+            return state.deductedBy.isEmpty ? nil : state.deductedBy.joined(separator: ", ")
+        case .overdue:
+            let left = MoneyText.format(state.outstanding.amount, currency: currencyCode, locale: locale)
+            return state.daysOverdue == 1
+                ? String(localized: L.overdueDetailOne(left))
+                : String(localized: L.overdueDetail(state.daysOverdue, left))
+        case .partlyPaid, .partlyPaidTaxDocumentMissing:
+            return String(localized: L.amountLeft(MoneyText.format(state.outstanding.amount, currency: currencyCode, locale: locale)))
+        case .overpaid:
+            return String(localized: L.overpaidBy(MoneyText.format(-state.outstanding.amount, currency: currencyCode, locale: locale)))
+        case .paid:
+            if kind == .paymentTaxDocument { return summary.relatedDocumentNumber }
+            if state.settlement == .settledByAdvances { return String(localized: L.byAdvances) }
+            return nil
+        case .issued, .awaitingPayment:
             let days = dueDate.days(since: today)
             if days == 0 { return String(localized: L.dueToday) }
             if days == 1 { return String(localized: L.dueTomorrow) }
             return days > 1 ? String(localized: L.dueInDays(days)) : nil
-        case .overpaid:
-            return String(localized: L.overpaidBy(MoneyText.format(-state.outstanding.amount, currency: currencyCode, locale: locale)))
-        case .paid, .settledByAdvances, .draft, .closedUnpaid:
+        case .draft, .paidTaxDocumentMissing, .taxDocumentIssued:
             return nil
         }
     }
 
-    /// Search over number, client, variable symbol and amounts, ignoring case and diacritics.
-    func matches(search: String) -> Bool {
+    /// Search over number, client, variable symbol and amounts, ignoring case and diacritics; then over
+    /// `extra`, the folded text of the client's IČO and VAT ID and the line descriptions, read only when
+    /// the summary fields do not match (screens-flows.md §2b).
+    func matches(search: String, extra: () -> String = { "" }) -> Bool {
         let needle = search.folded
         guard !needle.isEmpty else { return true }
-        return [number, customerName, variableSymbol, totalOrNil?.description ?? "", outstanding.description]
-            .contains { $0.folded.contains(needle) }
+        let fields = [number, customerName, variableSymbol, totalOrNil?.description ?? "", outstanding.description]
+        if fields.contains(where: { $0.folded.contains(needle) }) { return true }
+        return extra().contains(needle)
     }
 }
 

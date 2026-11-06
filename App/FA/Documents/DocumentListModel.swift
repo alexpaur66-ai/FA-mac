@@ -34,6 +34,8 @@ final class DocumentListModel {
     @ObservationIgnored private var restoreToken = 0
     /// The tickets of the window's undo registrations; the UndoManager holds its targets unretained.
     @ObservationIgnored private var undoTickets: [UndoTicket] = []
+    /// See `searchText(for:)`.
+    @ObservationIgnored private var searchCache: [String: SearchEntry] = [:]
 
     init(stores: Stores) {
         self.stores = stores
@@ -76,6 +78,28 @@ final class DocumentListModel {
 
     func state(id: String) -> DocumentState? {
         states.first { $0.id == id }
+    }
+
+    /// The folded search text a summary does not carry (screens-flows.md §2b): the client's IČO and VAT
+    /// ID and the line descriptions, read from the stored document the first time a search needs it. Kept
+    /// per save stamp, so a draft edited since is read again; an issued document never changes.
+    func searchText(for state: DocumentState) -> String {
+        let stamp = state.summary.updatedAt
+        if let cached = searchCache[state.id], cached.stamp == stamp { return cached.text }
+        var parts: [String] = []
+        if let document = try? stores.documents.document(id: state.id) {
+            if let number = document.customer.identificationNumber { parts.append(number.description) }
+            if let vatID = document.customer.vatIdentifier { parts.append(vatID.description) }
+            parts.append(contentsOf: document.lines.map(\.text))
+        }
+        let text = parts.joined(separator: "\n").folded
+        searchCache[state.id] = SearchEntry(stamp: stamp, text: text)
+        return text
+    }
+
+    private struct SearchEntry {
+        let stamp: String
+        let text: String
     }
 
     func rows(for filter: DocumentSmartFilter) -> [DocumentRow] {

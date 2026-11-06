@@ -107,18 +107,123 @@ enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Each filter opens with its own sort (screens-flows.md §2b); Unpaid by due date, so overdue rows
-    /// come first.
-    var defaultSortOrder: [KeyPathComparator<DocumentRow>] {
+    /// come first. After that it keeps the sort chosen for it (`DocumentSortMemory`).
+    var defaultSort: DocumentSort {
         switch self {
-        case .unpaid:
-            [KeyPathComparator(\DocumentRow.dueDate, order: .forward)]
-        case .openAdvances:
-            [KeyPathComparator(\DocumentRow.issueDate, order: .forward)]
-        case .drafts:
-            [KeyPathComparator(\DocumentRow.updatedAt, order: .reverse)]
-        case .all:
-            [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
+        case .unpaid: DocumentSort(column: .due, ascending: true)
+        case .openAdvances: DocumentSort(column: .issued, ascending: true)
+        case .drafts: DocumentSort(column: .updated, ascending: false)
+        case .all: DocumentSort(column: .issued, ascending: false)
         }
+    }
+}
+
+/// A sortable column of the Documents table, in header order, plus the Drafts filter's last edit (no
+/// column of its own). View ▸ Sort By ▸ lists the columns.
+enum DocumentSortColumn: String, CaseIterable, Identifiable, Sendable {
+    case number, type, client, issued, due, total, open, taxPoint, vs, updated
+
+    var id: Self { self }
+
+    /// The columns View ▸ Sort By ▸ lists, in header order.
+    static let menuColumns: [DocumentSortColumn] = [.number, .type, .client, .issued, .due, .total, .open, .taxPoint, .vs]
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .number: L.colNumber
+        case .type: L.colType
+        case .client: L.colClient
+        case .issued: L.colIssued
+        case .due: L.colDue
+        case .total: L.colTotal
+        case .open: L.colOpen
+        case .taxPoint: L.colTaxPoint
+        case .vs: L.colVS
+        case .updated: L.sortLastEdited
+        }
+    }
+
+    var keyPath: PartialKeyPath<DocumentRow> {
+        switch self {
+        case .number: \DocumentRow.number
+        case .type: \DocumentRow.typeName
+        case .client: \DocumentRow.customerName
+        case .issued: \DocumentRow.issueDate
+        case .due: \DocumentRow.dueDate
+        case .total: \DocumentRow.total
+        case .open: \DocumentRow.outstanding
+        case .taxPoint: \DocumentRow.taxPointKey
+        case .vs: \DocumentRow.variableSymbol
+        case .updated: \DocumentRow.updatedAt
+        }
+    }
+
+    func comparator(ascending: Bool) -> KeyPathComparator<DocumentRow> {
+        let order: SortOrder = ascending ? .forward : .reverse
+        switch self {
+        case .number: return KeyPathComparator(\DocumentRow.number, order: order)
+        case .type: return KeyPathComparator(\DocumentRow.typeName, order: order)
+        case .client: return KeyPathComparator(\DocumentRow.customerName, order: order)
+        case .issued: return KeyPathComparator(\DocumentRow.issueDate, order: order)
+        case .due: return KeyPathComparator(\DocumentRow.dueDate, order: order)
+        case .total: return KeyPathComparator(\DocumentRow.total, order: order)
+        case .open: return KeyPathComparator(\DocumentRow.outstanding, order: order)
+        case .taxPoint: return KeyPathComparator(\DocumentRow.taxPointKey, order: order)
+        case .vs: return KeyPathComparator(\DocumentRow.variableSymbol, order: order)
+        case .updated: return KeyPathComparator(\DocumentRow.updatedAt, order: order)
+        }
+    }
+
+    init?(keyPath: PartialKeyPath<DocumentRow>) {
+        guard let column = Self.allCases.first(where: { $0.keyPath == keyPath }) else { return nil }
+        self = column
+    }
+}
+
+/// One filter's sort: a column and a direction.
+struct DocumentSort: Equatable, Sendable {
+    var column: DocumentSortColumn
+    var ascending: Bool
+
+    var comparators: [KeyPathComparator<DocumentRow>] { [column.comparator(ascending: ascending)] }
+
+    /// The sort a table header click asks for; nil for a key path no column has.
+    init?(_ comparators: [KeyPathComparator<DocumentRow>]) {
+        guard let first = comparators.first, let column = DocumentSortColumn(keyPath: first.keyPath) else { return nil }
+        self.init(column: column, ascending: first.order == .forward)
+    }
+
+    init(column: DocumentSortColumn, ascending: Bool) {
+        self.column = column
+        self.ascending = ascending
+    }
+}
+
+/// Each filter's sort, kept with the window as one text: "unpaid=due.a,all=issued.d" (screens-flows.md
+/// §2b, "Each filter remembers its own sort").
+enum DocumentSortMemory {
+    static func sort(for filter: DocumentSmartFilter, in stored: String) -> DocumentSort {
+        decode(stored)[filter] ?? filter.defaultSort
+    }
+
+    static func setting(_ sort: DocumentSort, for filter: DocumentSmartFilter, in stored: String) -> String {
+        var sorts = decode(stored)
+        sorts[filter] = sort
+        return DocumentSmartFilter.allCases.compactMap { filter in
+            sorts[filter].map { "\(filter.rawValue)=\($0.column.rawValue).\($0.ascending ? "a" : "d")" }
+        }.joined(separator: ",")
+    }
+
+    private static func decode(_ stored: String) -> [DocumentSmartFilter: DocumentSort] {
+        var sorts: [DocumentSmartFilter: DocumentSort] = [:]
+        for entry in stored.split(separator: ",") {
+            let parts = entry.split(separator: "=")
+            guard parts.count == 2, let filter = DocumentSmartFilter(rawValue: String(parts[0])) else { continue }
+            let value = parts[1].split(separator: ".")
+            guard value.count == 2, let column = DocumentSortColumn(rawValue: String(value[0])) else { continue }
+            sorts[filter] = DocumentSort(column: column, ascending: value[1] == "a")
+        }
+        return sorts
     }
 }
 

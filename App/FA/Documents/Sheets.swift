@@ -52,7 +52,7 @@ struct RecordPaymentSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Text(mode == .payment ? L.rpTitle : L.rpRefundTitle).textRole(.screenTitle)
-            Text(verbatim: (state.summary.number ?? String(localized: L.draftTitle)) + " · " + state.summary.customerName)
+            Text(L.numberAndClient(state.summary.number ?? String(localized: L.draftTitle), state.summary.customerName))
                 .textRole(.rowSecondary)
             if let recorded {
                 recordedStep(recorded)
@@ -107,7 +107,7 @@ struct RecordPaymentSheet: View {
                 Text(goodsAdvance ? L.paymentRecordedGoodsAdvance : L.paymentRecordedAdvance)
                     .textRole(.body).fixedSize(horizontal: false, vertical: true)
             } icon: {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: MessageKind.done.symbol).foregroundStyle(MessageKind.done.tint)
             }
             if let error {
                 InlineMessage(error)
@@ -212,7 +212,7 @@ struct ClosureSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Text(kind == .closedUnpaid ? L.closeAdvanceTitle : L.markForCreditNoteTitle).textRole(.screenTitle)
-            Text(verbatim: (state.summary.number ?? "") + " · " + state.summary.customerName).textRole(.rowSecondary)
+            Text(L.numberAndClient(state.summary.number ?? "", state.summary.customerName)).textRole(.rowSecondary)
             Text(L.closureExplanation).textRole(.body).fixedSize(horizontal: false, vertical: true)
             TextField(text: $reason, axis: .vertical) { Text(L.reasonPrompt) }
                 .lineLimit(2...4)

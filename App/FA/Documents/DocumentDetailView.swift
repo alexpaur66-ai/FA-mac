@@ -1,7 +1,8 @@
-// The detail column for one issued document: the header, a closing banner, the figures, the lock line,
-// the payments, the Activity and the PDF (screens-flows.md §2b); there is no inspector. Drafts open in
-// DraftEditorView. The window computes what the document offers (`DocumentActions`) once, for the toolbar
-// here, the Document menu and the context menu, so the three never disagree.
+// The detail column for one issued document (screens-flows.md §2b): the header, the closing reason, the
+// chain line, the figures, the lock line, the payments, the Activity and the PDF; there is no inspector and
+// no banner. Drafts never come here: they open in DraftEditorView. The window computes what the document
+// offers (`DocumentActions`) once, for the toolbar here, the Document menu and the context menu, so the
+// three never disagree.
 
 import InvoicingCore
 import InvoicingData
@@ -17,24 +18,27 @@ struct DocumentDetailView: View {
     /// Step 3 of the advance flow: the tax document for a received payment that has none (after "Later",
     /// or after its draft was deleted).
     var createTaxDocument: (@MainActor (DocumentPayment) -> Void)? = nil
+    /// The chain line's next-step button (screens-flows.md §2d).
+    var chainAction: (@MainActor (ChainNextStep) -> Void)? = nil
     /// Opens a payment's draft tax document in the editor.
     var openDraft: (@MainActor (String) -> Void)? = nil
     /// Shows another issued document by id: the tax document a locked payment is the basis of, the chain.
     var openDocument: (@MainActor (String) -> Void)? = nil
     /// Bumped by whoever saves the PDF (the File menu, this view), so the row and the menu items reload.
     var pdfVersion: Binding<Int> = .constant(0)
-    /// Issue could not write the PDF file (screens-flows.md §2c): the banner offers Choose Folder… and Save PDF….
+    /// Issue could not write the PDF file (screens-flows.md §2c): the notice offers Choose Folder… and Save PDF….
     var pdfSaveFailure: Binding<PDFSaveFailure?> = .constant(nil)
+    /// Set by ↩ in the Documents table: the view takes keyboard focus.
+    var focusRequest: Binding<Bool> = .constant(false)
 
     @State private var payments: [DocumentPayment] = []
     /// A payment with a draft tax document, waiting for the answer whether the draft goes too.
     @State private var paymentPendingDeletion: DocumentPayment?
-    /// A final invoice's deduction links: the payment tax documents of the advances it deducts.
-    @State private var deductions: [AdvanceDeductionLink] = []
-    /// A final invoice's paid-in-advance links, or the settled payments of an advance (§ 64 goods, ADR 0012).
+    /// The settled payments of an advance (§ 64 goods, ADR 0012), for their captions.
     @State private var paidAdvanceLinks: [PaidAdvanceLink] = []
-    /// The bank account the document asks to be paid to (IBAN), shown beside the variable symbol.
-    @State private var account: String?
+    /// The stored document: its account, rate, language and treatments for the figures.
+    @State private var document: Document?
+    @State private var chain: AdvanceChain?
     /// The document's Activity, oldest first as stored.
     @State private var events: [AuditEvent] = []
     @State private var activityExpanded = false
@@ -43,6 +47,7 @@ struct DocumentDetailView: View {
     @State private var pdf: StoredDocumentPDF?
     @State private var pdfError: String?
     @State private var savedFileExists = false
+    @FocusState private var headerFocused: Bool
     @Environment(\.locale) private var locale
 
     private struct LoadKey: Equatable {
@@ -58,12 +63,11 @@ struct DocumentDetailView: View {
                     .padding(Spacing.xl)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ContentUnavailableView {
-                    Label { Text(L.noSelection) } icon: { Image(systemName: Symbols.document) }
-                }
+                // Title only (design-system.md §8.10): a real empty state has a symbol and an action.
+                ContentUnavailableView { Text(L.noSelection) }
             }
         }
-        .navigationTitle(Text(verbatim: documents.state(id: documentID)?.summary.number ?? String(localized: L.draftTitle)))
+        .navigationTitle(Text(verbatim: documents.state(id: documentID)?.summary.number ?? ""))
         .toolbar { toolbar }
         .task(id: LoadKey(id: documentID, states: documents.states, pdfVersion: pdfVersion.wrappedValue)) {
             load()
@@ -72,13 +76,18 @@ struct DocumentDetailView: View {
         .onChange(of: documentID) {
             activityExpanded = false
         }
+        .onChange(of: focusRequest.wrappedValue, initial: true) { _, requested in
+            guard requested else { return }
+            headerFocused = true
+            focusRequest.wrappedValue = false
+        }
         .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
-    /// Fixed items (design-system.md §8.11): Duplicate, the advance's Create Final Invoice, and the one
-    /// prominent action, text only and declared last so it is trailing: Record Payment… while something is
-    /// left to pay, Record Refund… on an overpaid document. A settled document shows Duplicate only; a tax
-    /// document for a received payment shows nothing.
+    /// Fixed items (design-system.md §8.11): Duplicate, and the one prominent action, text only and declared
+    /// last so it is trailing: Record Payment… while something is left to pay, Record Refund… on an overpaid
+    /// document. A settled document shows Duplicate only; a payment tax document shows nothing. The advance's
+    /// Create Final Invoice is the chain line's button.
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let duplicate = actions.duplicate, actions.duplicateSourceNumber != nil {
             ToolbarItem {
@@ -86,11 +95,6 @@ struct DocumentDetailView: View {
                     Label { Text(L.duplicate) } icon: { Image(systemName: "plus.square.on.square") }
                 }
                 .help(Text(L.duplicateHelp))
-            }
-        }
-        if let createFinalInvoice = actions.createFinalInvoice {
-            ToolbarItem {
-                Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
             }
         }
         if let recordPayment = actions.recordPayment {
@@ -111,16 +115,16 @@ struct DocumentDetailView: View {
     private func load() {
         do {
             payments = try stores.documents.payments(for: documentID)
-            deductions = try DocumentLinks.deductions(stores, state: documents.state(id: documentID))
             paidAdvanceLinks = try DocumentLinks.paidAdvanceLinks(stores, state: documents.state(id: documentID))
-            account = try stores.documents.document(id: documentID)?.payment?.bankConnection.iban.formatted
+            document = try stores.documents.document(id: documentID)
+            chain = try AdvanceChain.of(documentID, stores: stores, states: documents.states)
             events = try DocumentLinks.shownEvents(stores.audit.events(entity: "document", id: documentID))
             loadError = nil
         } catch {
             payments = []
-            deductions = []
             paidAdvanceLinks = []
-            account = nil
+            document = nil
+            chain = nil
             events = []
             loadError = ErrorText.message(error, locale: locale)
         }
@@ -151,16 +155,29 @@ struct DocumentDetailView: View {
     @ViewBuilder private func content(_ state: DocumentState) -> some View {
         let summary = state.summary
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            header(state)
-            // Critical information goes at the top (screens-flows.md §0.1): a closing event, a PDF that
-            // could not be written.
-            if let closure = state.closure {
-                closureBanner(closure)
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                header(state)
+                if let closure = state.closure {
+                    // The reason shows once, here (design-system.md §8.3): the badge above names the event.
+                    Text(verbatim: closure.reason)
+                        .textRole(.rowSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let chain {
+                    ChainLine(chain: chain, open: openChainItem, perform: { chainAction?($0) })
+                }
             }
+            // Critical information goes at the top (screens-flows.md §0.1): a PDF that could not be written.
             if let failure = pdfSaveFailure.wrappedValue, failure.documentID == documentID {
-                saveFailureBanner(failure)
+                saveFailureNotice(failure)
             }
-            figures(state)
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                figures(state)
+                if let line = languageAndTreatmentLine {
+                    Text(verbatim: line).textRole(.rowSecondary)
+                }
+            }
             if summary.status == .issued {
                 Label {
                     Text(lockLine(summary))
@@ -169,11 +186,6 @@ struct DocumentDetailView: View {
                 }
                 .textRole(.legalNote)
                 paymentsSection(state)
-            } else {
-                Text(L.draftNote).textRole(.body)
-                if let deleteDraft = actions.deleteDraft {
-                    Button(role: .destructive) { deleteDraft() } label: { Text(L.deleteDraft) }
-                }
             }
             if let loadError {
                 InlineMessage(loadError)
@@ -189,6 +201,16 @@ struct DocumentDetailView: View {
                 }
                 pdfSection
             }
+        }
+    }
+
+    /// Opens a step of the chain line: a draft in the editor, an issued document in this view.
+    private func openChainItem(_ item: ChainItem) {
+        guard let id = item.documentID else { return }
+        if item.isDraft {
+            openDraft?(id)
+        } else {
+            openDocument?(id)
         }
     }
 
@@ -212,12 +234,14 @@ struct DocumentDetailView: View {
         return total - due
     }
 
+    /// The number; the English type with the Czech title; the client link; the status badge. A closing
+    /// event's badge has no detail: its reason is the line under the header.
     private func header(_ state: DocumentState) -> some View {
         let summary = state.summary
         return HStack(alignment: .firstTextBaseline, spacing: Spacing.l) {
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(verbatim: summary.number ?? String(localized: L.draftTitle)).textRole(.documentNumber)
-                Text(summary.kind.longTitle).textRole(.body)
+                Text(verbatim: summary.number ?? "").textRole(.documentNumber)
+                Text(verbatim: summary.kind.pickerTitle).textRole(.body)
                 if summary.customerName.isEmpty {
                     Text(L.noClient).textRole(.rowSecondary)
                 } else if let showClient = actions.showClient {
@@ -226,131 +250,117 @@ struct DocumentDetailView: View {
                         Text(verbatim: summary.customerName).textRole(.rowSecondary)
                     }
                     .buttonStyle(.link)
-                    .help(Text(L.showClient))
+                    .help(Text(L.showClientHelp))
                 } else {
                     Text(verbatim: summary.customerName).textRole(.rowSecondary)
                 }
             }
             Spacer(minLength: Spacing.l)
-            StatusBadge(DocumentStateInputs(state), detail: DocumentRow(state: state, today: documents.today).badgeDetail(locale: locale))
+            StatusBadge(DocumentStateInputs(state),
+                        detail: DocumentRow(state: state, today: documents.today).badgeDetail(locale: locale, withReason: false))
+        }
+        // ↩ in the table lands here; Tab goes on to the links and buttons below.
+        .focusable()
+        .focused($headerFocused)
+    }
+
+    /// One figure: the label and its value, each only where it applies (design-system.md §8.12).
+    private func figure<Value: View>(_ label: LocalizedStringResource, @ViewBuilder value: () -> Value) -> some View {
+        GridRow {
+            Text(label).textRole(.label)
+            value()
         }
     }
 
-    /// A closing event as a banner under the header (screens-flows.md §2d): the kind, and the reason.
-    private func closureBanner(_ closure: DocumentClosure) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Label {
-                Text(closure.kind == .closedUnpaid ? L.bannerClosedUnpaid : L.bannerMarkedForCreditNote)
-                    .textRole(.body)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: closure.kind == .closedUnpaid ? "xmark.circle" : "flag")
-                    .foregroundStyle(.secondary)
-            }
-            Text(verbatim: closure.reason)
-                .textRole(.rowSecondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tileSurface(radius: Radius.m)
-    }
-
+    /// The frozen values in the order of screens-flows.md §2b: Total, the deduction, Paid, Open balance,
+    /// Issued, DUZP, Due, VS, Account, Rate and VAT in CZK.
     private func figures(_ state: DocumentState) -> some View {
         let summary = state.summary
+        let code = summary.currency.code
+        let payable = summary.kind != .paymentTaxDocument
+        let foreign = summary.currency != .czk
         return Grid(alignment: .leading, horizontalSpacing: Spacing.xl, verticalSpacing: Spacing.s) {
-            GridRow {
-                Text(L.colTotal).textRole(.label)
+            figure(L.colTotal) {
                 if let total = summary.totalGross {
-                    MoneyText(amount: total.amount, currency: summary.currency.code, locale: locale, role: .total)
+                    MoneyText(amount: total.amount, currency: code, locale: locale, role: .total)
                 } else {
-                    // A draft whose totals cannot be computed yet (for example a missing rate).
                     Text(verbatim: "—").textRole(.total)
                 }
             }
             if summary.kind == .finalInvoice, let deducted = Self.deductedAmount(summary), !deducted.isZero {
                 // Total − advances = amount due (screens-flows.md §2d), so the figures reconcile.
-                GridRow {
-                    Text(L.advancesDeducted).textRole(.label)
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        MoneyText(amount: -deducted.amount, currency: summary.currency.code, locale: locale)
-                        if !deductions.isEmpty {
-                            chainLinks(deductions.map(\.receiptNumber))
-                        }
-                    }
+                figure(L.advancesDeducted) {
+                    MoneyText(amount: -deducted.amount, currency: code, locale: locale)
                 }
             }
             if summary.kind == .finalInvoice, let paid = summary.paidInAdvance, !paid.isZero {
                 // Total − paid in advance = amount due: the § 64 value itself is never reduced (ADR 0012).
-                GridRow {
-                    Text(L.paidInAdvanceTitle).textRole(.label)
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        MoneyText(amount: -paid.amount, currency: summary.currency.code, locale: locale)
-                        if !paidAdvanceLinks.isEmpty {
-                            chainLinks(DocumentLinks.unique(paidAdvanceLinks.map(\.advanceNumber)))
-                        }
-                    }
+                figure(L.paidInAdvanceTitle) {
+                    MoneyText(amount: -paid.amount, currency: code, locale: locale)
                 }
             }
-            if summary.status == .issued && summary.kind != .paymentTaxDocument {
-                GridRow {
-                    Text(L.paid).textRole(.label)
-                    MoneyText(amount: state.paid.amount, currency: summary.currency.code, locale: locale)
-                }
-                GridRow {
-                    Text(L.outstanding).textRole(.label)
-                    MoneyText(amount: state.outstanding.amount, currency: summary.currency.code, locale: locale, role: .amountStrong)
+            if payable && state.paid.amount > 0 {
+                figure(L.paid) {
+                    MoneyText(amount: state.paid.amount, currency: code, locale: locale)
                 }
             }
-            GridRow {
-                Text(L.issuedOn).textRole(.label)
-                DayText(summary.issueDate)
-            }
-            GridRow {
-                Text(L.dueOn).textRole(.label)
-                DayText(summary.dueDate)
-            }
-            if let account {
-                GridRow {
-                    Text(L.account).textRole(.label)
-                    Text(verbatim: account).textRole(.amount).textSelection(.enabled)
+            if payable {
+                figure(L.openBalance) {
+                    MoneyText(amount: state.outstanding.amount, currency: code, locale: locale, role: .amountStrong)
                 }
+            }
+            figure(L.issuedOn) { DayText(summary.issueDate) }
+            if summary.kind.isTaxDocument {
+                figure(L.figureTaxPoint) { DayText(summary.taxPointDate ?? summary.issueDate) }
+            }
+            if payable {
+                figure(L.dueOn) { DayText(summary.dueDate) }
             }
             if let symbol = summary.variableSymbol {
-                GridRow {
-                    Text(L.variableSymbol).textRole(.label)
+                figure(L.variableSymbol) {
                     Text(verbatim: symbol).textRole(.amount).textSelection(.enabled)
                 }
             }
-            if let related = summary.relatedDocumentNumber {
-                GridRow {
-                    Text(L.chain).textRole(.label)
-                    chainLinks([related])
+            if let account = document?.payment?.bankConnection.iban.formatted {
+                figure(L.account) {
+                    Text(verbatim: account).textRole(.amount).textSelection(.enabled)
                 }
             }
-            if !state.deductedBy.isEmpty {
-                GridRow {
-                    // An advance for § 64 goods is settled, not deducted: no tax base changes (ADR 0012).
-                    Text(state.taxDocumentRequired ? L.deductedByLabel : L.settledInLabel).textRole(.label)
-                    chainLinks(state.deductedBy)
+            if foreign, summary.kind.isTaxDocument, let line = rateLine {
+                figure(L.colRate) {
+                    Text(verbatim: line).textRole(.amount).textSelection(.enabled)
+                }
+            }
+            if foreign, let vat = summary.taxableVATCZK, !vat.isZero {
+                // Czech VAT charged on a EUR or USD document, in CZK (screens-flows.md §0 rule 5).
+                figure(L.vatInCZK) {
+                    MoneyText(amount: vat.amount, currency: vat.currency.code, locale: locale)
                 }
             }
         }
     }
 
-    /// Document numbers of the chain, each a link to that document when the list knows it.
-    private func chainLinks(_ numbers: [String]) -> some View {
-        HStack(spacing: Spacing.s) {
-            ForEach(numbers, id: \.self) { number in
-                if let openDocument, let id = documents.states.first(where: { $0.summary.number == number })?.id {
-                    Button { openDocument(id) } label: { Text(verbatim: number).textRole(.body) }
-                        .buttonStyle(.link)
-                } else {
-                    Text(verbatim: number).textRole(.body)
-                }
-            }
-        }
+    /// "1 EUR = 24,315 CZK · for 30. 10. 2026 · Typed": the rate, its own day and its source. A rate for an
+    /// earlier day than the rate day (a weekend or holiday) is named the last published rate (§0 rule 6).
+    private var rateLine: String? {
+        guard let document, let rate = document.exchangeRate else { return nil }
+        let row = RateRow(rate: rate)
+        let value = row.rateText(locale: locale)
+        let day = rate.validFor.formatted(locale)
+        return rate.validFor == document.exchangeRateDay
+            ? String(localized: L.figureRate(value, day, row.sourceName))
+            : String(localized: L.figureRateFallback(value, day, row.sourceName))
+    }
+
+    /// "Czech + English · EU goods, exempt": the document language and its VAT treatments in short form.
+    private var languageAndTreatmentLine: String? {
+        guard let document else { return nil }
+        let language = String(localized: document.language == .english ? L.languageEnglish : L.languageCzech)
+        var seen: Set<TreatmentChoice> = []
+        let treatments = document.treatments.map { TreatmentChoice($0) }.filter { seen.insert($0).inserted }
+            .map { String(localized: $0.shortTitle) }
+        guard !treatments.isEmpty else { return language }
+        return String(localized: L.languageAndTreatments(language, treatments.joined(separator: ", ")))
     }
 
     private func paymentsSection(_ state: DocumentState) -> some View {
@@ -365,10 +375,14 @@ struct DocumentDetailView: View {
         }
     }
 
+    /// Date · kind · source (bank imports only) · note, the amount trailing, with no lock glyph (screens-flows.md
+    /// §2f). A payment an issued tax document rests on, or one a final invoice settled, says so in its
+    /// caption. Open Tax Document, Create Tax Document and Delete Payment are in the row's context menu.
     @ViewBuilder private func paymentRow(_ payment: DocumentPayment, state: DocumentState) -> some View {
         // An advance for § 64 goods takes no tax document; its payments are settled in the final invoice (ADR 0012).
         let isAdvanceReceipt = state.summary.kind == .advanceRequest && payment.kind == .received && state.taxDocumentRequired
         let settledIn = paidAdvanceLinks.first { $0.paymentID == payment.id }
+        let draftReceiptID = payment.receiptIssued ? nil : payment.receiptDocumentID
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(spacing: Spacing.m) {
                 DayText(payment.paidOn)
@@ -381,20 +395,6 @@ struct DocumentDetailView: View {
                 }
                 Spacer()
                 MoneyText(amount: payment.amount.amount, currency: payment.amount.currency.code, locale: locale)
-                if payment.receiptIssued || settledIn != nil {
-                    // A settled payment has no tax document; the final invoice holds it (ADR 0012).
-                    Image(systemName: "lock.fill")
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(Text(payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
-                } else if isAdvanceReceipt {
-                    if let receiptID = payment.receiptDocumentID {
-                        if let openDraft {
-                            Button { openDraft(receiptID) } label: { Text(L.openTaxDocument) }
-                        }
-                    } else if let createTaxDocument {
-                        Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
-                    }
-                }
             }
             // The basis of an issued tax document: the row names it and opens it (screens-flows.md §2f).
             if payment.receiptIssued, let receiptID = payment.receiptDocumentID {
@@ -416,7 +416,9 @@ struct DocumentDetailView: View {
             }
         }
         .contextMenu {
-            if isAdvanceReceipt, payment.receiptDocumentID == nil, let createTaxDocument {
+            if isAdvanceReceipt, let draftReceiptID, let openDraft {
+                Button { openDraft(draftReceiptID) } label: { Text(L.openTaxDocument) }
+            } else if isAdvanceReceipt, payment.receiptDocumentID == nil, let createTaxDocument {
                 Button { createTaxDocument(payment) } label: { Text(L.createTaxDocument) }
             }
             if payment.canBeDeleted && settledIn == nil {
@@ -433,6 +435,7 @@ struct DocumentDetailView: View {
             }
         }
     }
+
 
     // MARK: PDF (screens-flows.md §2b, ADR 0010)
 
@@ -460,7 +463,7 @@ struct DocumentDetailView: View {
             }
             if let pdfError {
                 HStack(spacing: Spacing.m) {
-                    InlineMessage(String(localized: L.pdfPreviewUnavailable) + " " + pdfError, kind: .warning)
+                    InlineMessage(L.pdfPreviewUnavailable, detail: pdfError)
                     Button { loadPDF() } label: { Text(L.retry) }
                 }
             }
@@ -471,23 +474,15 @@ struct DocumentDetailView: View {
     }
 
     /// "PDF couldn't be saved to …" with Choose Folder… and Save PDF… (screens-flows.md §2c).
-    private func saveFailureBanner(_ failure: PDFSaveFailure) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Label {
-                Text(L.pdfSaveFailed(failure.folder))
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            }
-            .textRole(.body)
-            Text(verbatim: failure.detail).textRole(.caption)
+    private func saveFailureNotice(_ failure: PDFSaveFailure) -> some View {
+        // A problem-kind message, the system text as its detail line (design-system.md §8.3).
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            InlineMessage(L.pdfSaveFailed(failure.folder), detail: failure.detail)
             HStack(spacing: Spacing.m) {
                 Button { chooseFolderAndSave() } label: { Text(L.chooseFolder) }
                 Button { savePDF() } label: { Text(L.savePDF) }
             }
         }
-        .padding(Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tileSurface(radius: Radius.m)
     }
 
     private func savePDF() {
@@ -543,12 +538,6 @@ enum DocumentLinks {
             }
             return true
         }
-    }
-
-    /// The deduction links of an issued final invoice; empty for every other document.
-    static func deductions(_ stores: Stores, state: DocumentState?) throws -> [AdvanceDeductionLink] {
-        guard let state, state.summary.kind == .finalInvoice, state.summary.status == .issued else { return [] }
-        return try stores.documents.deductions(ofFinalInvoice: state.id)
     }
 
     /// The paid-in-advance links of an issued final invoice, or the settled payments of an issued advance
