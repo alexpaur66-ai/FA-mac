@@ -238,13 +238,19 @@ struct StockItemDetailView: View {
     @Environment(\.locale) private var locale
 
     var body: some View {
-        if let state = stock.state(id: itemID) {
+        // An archived item, shown from a client page's Items tab (§2n), is read-only: its history stays.
+        if let state = stock.state(id: itemID) ?? stock.anyState(id: itemID) {
+            let archived = state.item.isArchived
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.xl) {
                     // Keyed on the id, so a saved edit keeps the header and its focus; the header refreshes its
                     // fields when the stored item changes (Undo, Redo).
                     StockItemHeader(stock: stock, item: state.item)
                         .id(state.item.id)
+                        .disabled(archived)
+                    if archived {
+                        Text(L.stockItemArchived).textRole(.rowSecondary)
+                    }
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(verbatim: StockFormat.quantity(state.onHand, unit: state.item.unit, locale: locale))
                             .textRole(.kpi)
@@ -260,11 +266,13 @@ struct StockItemDetailView: View {
                 ToolbarItem {
                     Button { stock.sheet = .receive(itemID) } label: { Text(L.stockReceive) }
                         .help(Text(L.stockReceiveHelp))
+                        .disabled(archived)
                 }
                 ToolbarItem {
                     Button { stock.sheet = .count(itemID) } label: { Text(L.stockCount) }
                         .buttonStyle(.borderedProminent)
                         .help(Text(L.stockCountHelp))
+                        .disabled(archived)
                 }
             }
         } else {

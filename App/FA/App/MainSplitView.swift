@@ -21,6 +21,8 @@ struct MainSplitView: View {
     @SceneStorage("documents.selection") private var documentSelectionStored = ""
     @SceneStorage("overview.selection") private var overviewSelection: String?
     @SceneStorage("clients.selection") private var clientSelection: String?
+    /// The client page's tab (screens-flows.md §2e); Items once a stock item exists.
+    @SceneStorage("clients.tab") private var clientTab: ClientTab = .documents
     @State private var paymentDocumentSelection: String?
     /// Restored ids whose documents are gone are dropped once, when the documents have loaded.
     @State private var restoredSelectionsChecked = false
@@ -242,11 +244,12 @@ struct MainSplitView: View {
         case .clients:
             if let id = clientSelection {
                 let last = lastInvoice(ofClient: id)
-                ClientDetailView(clients: clients, documents: documents, customerID: id,
+                ClientDetailView(clients: clients, documents: documents, stock: stock, tab: $clientTab, customerID: id,
                                  editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) },
                                  lastInvoiceNumber: last?.summary.number,
                                  duplicateLastInvoice: duplicateAction(last),
-                                 openDocument: { openDocument(id: $0) })
+                                 openDocument: { openDocument(id: $0) },
+                                 showStockItem: showStockItem)
             } else {
                 placeholder(L.noClientSelected)
             }
@@ -375,6 +378,12 @@ struct MainSplitView: View {
             actions.backUpNow = backUpNow
         }
         actions.newStockItem = newStockItem
+        // View ▸ Client Tab ▸, while a client page is shown (§1.4); Items once a stock item exists.
+        if sidebar.section == .clients, clientSelection != nil {
+            actions.clientTab = stock.hasItems ? clientTab : .documents
+            actions.hasStockItems = stock.hasItems
+            actions.showClientTab = { tab in clientTab = tab }
+        }
         if sidebar.section == .stock, let id = stockSelection, let state = stock.state(id: id) {
             let model = stock
             var archive: (@MainActor () -> Void)?
@@ -487,6 +496,14 @@ struct MainSplitView: View {
             }
         }
         return actions
+    }
+
+    /// An Items row of a client page: the item in Stock, past an earlier search so the list shows it. An
+    /// archived item has no row there; its detail shows read-only (StockItemDetailView).
+    private func showStockItem(_ id: String) {
+        stockSearch = ""
+        stockSelection = id
+        show(.section(.stock))
     }
 
     private func show(_ item: SidebarItem) {

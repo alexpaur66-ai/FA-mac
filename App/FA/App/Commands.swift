@@ -105,6 +105,10 @@ struct MainActions {
     var newStockItem: (@MainActor () -> Void)?
     /// The Stock menu's items for the item selected in Stock; nil otherwise.
     var stockItem: StockMenuActions?
+    /// View ▸ Client Tab ▸: the tab shown while a client page is; nil otherwise.
+    var clientTab: ClientTab?
+    var hasStockItems = false
+    var showClientTab: (@MainActor (ClientTab) -> Void)?
 }
 
 /// The Stock menu (screens-flows.md §2n): Count… · Receive… · Take Out… | Archive, for the selected item.
@@ -226,6 +230,18 @@ struct AppCommands: Commands {
             }
             .disabled(actions == nil)
             sortMenu
+            // Checkmarked, so the client page's tabs have a path that doesn't depend on Tab (§1.4, §2e).
+            Menu {
+                ForEach(ClientTab.allCases) { tab in
+                    Toggle(isOn: Binding(get: { actions?.clientTab == tab }, set: { _ in actions?.showClientTab?(tab) })) {
+                        Text(tab.title)
+                    }
+                    .disabled(tab == .items && !(actions?.hasStockItems ?? false))
+                }
+            } label: {
+                Text(L.menuClientTab)
+            }
+            .disabled(actions?.clientTab == nil)
             Divider()
             // A draft in the editor: its detail swaps between the editor and the live PDF preview (§2c).
             Button { actions?.togglePreview?() } label: { Text(actions?.previewShown == true ? L.hidePreview : L.showPreview) }

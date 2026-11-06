@@ -193,9 +193,27 @@ struct ClientsView: View {
     }
 }
 
+/// The client page's tabs (screens-flows.md §2e): Documents, and Items once a stock item exists (§2n). Activity
+/// comes with the client notes.
+enum ClientTab: String, CaseIterable, Identifiable {
+    case documents, items
+
+    var id: Self { self }
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .documents: L.clientDocuments
+        case .items: L.clientTabItems
+        }
+    }
+}
+
 struct ClientDetailView: View {
     let clients: ClientsModel
     let documents: DocumentListModel
+    /// The window's stock, for the Items tab (§2n "On the client page").
+    let stock: StockModel
+    @Binding var tab: ClientTab
     let customerID: String
     let editClient: @MainActor () -> Void
     /// New Invoice for this client (screens-flows.md §2e); ⇧⌘N makes an advance for it.
@@ -205,8 +223,11 @@ struct ClientDetailView: View {
     var duplicateLastInvoice: (@MainActor () -> Void)? = nil
     /// ↩ or a double-click on a document row shows it in Documents ▸ All (other-07).
     var openDocument: (@MainActor (String) -> Void)? = nil
+    /// ↩ or a double-click on an Items row shows the item in Stock.
+    var showStockItem: (@MainActor (String) -> Void)? = nil
 
     @State private var documentSelection: Set<String> = []
+    @State private var itemSelection: Set<String> = []
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -222,34 +243,21 @@ struct ClientDetailView: View {
                     figure(L.clientOpenBalance, row.open, overdue: row.overdue)
                     figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
-                Text(L.clientDocuments).textRole(.sectionTitle)
-                Table(own, selection: $documentSelection) {
-                    TableColumn(Text(L.colStatus)) { row in
-                        StatusBadge(row.badgeInputs, detail: row.badgeDetail(locale: locale))
+                // The tabs show once a stock item exists; until then the page has its documents only.
+                // §2e "The control": a SwiftUI TabView, never `.segmented`. The macOS 27 `Picker` with
+                // `PickerStyle.tabs` waits for an SDK that has it (CI builds with the macOS 26 SDK).
+                if stock.hasItems {
+                    TabView(selection: $tab) {
+                        documentsTable(own)
+                            .tabItem { Text(ClientTab.documents.title) }
+                            .tag(ClientTab.documents)
+                        itemsTable
+                            .tabItem { Text(ClientTab.items.title) }
+                            .tag(ClientTab.items)
                     }
-                    .width(min: 110, ideal: 180)
-                    TableColumn(Text(L.colNumber)) { row in DocumentNumberText(row: row) }
-                    TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName).textRole(.body) }
-                    TableColumn(Text(L.colIssued)) { row in DayText(row.issueDate) }.alignment(.trailing)
-                    TableColumn(Text(L.colDue)) { row in DayText(row.dueDate) }.alignment(.trailing)
-                    TableColumn(Text(L.colTotal)) { row in
-                        if let total = row.totalOrNil {
-                            MoneyText(amount: total, currency: row.currencyCode, locale: locale)
-                        } else {
-                            Text(verbatim: "—").textRole(.amountSecondary)
-                        }
-                    }
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colOpen)) { row in
-                        MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
-                                  role: row.outstanding > 0 ? .amountStrong : .amount)
-                    }
-                    .alignment(.trailing)
-                }
-                .contextMenu(forSelectionType: String.self) { _ in
-                    EmptyView()
-                } primaryAction: { ids in
-                    if ids.count == 1, let id = ids.first { openDocument?(id) }
+                } else {
+                    Text(L.clientDocuments).textRole(.sectionTitle)
+                    documentsTable(own)
                 }
             }
             .padding(Spacing.xl)
@@ -284,6 +292,38 @@ struct ClientDetailView: View {
             ContentUnavailableView {
                 Label { Text(L.noClientSelected) } icon: { Image(systemName: "person.2") }
             }
+        }
+    }
+
+    /// The Documents tab: the client's documents, newest first; ↩ or a double-click shows one in Documents.
+    private func documentsTable(_ own: [DocumentRow]) -> some View {
+        Table(own, selection: $documentSelection) {
+            TableColumn(Text(L.colStatus)) { row in
+                StatusBadge(row.badgeInputs, detail: row.badgeDetail(locale: locale))
+            }
+            .width(min: 110, ideal: 180)
+            TableColumn(Text(L.colNumber)) { row in DocumentNumberText(row: row) }
+            TableColumn(Text(L.colType)) { row in Text(verbatim: row.typeName).textRole(.body) }
+            TableColumn(Text(L.colIssued)) { row in DayText(row.issueDate) }.alignment(.trailing)
+            TableColumn(Text(L.colDue)) { row in DayText(row.dueDate) }.alignment(.trailing)
+            TableColumn(Text(L.colTotal)) { row in
+                if let total = row.totalOrNil {
+                    MoneyText(amount: total, currency: row.currencyCode, locale: locale)
+                } else {
+                    Text(verbatim: "—").textRole(.amountSecondary)
+                }
+            }
+            .alignment(.trailing)
+            TableColumn(Text(L.colOpen)) { row in
+                MoneyText(amount: row.outstanding, currency: row.currencyCode, locale: locale,
+                          role: row.outstanding > 0 ? .amountStrong : .amount)
+            }
+            .alignment(.trailing)
+        }
+        .contextMenu(forSelectionType: String.self) { _ in
+            EmptyView()
+        } primaryAction: { ids in
+            if ids.count == 1, let id = ids.first { openDocument?(id) }
         }
     }
 
@@ -338,6 +378,43 @@ struct ClientDetailView: View {
         .padding(Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tileSurface(radius: Radius.m)
+    }
+
+    /// Item · Bought This Year · Bought in All · Last Bought · Last Price, from the "out" movements of the
+    /// client's issued documents (§2n "On the client page"); a double-click shows the item in Stock.
+    @ViewBuilder private var itemsTable: some View {
+        let rows = stock.clientItems(customerID: customerID, year: documents.today.year)
+        if rows.isEmpty {
+            Text(L.clientNoItems).textRole(.rowSecondary)
+        } else {
+            Table(rows, selection: $itemSelection) {
+                TableColumn(Text(L.colItem)) { row in Text(verbatim: row.name).textRole(.body) }
+                TableColumn(Text(L.colBoughtThisYear)) { row in
+                    Text(verbatim: StockFormat.quantity(row.boughtThisYear, unit: row.unit, locale: locale)).textRole(.amount)
+                }
+                .alignment(.trailing)
+                TableColumn(Text(L.colBoughtInAll)) { row in
+                    Text(verbatim: StockFormat.quantity(row.boughtInAll, unit: row.unit, locale: locale)).textRole(.amount)
+                }
+                .alignment(.trailing)
+                TableColumn(Text(L.colLastBought)) { row in
+                    Text(L.lastBoughtLine(row.lastDay.formatted(locale), row.lastDocumentNumber ?? "")).textRole(.body)
+                }
+                TableColumn(Text(L.colLastPrice)) { row in
+                    if let price = row.lastPrice {
+                        MoneyText(amount: price.amount, currency: price.currency.code, locale: locale)
+                    } else {
+                        Text(verbatim: "—").textRole(.amountSecondary)
+                    }
+                }
+                .alignment(.trailing)
+            }
+            .contextMenu(forSelectionType: String.self) { _ in
+                EmptyView()
+            } primaryAction: { ids in
+                if ids.count == 1, let id = ids.first { showStockItem?(id) }
+            }
+        }
     }
 
     /// The Overview's revenue rule (screens-flows.md §2a): invoices, payment tax documents, and a final

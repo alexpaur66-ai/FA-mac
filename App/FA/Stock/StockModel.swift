@@ -48,6 +48,14 @@ final class StockModel {
         allStates[id]
     }
 
+    /// A stock item exists, archived or not: the client page shows its Items tab (§2n).
+    var hasItems: Bool { !allStates.isEmpty }
+
+    /// The client page's Items tab: what the client bought, from the "out" movements of their issued documents.
+    func clientItems(customerID: String, year: Int) -> [ClientStockItem] {
+        (try? stock.clientItems(customerID: customerID, year: year)) ?? []
+    }
+
     /// The sidebar badge: the items running low.
     var lowCount: Int { states.filter(\.isLow).count }
 

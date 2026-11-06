@@ -124,4 +124,32 @@ import InvoicingCore
         let restored = try stock.links(documentID: draft.id)
         #expect(restored == ["a": bolt.id])
     }
+    @Test func aClientsItemsComeFromTheOutMovementsOfTheirIssuedDocuments() throws {
+        let database = try Fixtures.prepared()
+        let stock = StockStore(database)
+        let documents = DocumentStore(database)
+        let bolt = try stock.add(name: "Bolt M8", unit: "ks", onHand: 100, day: Fixtures.day("2026-11-01"), now: Fixtures.now)
+        let draft = goodsDraft()
+        try documents.saveDraft(draft, now: Fixtures.now)
+        try stock.link(documentID: draft.id, lineID: "a", itemID: bolt.id)
+        try stock.link(documentID: draft.id, lineID: "b", itemID: bolt.id)
+        // Before Issue nothing was bought.
+        let before = try stock.clientItems(customerID: "cust-cz", year: 2026)
+        #expect(before.isEmpty)
+        try documents.issue(id: draft.id, seriesID: "fv", now: Fixtures.now)
+
+        let items = try stock.clientItems(customerID: "cust-cz", year: 2026)
+        #expect(items.count == 1)
+        let row = try #require(items.first)
+        #expect(row.name == "Bolt M8")
+        #expect(row.boughtThisYear == 30)
+        #expect(row.boughtInAll == 30)
+        #expect(row.lastDay == Fixtures.day("2026-11-04"))
+        #expect(row.lastDocumentNumber == "FV-2026-001")
+        #expect(row.lastPrice == Money(Fixtures.d("12.50"), .czk))
+        let lastYear = try stock.clientItems(customerID: "cust-cz", year: 2025)
+        #expect(lastYear.first?.boughtThisYear == 0)
+        let other = try stock.clientItems(customerID: "cust-de", year: 2026)
+        #expect(other.isEmpty)
+    }
 }
