@@ -188,6 +188,14 @@ struct NumberCell: Hashable {
     /// issue date" DUZP into a later month (docs-28).
     private(set) var startedOn: CalendarDay?
 
+    /// Line id → stock item id: the draft's lines that take from stock (screens-flows.md §2c "Stock in the
+    /// lines"). The links live beside the document, never in it (ADR 0013 rule 4).
+    private(set) var stockLinks: [String: String] = [:]
+    /// Why the last link to a stock item failed; shown under the lines.
+    private(set) var stockError: String?
+    /// The window's undo manager, set by the editor view: Don't Take from Stock is undoable from the menu too.
+    @ObservationIgnored weak var undoManager: UndoManager?
+
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// Set when the draft was deleted: nothing is written any more (a pending save would re-create it).
     @ObservationIgnored private var discarded = false
@@ -243,6 +251,7 @@ struct NumberCell: Hashable {
             refreshDeductionConflicts()
             refreshRate()
             floatIssueDate()
+            refreshStockLinks()
         } catch {
             loadError = ErrorText.message(error)
         }
@@ -1225,6 +1234,99 @@ struct NumberCell: Hashable {
     func predictedNumber(seriesID: String) -> String? {
         guard let document else { return nil }
         return try? stores.series.peekNextNumber(seriesID: seriesID, on: document.issueDate)
+    }
+
+    // MARK: Stock (screens-flows.md §2c "Stock in the lines", §2n)
+
+    /// The Description suggestions list stock items on every kind but a tax document for a received payment.
+    var offersStock: Bool {
+        guard let document else { return false }
+        return document.kind != .paymentTaxDocument
+    }
+
+    /// The draft's kind takes goods out at Issue (an Invoice or a Final invoice); an advance's links wait for
+    /// its final invoice.
+    var takesGoodsOut: Bool {
+        document.map { StockStore.takesGoodsOut($0.kind) } ?? false
+    }
+
+    /// The focused line takes from stock: Document ▸ Don't Take from Stock is enabled.
+    var focusedLineIsLinked: Bool {
+        focusedLineID.map { stockLinks[$0] != nil } ?? false
+    }
+
+    func refreshStockLinks() {
+        do {
+            stockLinks = try stores.stock.links(documentID: documentID)
+        } catch {
+            stockError = ErrorText.message(error)
+        }
+    }
+
+    /// Picking a stock item fills Description with its name and Unit with its unit, and links the line. The
+    /// unit price comes from the last issued line for the item in the draft's currency; with none, the line
+    /// keeps its price. The draft is written first, as the link names a saved line.
+    func linkLine(_ lineID: String, to item: StockItem) {
+        guard let document, !discarded else { return }
+        let price: Decimal? = try? stores.stock.lastUnitPrice(itemID: item.id, currency: document.currency)
+        setLine(lineID) { line in
+            line.text = item.name
+            line.unit = item.unit.isEmpty ? nil : item.unit
+            if let price { line.unitPrice = price.rounded(scale: document.currency.minorUnits) }
+        }
+        guard saveNow() else { return }
+        relink(lineID, itemID: item.id, actionName: nil)
+    }
+
+    /// Don't Take from Stock, from the line's context menu or the Document menu; Undo links the line again.
+    func unlinkLine(_ lineID: String) {
+        guard let itemID = stockLinks[lineID], !discarded else { return }
+        do {
+            try stores.stock.unlink(documentID: documentID, lineID: lineID)
+            stockError = nil
+        } catch {
+            stockError = ErrorText.message(error)
+            return
+        }
+        refreshStockLinks()
+        if let undoManager {
+            undoManager.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.relink(lineID, itemID: itemID, actionName: L.undoDontTakeFromStock) }
+            }
+            undoManager.setActionName(String(localized: L.undoDontTakeFromStock))
+        }
+    }
+
+    func unlinkFocusedLine() {
+        guard let id = focusedLineID else { return }
+        unlinkLine(id)
+    }
+
+    /// Links the line; as an Undo of Don't Take from Stock it registers the Redo.
+    private func relink(_ lineID: String, itemID: String, actionName: LocalizedStringResource?) {
+        guard !discarded else { return }
+        do {
+            try stores.stock.link(documentID: documentID, lineID: lineID, itemID: itemID)
+            stockError = nil
+        } catch {
+            stockError = ErrorText.message(error)
+            return
+        }
+        refreshStockLinks()
+        if let actionName, let undoManager {
+            undoManager.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.unlinkLine(lineID) }
+            }
+            undoManager.setActionName(String(localized: actionName))
+        }
+    }
+
+    /// The Issue sheet's stock row: what Issue takes out, each item once (§2n "Review and Issue").
+    func stockIssueRows() -> [StockIssueRow] {
+        guard let document else { return [] }
+        let lines = Self.strippingBlankTrailingLines(document).lines
+        return (try? stores.stock.issuePreview(documentID: documentID, kind: document.kind, lines: lines,
+                                               taxPoint: document.taxPoint)) ?? []
     }
 
     /// Writes the draft, then issues it in the data layer's one transaction (ADR 0005): number, symbol,

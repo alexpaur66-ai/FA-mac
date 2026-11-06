@@ -126,6 +126,8 @@ final class DocumentListModel {
         let document: Document
         let receiptOf: DocumentPayment?
         let dating: DraftDating?
+        /// The links of its lines to stock items, which go with the draft (ADR 0013 rule 4).
+        var stockLinks: [StockLineLink] = []
     }
 
     /// A new ticket for one undo registration of the window, kept alive here (the UndoManager does not
@@ -167,6 +169,7 @@ final class DocumentListModel {
                 try stores.documents.saveDraft(entry.document, issueDateSetByHand: entry.dating?.issueDateSetByHand ?? true,
                                                taxPointSetByHand: entry.dating?.taxPointSetByHand)
                 lastID = entry.document.id
+                if !entry.stockLinks.isEmpty { try? stores.stock.restoreLinks(entry.stockLinks) }
                 guard entry.receiptOf != nil else { continue }
                 guard let payment, payment.receiptDocumentID == nil else {
                     unlinked = true

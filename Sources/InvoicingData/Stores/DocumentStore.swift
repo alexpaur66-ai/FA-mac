@@ -214,6 +214,8 @@ public struct DocumentStore: Sendable {
             }
             try issued.update(db)
             try NumberSeriesRecord(stored).update(db)
+            // Linked lines of an Invoice or a Final invoice take their goods out of stock (ADR 0013).
+            try StockStore.recordIssue(db, document: document, at: stamp)
             let external = try Self.linkDeductions(db, finalInvoice: issued, document: document, at: stamp)
             let externalPaid = try Self.linkPaidAdvances(db, finalInvoice: issued, document: document, at: stamp)
             var details = ["number": number, "series": seriesID, "sha256": issued.snapshotSHA256 ?? ""]

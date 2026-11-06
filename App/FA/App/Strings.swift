@@ -727,6 +727,25 @@ enum L {
     static let undoDeleteStockItem = r("stock.undoDelete", "Delete Stock Item")
     static let undoArchiveStockItem = r("stock.undoArchive", "Archive Stock Item")
 
+    // Stock in the draft's lines (screens-flows.md §2c, §2n)
+    static func stockInStock(_ figure: String) -> LocalizedStringResource { r("stock.inStock", "\(figure) in stock") }
+    static func addToStockNamed(_ name: String) -> LocalizedStringResource { r("stock.addToStockNamed", "Add “\(name)” to Stock…") }
+    static func takesFromStockHelp(_ name: String, _ figure: String) -> LocalizedStringResource {
+        r("stock.takesFromStockHelp", "Takes from stock: \(name) (\(figure) on hand)")
+    }
+    static func leavesStockWithFinalHelp(_ name: String, _ figure: String) -> LocalizedStringResource {
+        r("stock.leavesWithFinalHelp", "\(name) (\(figure) on hand) leaves stock with the final invoice")
+    }
+    static let dontTakeFromStock = r("stock.dontTake", "Don't Take from Stock")
+    static let undoDontTakeFromStock = r("stock.undoDontTake", "Don't Take from Stock")
+    static let issueTakesFromStock = r("issue.takesFromStock", "Takes from stock")
+    static func issueStockItem(_ name: String, _ change: String, _ left: String) -> LocalizedStringResource {
+        r("issue.stockItem", "\(name) \(change) (\(left) left)")
+    }
+    static func issueStockItemCounted(_ name: String, _ change: String, _ left: String) -> LocalizedStringResource {
+        r("issue.stockItemCounted", "\(name) \(change) (\(left) left, counted after the DUZP)")
+    }
+
     // Backups (screens-flows.md §2h, §2a, §2i)
     static let backupFolder = r("backup.folder", "Backup folder")
     static let backupFolderPrompt = r("backup.folderPrompt", "Choose the folder where backups are kept.")

@@ -274,7 +274,7 @@ struct MainSplitView: View {
         if documents.state(id: id)?.summary.status == .draft {
             if let editor, editor.documentID == id {
                 DraftEditorView(
-                    stores: stores, documents: documents, model: editor, onIssued: issued,
+                    stores: stores, documents: documents, stock: stock, model: editor, onIssued: issued,
                     newClient: { sheet = .newClientForDraft($0) },
                     openChainItem: { item in
                         guard let target = item.documentID else { return }
@@ -689,6 +689,8 @@ struct MainSplitView: View {
     /// detail column shows the issued view (screens-flows.md §2c, "Afterwards").
     private func issued(_ document: Document) {
         issueSheetPresented = false
+        // Linked lines of an Invoice or a Final invoice took their goods out of stock (ADR 0013).
+        stock.reload()
         previewShown = false
         if sidebar == .filter(.drafts) { sidebar = .filter(.all) }
         if sidebar.section == .documents { documentSelection = [document.id] }
@@ -754,6 +756,8 @@ struct MainSplitView: View {
                 lines: Self.copiedLines(source.lines),
                 orderReference: source.orderReference, note: source.note, footer: profile?.footer)
             try stores.documents.saveDraft(copy)
+            // The copy's lines take from the same stock items (screens-flows.md §2c).
+            try stores.stock.copyLinks(from: source.id, to: copy.id, lineIDs: Self.lineIDs(source.lines, copy.lines))
             openDraft(copy.id, focus: .firstLineQuantity)
         } catch {
             report(error)
@@ -820,10 +824,17 @@ struct MainSplitView: View {
                 advanceDeductions: deductions, paidAdvances: paidAdvances.isEmpty ? nil : paidAdvances, relatedDocumentNumber: advance.number,
                 orderReference: advance.orderReference, note: advance.note, footer: profile?.footer)
             try stores.documents.saveDraft(final)
+            // The final invoice takes the goods out of stock, once, for the whole chain (§2n rule 5).
+            try stores.stock.copyLinks(from: advance.id, to: final.id, lineIDs: Self.lineIDs(advance.lines, final.lines))
             openDraft(final.id, focus: .firstLineQuantity)
         } catch {
             report(error)
         }
+    }
+
+    /// Each source line's id → its copy's id; `copiedLines` keeps the order.
+    private static func lineIDs(_ source: [DocumentLine], _ copy: [DocumentLine]) -> [String: String] {
+        Dictionary(zip(source.map(\.id), copy.map(\.id)), uniquingKeysWith: { first, _ in first })
     }
 
     private static func copiedLines(_ lines: [DocumentLine]) -> [DocumentLine] {
@@ -845,8 +856,10 @@ struct MainSplitView: View {
                 guard let document = try stores.documents.document(id: id), document.status == .draft else { continue }
                 let receiptOf = try stores.documents.payment(ofReceipt: id)
                 let dating = try stores.documents.draftDating(id: id)
+                let stockLinks = try stores.stock.linkRows(documentID: id)
                 try stores.documents.deleteDraft(id: id)
-                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOf: receiptOf, dating: dating))
+                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOf: receiptOf, dating: dating,
+                                                              stockLinks: stockLinks))
                 forgetDeletedDraft(id)
             } catch {
                 failure = error

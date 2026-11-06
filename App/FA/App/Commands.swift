@@ -357,6 +357,9 @@ struct AppCommands: Commands {
             editor?.requestDiscount(on: nil)
         } label: { Text(L.addDiscount) }
             .disabled(editor?.focusedLineID == nil)
+        // Enabled with the cursor in a line linked to a stock item; undoable (screens-flows.md §1.4, §2n).
+        Button { editor?.unlinkFocusedLine() } label: { Text(L.dontTakeFromStock) }
+            .disabled(!(editor?.focusedLineIsLinked ?? false))
         Divider()
         Picker(selection: Binding(get: { document?.kind ?? .invoice }, set: { kind in editor?.setKind(kind) })) {
             ForEach(DraftEditorModel.kindOptions(for: document?.kind ?? .invoice), id: \.self) { kind in
