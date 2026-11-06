@@ -1101,4 +1101,26 @@ enum L {
     static func issueMonthExported(_ month: String, _ day: String) -> LocalizedStringResource {
         r("issue.monthExported", "\(month) was already exported for the accountant on \(day); this document belongs to that month")
     }
+
+    // The client's Activity tab and notes (screens-flows.md §2e, design-system.md §8.15)
+    static let clientTabActivity = r("client.tabActivity", "Activity")
+    static let addNotePrompt = r("activity.addNotePrompt", "Add a note…")
+    static let noteText = r("activity.noteText", "Note")
+    static let noteDay = r("activity.noteDay", "Day")
+    static let noteDayHelp = r("activity.noteDayHelp", "The day the note is about")
+    static func menuAddNote(_ name: String) -> LocalizedStringResource { r("menu.addNoteNamed", "Add Note to “\(name)”…") }
+    static let menuAddNoteEmpty = r("menu.addNoteEmpty", "Add Note…")
+    static let noActivity = r("activity.empty", "No notes or document events yet")
+    static let editNote = r("activity.editNote", "Edit Note…")
+    static let editNoteTitle = r("activity.editNoteTitle", "Edit Note")
+    static let deleteNote = r("activity.deleteNote", "Delete Note")
+    static let undoAddNote = r("activity.undoAdd", "Add Note")
+    static let undoEditNote = r("activity.undoEdit", "Edit Note")
+    static let undoDeleteNote = r("activity.undoDelete", "Delete Note")
+    /// A document event in the client's tab: "FV 2026-0042 · Received: 1 000,00 €".
+    static func activityForDocument(_ number: String, _ sentence: String) -> LocalizedStringResource {
+        r("activity.forDocument", "\(number) · \(sentence)")
+    }
+    static let noteTextRequired = r("activity.textRequired", "Type the note first.")
+    static let noteMissing = r("activity.noteMissing", "This note is no longer there.")
 }

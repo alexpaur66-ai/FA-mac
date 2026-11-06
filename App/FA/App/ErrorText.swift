@@ -36,6 +36,12 @@ enum ErrorText {
             case .dayInFuture: return String(localized: L.stockDayInFuture)
             }
         }
+        if let noteError = error as? ClientNoteError {
+            switch noteError {
+            case .textRequired: return String(localized: L.noteTextRequired)
+            case .noteNotFound: return String(localized: L.noteMissing)
+            }
+        }
         if let backupError = error as? BackupError {
             switch backupError {
             case .unreadable: return String(localized: L.backupUnreadable)
