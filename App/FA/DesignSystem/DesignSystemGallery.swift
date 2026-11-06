@@ -1,5 +1,5 @@
-// A debug-only gallery of the design system: text roles, status badges, amounts, the accent and
-// the floating surface. Open it in Xcode's canvas to check light, dark and Increase Contrast.
+// A debug-only gallery of the design system: text roles, status badges, amounts and the accent.
+// Open it in Xcode's canvas to check light, dark and Increase Contrast.
 // The amounts are sample values; 24,310 CZK/EUR is an illustrative rate, not a published ČNB rate.
 
 #if DEBUG
@@ -19,7 +19,6 @@ struct DesignSystemGallery: View {
                 amounts
                 scaled
                 accent
-                floating
             }
             .padding(Spacing.page)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,15 +97,6 @@ struct DesignSystemGallery: View {
                 .padding(.vertical, Spacing.s)
                 .foregroundStyle(.white)
                 .background(Brand.accent, in: RoundedRectangle(cornerRadius: Radius.m))
-        }
-    }
-
-    private var floating: some View {
-        section("Floating surface") {
-            Text(verbatim: "3 platby zaznamenány · Odvolat")
-                .padding(.horizontal, Spacing.l)
-                .padding(.vertical, Spacing.s)
-                .floatingSurface()
         }
     }
 

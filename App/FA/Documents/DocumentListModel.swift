@@ -82,13 +82,16 @@ final class DocumentListModel {
         states.filter { filter.matches($0, today: today) }.map { DocumentRow(state: $0, today: today) }
     }
 
-    /// Counts for the sidebar badges (Drafts, Overdue, Open advances).
-    var badgeCounts: [DocumentSmartFilter: Int] {
-        var counts: [DocumentSmartFilter: Int] = [:]
-        for filter in DocumentSmartFilter.allCases where filter.showsBadge {
-            counts[filter] = states.filter { filter.matches($0, today: today) }.count
-        }
-        return counts
+    /// The sidebar badges (screens-flows.md §1.2): the drafts, and the overdue invoices that Unpaid lists.
+    var badges: SidebarBadges {
+        SidebarBadges(
+            drafts: states.filter { $0.summary.status == .draft }.count,
+            overdue: overdueCount)
+    }
+
+    /// Unpaid's rows that are past their due date: the red badge and the subtitle's "3 overdue".
+    var overdueCount: Int {
+        states.filter { $0.countsAsUnpaidInvoice && $0.isOverdue }.count
     }
 
     // MARK: Undo
@@ -204,4 +207,10 @@ final class DocumentListModel {
 @MainActor
 final class UndoTicket {
     fileprivate(set) var spent = false
+}
+
+/// The counts the sidebar shows as badges; zero hides a badge.
+struct SidebarBadges: Equatable, Sendable {
+    var drafts = 0
+    var overdue = 0
 }

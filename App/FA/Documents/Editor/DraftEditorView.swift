@@ -51,8 +51,6 @@ struct DraftEditorView: View {
     let onIssued: @MainActor (Document) -> Void
     /// New Client “X”… from the client field: the New Client sheet opens with the typed name.
     let newClient: @MainActor (String) -> Void
-    /// Duplicate (toolbar, File ▸ New): a draft copy of this draft.
-    let duplicate: @MainActor (String) -> Void
 
     @Environment(\.locale) private var locale
     @Environment(\.textScale) private var textScale
@@ -133,25 +131,18 @@ struct DraftEditorView: View {
         .navigationTitle(Text(verbatim: title))
         .navigationSubtitle(Text(saveLine))
         .toolbar {
-            // Centre: Preview toggle · Duplicate; the one prominent action, Issue…, last (design-system.md §8.11).
-            ToolbarItem(placement: .automatic) {
+            // Fixed items (design-system.md §8.11): the Preview toggle, then the one prominent action,
+            // Issue…, text only and declared last so it is trailing. ⌘D duplicates from the File menu.
+            ToolbarItem {
                 Button { previewShown.toggle() } label: {
                     Label { Text(previewShown ? L.hidePreview : L.showPreview) } icon: {
                         Image(systemName: previewShown ? "square.and.pencil" : "doc.text.magnifyingglass")
                     }
                 }
                 .disabled(model.document == nil)
-                .help(Text(previewShown ? L.hidePreview : L.showPreview))
+                .help(Text(L.previewHelp))
             }
-            ToolbarItem(placement: .automatic) {
-                Button { duplicate(model.documentID) } label: {
-                    Label { Text(L.duplicate) } icon: { Image(systemName: "plus.square.on.square") }
-                }
-                // A payment tax document belongs to its payment; it is never duplicated.
-                .disabled(model.document == nil || model.document?.kind == .paymentTaxDocument)
-                .help(Text(L.duplicate))
-            }
-            ToolbarItem(placement: .automatic) {
+            ToolbarItem {
                 Button { openIssueSheet() } label: { Text(L.issue) }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.document == nil)

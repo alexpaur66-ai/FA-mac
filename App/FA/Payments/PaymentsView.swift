@@ -1,5 +1,5 @@
-// Payments & Bank (screens-flows.md §2f): every recorded payment, newest first. The bank import and the
-// matching queue arrive with v0.2.
+// Payments (screens-flows.md §2f): every recorded payment, newest first, with search. The bank import
+// and the matching queue arrive with v0.2.
 
 import InvoicingCore
 import InvoicingData
@@ -13,17 +13,22 @@ struct PaymentRow: Identifiable, Hashable {
     var date: CalendarDay { payment.paidOn }
     var amount: Decimal { payment.amount.amount }
     var currencyCode: String { payment.amount.currency.code }
-    /// Typed, Statement or Credit (screens-flows.md §2f).
-    var sourceName: String { String(localized: payment.sourceTitle) }
     var documentNumber: String { state.summary.number ?? "" }
     var customerName: String { state.summary.customerName }
     var note: String { payment.note ?? "" }
+
+    /// Plain search: client, document number, note and amount (screens-flows.md §2f).
+    func matches(search: String) -> Bool {
+        let needle = search.folded
+        guard !needle.isEmpty else { return true }
+        return [customerName, documentNumber, note, amount.description].contains { $0.folded.contains(needle) }
+    }
 }
 
 struct PaymentsView: View {
     let stores: Stores
     let documents: DocumentListModel
-    /// The document of the selected payment, for the detail column and the inspector.
+    /// The document of the selected payment, for the detail column.
     @Binding var selectedDocumentID: String?
     /// Deletes a payment, and with it its draft tax document when the dialog says so; the window
     /// registers the undo.
@@ -36,7 +41,13 @@ struct PaymentsView: View {
     @SceneStorage("payments.selection") private var selection: String?
     @State private var paymentPendingDeletion: DocumentPayment?
     @State private var sortOrder = [KeyPathComparator(\PaymentRow.date, order: .reverse)]
+    @State private var search = ""
     @Environment(\.locale) private var locale
+
+    /// The rows the search leaves; the detail column, the menus and ⌫ act only on these, as in Documents.
+    private var visibleRows: [PaymentRow] {
+        rows.filter { $0.matches(search: search) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,25 +67,32 @@ struct PaymentsView: View {
                 } description: {
                     Text(L.noPaymentsDescription)
                 }
+            } else if loaded && visibleRows.isEmpty {
+                ContentUnavailableView.search(text: search)
             } else {
                 table
             }
         }
         .navigationTitle(Text(L.payments))
-        .navigationSubtitle(Text(verbatim: String(rows.count)))
+        .navigationSubtitle(Text(verbatim: String(visibleRows.count)))
+        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchPayments))
         .task(id: documents.states) {
             load()
         }
         .onChange(of: selection, initial: true) { _, newValue in
             sync(newValue)
         }
+        // A selection the search hides is dropped, so nothing hidden is shown, deleted or acted on.
+        .onChange(of: search) {
+            dropHiddenSelection()
+        }
         .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
-    // Date · Client · Document · Amount · Source · Note (screens-flows.md §2f); Account and the CZK
-    // difference arrive with the bank import.
+    // Date · Client · Document · Amount · Note (screens-flows.md §2f); Account, the CZK difference and the
+    // Source arrive with the bank import, when statements make them differ from row to row.
     private var table: some View {
-        Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+        Table(visibleRows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
             TableColumn(Text(L.colDate), value: \.date) { row in DayText(row.date) }
                 .width(min: 90, ideal: 100)
             TableColumn(Text(L.colClient), value: \.customerName) { row in
@@ -98,21 +116,17 @@ struct PaymentsView: View {
             }
             .width(min: 110, ideal: 140)
             .alignment(.trailing)
-            TableColumn(Text(L.colSource), value: \.sourceName) { row in
-                Text(verbatim: row.sourceName).textRole(.body)
-            }
-            .width(min: 70, ideal: 90)
             TableColumn(Text(L.colNote), value: \.note) { row in
                 Text(verbatim: row.note).textRole(.body)
             }
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            if ids.count == 1, let id = ids.first, let row = rows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+            if ids.count == 1, let id = ids.first, let row = visibleRows.first(where: { $0.id == id }), row.payment.canBeDeleted {
                 Button(role: .destructive) { requestDeletion(row.payment) } label: { Text(L.deletePayment) }
             }
         }
         .onDeleteCommand {
-            if let id = selection, let row = rows.first(where: { $0.id == id }), row.payment.canBeDeleted {
+            if let id = selection, let row = visibleRows.first(where: { $0.id == id }), row.payment.canBeDeleted {
                 requestDeletion(row.payment)
             }
         }
@@ -139,6 +153,13 @@ struct PaymentsView: View {
         }
     }
 
+    /// Drops a selected payment the search hides; `sync` then clears the detail column.
+    private func dropHiddenSelection() {
+        if let id = selection, !visibleRows.contains(where: { $0.id == id }) {
+            selection = nil
+        }
+    }
+
     /// One query per issued document with a balance movement; a payments query across documents comes
     /// with the bank import.
     private func load() {
@@ -157,5 +178,6 @@ struct PaymentsView: View {
         }
         loaded = documents.loaded
         sync(selection)
+        if loaded { dropHiddenSelection() }
     }
 }

@@ -1,7 +1,8 @@
-// The menu bar (screens-flows.md §1.4). The main window publishes what it can do through
-// `focusedSceneValue`, so the menus follow the key window and its selection; an item whose action is
-// nil is disabled, never hidden. The editor of the selected draft is published too, so the Document menu
-// edits the draft from the keyboard (lines, type, currency, language, VAT treatment, rate).
+// The menu bar (screens-flows.md §1.4): FA, File, Edit, View, Document, Window, Help; there is no Client
+// menu. The main window publishes what it can do through `focusedSceneValue`, so the menus follow the key
+// window and its selection; an item whose action is nil is disabled, never hidden. The editor of the
+// selected draft is published too, so the Document menu edits the draft from the keyboard (lines, type,
+// currency, language, VAT treatment, rate).
 
 import AppKit
 import InvoicingCore
@@ -30,26 +31,42 @@ struct DocumentActions {
     /// Selects the document's client in Clients.
     var showClient: (@MainActor () -> Void)?
 
-    var reopenTitle: LocalizedStringResource {
-        reopenKind == .markedForCreditNote ? L.removeCreditNoteMark : L.reopenAdvance
-    }
+    /// Reopen of a closed advance: the Close Advance as Unpaid… row reads "Reopen Advance" (§1.4).
+    var reopenAdvance: (@MainActor () -> Void)? { reopenKind == .closedUnpaid ? reopen : nil }
+    /// Reopen of a marked document: the Mark for Credit Note… row reads "Remove Credit Note Mark".
+    var removeCreditNoteMark: (@MainActor () -> Void)? { reopenKind == .markedForCreditNote ? reopen : nil }
+
+    /// One ⌘R row: Record Payment…, or Record Refund… on an overpaid document.
+    var paymentAction: (@MainActor () -> Void)? { recordPayment ?? recordRefund }
+    var paymentTitle: LocalizedStringResource { recordPayment == nil && recordRefund != nil ? L.recordRefund : L.recordPayment }
+
+    /// One row for closing an advance or reopening it.
+    var closeAdvanceAction: (@MainActor () -> Void)? { reopenAdvance ?? closeAdvanceUnpaid }
+    var closeAdvanceTitle: LocalizedStringResource { reopenAdvance != nil ? L.reopenAdvance : L.closeAdvanceUnpaid }
+
+    /// One row for the credit note mark or its removal.
+    var creditNoteAction: (@MainActor () -> Void)? { removeCreditNoteMark ?? markForCreditNote }
+    var creditNoteTitle: LocalizedStringResource { removeCreditNoteMark != nil ? L.removeCreditNoteMark : L.markForCreditNote }
 }
 
 struct MainActions {
     var show: @MainActor (SidebarItem) -> Void
     var newDocument: @MainActor (DocumentKind) -> Void
     var newClient: @MainActor () -> Void
-    /// File ▸ Import ČNB Rates…: shows Exchange rates and opens the file importer.
+    /// File ▸ Exchange Rates: the read-only rates sheet.
+    var showExchangeRates: @MainActor () -> Void
+    /// File ▸ Import ČNB Rates…: the file importer over the current section.
     var importRates: @MainActor () -> Void
     /// Help ▸ Getting Started: the Overview with the setup card shown again.
     var showGettingStarted: @MainActor () -> Void
     var showDataFolder: (@MainActor () -> Void)?
-    /// Nil in the sections without an inspector (Exchange rates, Exports & Backup).
-    var toggleInspector: (@MainActor () -> Void)?
-    var inspectorShown = false
-    /// The Client menu: the client selected in Clients, or the client of the selected document.
-    var clientName: String?
-    var newDocumentForClient: (@MainActor (DocumentKind) -> Void)?
+    /// The Documents filter shown, for the checkmark in View ▸ Filter ▸; nil outside Documents.
+    var currentFilter: DocumentSmartFilter?
+    /// Client context (the Clients section with a client selected): File ▸ New Invoice reads
+    /// "New Invoice for Acme GmbH" and prefills that client.
+    var newDocumentClientName: String?
+    /// File ▸ Edit Client “…”…: the client selected in Clients, or the client of the selected document.
+    var editClientName: String?
     var editClient: (@MainActor () -> Void)?
     /// View ▸ Show/Hide Preview on a draft in the editor; `previewShown` picks the title.
     var togglePreview: (@MainActor () -> Void)?
@@ -78,16 +95,17 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         // File ▸ New replaces the system group, so File ▸ New Window never appears (§1.1). Duplicate makes
-        // a new draft, so it lives here (⌘D) and names what it copies.
+        // a new draft, so it lives here (⌘D) and names what it copies. The order is screens-flows.md §1.4.
         CommandGroup(replacing: .newItem) {
-            Button { actions?.newDocument(.invoice) } label: { Text(L.newInvoice) }
+            let client = actions?.newDocumentClientName
+            Button { actions?.newDocument(.invoice) } label: { Text(client.map { L.newInvoiceFor($0) } ?? L.newInvoice) }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(actions == nil)
-            Button { actions?.newDocument(.advanceRequest) } label: { Text(L.newAdvance) }
+            Button { actions?.newDocument(.advanceRequest) } label: { Text(client.map { L.newAdvanceFor($0) } ?? L.newAdvance) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(actions == nil)
+            // No shortcut: ⌥⌘N is unassigned in v0.1 (§3.1).
             Button { actions?.newClient() } label: { Text(L.newClient) }
-                .keyboardShortcut("n", modifiers: [.command, .option])
                 .disabled(actions == nil)
             Divider()
             Button { actions?.document.duplicate?() } label: {
@@ -95,30 +113,37 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(actions?.document.duplicate == nil)
+            Button { actions?.editClient?() } label: {
+                Text(actions?.editClientName.map { L.editClientNamed($0) } ?? L.editClientEmpty)
+            }
+            .disabled(actions?.editClient == nil)
             Divider()
+            Button { actions?.showExchangeRates() } label: { Text(L.menuRates) }
+                .disabled(actions == nil)
             Button { actions?.importRates() } label: { Text(L.importRates) }
                 .disabled(actions == nil)
-            Divider()
-            // The export step brings these three (screens-flows.md §2h); they are listed, disabled, until then.
+            // The export step brings it (screens-flows.md §2h); listed, disabled, until then.
             Button {} label: { Text(L.menuExportAccountant) }
                 .disabled(true)
+            Divider()
+            // The backup step brings these two; listed, disabled, until then. Show Data Folder is the one
+            // place the data file is reachable from.
             Button {} label: { Text(L.backUpNow) }
                 .disabled(true)
             Button {} label: { Text(L.restoreFromBackup) }
                 .disabled(true)
+            Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
+                .disabled(actions?.showDataFolder == nil)
         }
 
         // File ▸ Save PDF…, Show PDF in Finder and Print… (⌘P) follow the selected document (§1.4); ⌘S
-        // stays unbound, drafts autosave. Show Data Folder is the one place the data file is reachable from.
+        // stays unbound, drafts autosave.
         CommandGroup(after: .newItem) {
             Divider()
             Button { actions?.document.savePDF?() } label: { Text(L.savePDF) }
                 .disabled(actions?.document.savePDF == nil)
             Button { actions?.document.showPDFInFinder?() } label: { Text(L.showPDFInFinder) }
                 .disabled(actions?.document.showPDFInFinder == nil)
-            Divider()
-            Button { actions?.showDataFolder?() } label: { Text(L.showDataFolder) }
-                .disabled(actions?.showDataFolder == nil)
         }
         CommandGroup(replacing: .printItem) {
             Button { actions?.document.printDocument?() } label: { Text(L.printDocument) }
@@ -129,18 +154,28 @@ struct AppCommands: Commands {
         SidebarCommands()
         ToolbarCommands()
 
-        // View: section navigation ⌘1 … ⌘6, the inspector (⌥⌘I, never ⌃⌘I) and the text scale.
+        // View: the sections ⌘1 … ⌘4, the Documents filters, the draft preview and the text scale. There is
+        // no inspector: ⌥⌘I is never bound (§3.1).
         CommandGroup(after: .sidebar) {
             Divider()
             ForEach(AppSection.allCases) { section in
-                Button { actions?.show(.section(section)) } label: { Text(section.menuTitle) }
+                Button { actions?.show(.section(section)) } label: { Text(section.title) }
                     .keyboardShortcut(section.shortcutKey, modifiers: .command)
                     .disabled(actions == nil)
             }
             Divider()
-            Button { actions?.toggleInspector?() } label: { Text(actions?.inspectorShown == true ? L.hideInspector : L.showInspector) }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(actions?.toggleInspector == nil)
+            // Always enabled: a pick switches to Documents; the checkmark only while Documents is shown.
+            Picker(selection: Binding(
+                get: { actions?.currentFilter },
+                set: { filter in if let filter { actions?.show(.filter(filter)) } })) {
+                ForEach(DocumentSmartFilter.allCases) { filter in
+                    Text(filter.menuTitle).tag(Optional(filter))
+                }
+            } label: {
+                Text(L.menuFilter)
+            }
+            .disabled(actions == nil)
+            Divider()
             // A draft in the editor: its detail swaps between the editor and the live PDF preview (§2c).
             Button { actions?.togglePreview?() } label: { Text(actions?.previewShown == true ? L.hidePreview : L.showPreview) }
                 .disabled(actions?.togglePreview == nil)
@@ -158,11 +193,10 @@ struct AppCommands: Commands {
             Button { document?.issue?() } label: { Text(L.issue) }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(document?.issue == nil)
-            Button { document?.recordPayment?() } label: { Text(L.recordPayment) }
+            // One ⌘R row; on an overpaid document it reads Record Refund….
+            Button { document?.paymentAction?() } label: { Text(document?.paymentTitle ?? L.recordPayment) }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(document?.recordPayment == nil)
-            Button { document?.recordRefund?() } label: { Text(L.recordRefund) }
-                .disabled(document?.recordRefund == nil)
+                .disabled(document?.paymentAction == nil)
             Button { document?.createTaxDocument?() } label: { Text(L.createTaxDocumentForPayment) }
                 .disabled(document?.createTaxDocument == nil)
             Button { document?.createFinalInvoice?() } label: { Text(L.createFinalInvoice) }
@@ -170,30 +204,17 @@ struct AppCommands: Commands {
             Divider()
             editingItems
             Divider()
+            // Each closing row reads its reopening on a closed or marked document, which acts at once.
+            Button { document?.closeAdvanceAction?() } label: { Text(document?.closeAdvanceTitle ?? L.closeAdvanceUnpaid) }
+                .disabled(document?.closeAdvanceAction == nil)
+            Button { document?.creditNoteAction?() } label: { Text(document?.creditNoteTitle ?? L.markForCreditNote) }
+                .disabled(document?.creditNoteAction == nil)
+            Divider()
             Button { document?.showClient?() } label: { Text(L.showClient) }
                 .disabled(document?.showClient == nil)
             Divider()
-            Button { document?.closeAdvanceUnpaid?() } label: { Text(L.closeAdvanceUnpaid) }
-                .disabled(document?.closeAdvanceUnpaid == nil)
-            Button { document?.markForCreditNote?() } label: { Text(L.markForCreditNote) }
-                .disabled(document?.markForCreditNote == nil)
-            Button { document?.reopen?() } label: { Text(document?.reopenTitle ?? L.reopen) }
-                .disabled(document?.reopen == nil)
-            Divider()
             Button { document?.deleteDraft?() } label: { Text(L.deleteDraft) }
                 .disabled(document?.deleteDraft == nil)
-        }
-
-        // Client: the New items prefilled with the selected client, and their details (§1.4).
-        CommandMenu(Text(L.menuClient)) {
-            let name = actions?.clientName ?? ""
-            Button { actions?.newDocumentForClient?(.invoice) } label: { Text(L.newInvoiceFor(name)) }
-                .disabled(actions?.newDocumentForClient == nil)
-            Button { actions?.newDocumentForClient?(.advanceRequest) } label: { Text(L.newAdvanceFor(name)) }
-                .disabled(actions?.newDocumentForClient == nil)
-            Divider()
-            Button { actions?.editClient?() } label: { Text(L.editClientDetails) }
-                .disabled(actions?.editClient == nil)
         }
 
         // Window ▸ Main Window brings the main window to the front, or reopens it when it was closed (§1.1).

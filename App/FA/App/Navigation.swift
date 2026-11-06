@@ -20,29 +20,19 @@ enum Symbols {
     }
 }
 
-/// The six sidebar sections, ⌘1 … ⌘6.
+/// The four sidebar sections, ⌘1 … ⌘4 (screens-flows.md §1.2). Exchange rates, the export and the backup
+/// are File menu commands; ⌘5 waits for Stock and ⌘6 is unassigned.
 enum AppSection: String, CaseIterable, Identifiable, Sendable {
-    case overview, documents, clients, payments, rates, exports
+    case overview, documents, clients, payments
 
     var id: Self { self }
 
-    /// The sidebar label, in sentence case.
     var title: LocalizedStringResource {
         switch self {
         case .overview: L.overview
         case .documents: L.documents
         case .clients: L.clients
         case .payments: L.payments
-        case .rates: L.rates
-        case .exports: L.exports
-        }
-    }
-
-    /// The View menu item, in title case where the two differ.
-    var menuTitle: LocalizedStringResource {
-        switch self {
-        case .rates: L.menuRates
-        default: title
         }
     }
 
@@ -52,8 +42,6 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .documents: Symbols.document
         case .clients: "person.2"
         case .payments: "banknote"
-        case .rates: "arrow.left.arrow.right"
-        case .exports: "externaldrive"
         }
     }
 
@@ -63,52 +51,45 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .documents: "2"
         case .clients: "3"
         case .payments: "4"
-        case .rates: "5"
-        case .exports: "6"
-        }
-    }
-
-    /// Exchange rates and Exports & Backup have no inspector (design-system.md §8.11): the item is disabled there.
-    var hasInspector: Bool {
-        switch self {
-        case .overview, .documents, .clients, .payments: true
-        case .rates, .exports: false
         }
     }
 }
 
-/// The smart filters under Documents. The rules follow the aggregation table in screens-flows.md §2a:
-/// Unpaid and Overdue count invoices and final invoices only; advances have their own filter.
+/// The smart filters of Documents: the Documents row itself (all) and the three rows under it. The rules
+/// follow the aggregation table in screens-flows.md §2a: Unpaid counts invoices and final invoices only
+/// (overdue ones first, with their status word); advances have their own filter.
 enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
-    case all, drafts, unpaid, overdue, thisMonth, openAdvances
+    case all, drafts, unpaid, openAdvances
 
     var id: Self { self }
 
+    /// The sidebar row and the window subtitle.
     var title: LocalizedStringResource {
         switch self {
-        case .all: L.filterAll
+        case .all: L.documents
         case .drafts: L.filterDrafts
         case .unpaid: L.filterUnpaid
-        case .overdue: L.filterOverdue
-        case .thisMonth: L.filterThisMonth
         case .openAdvances: L.filterOpenAdvances
+        }
+    }
+
+    /// View ▸ Filter ▸, in title case.
+    var menuTitle: LocalizedStringResource {
+        switch self {
+        case .all: L.filterAllDocuments
+        case .drafts: L.filterDrafts
+        case .unpaid: L.filterUnpaid
+        case .openAdvances: L.menuFilterOpenAdvances
         }
     }
 
     var symbol: String {
         switch self {
-        case .all: "tray.full"
+        case .all: Symbols.document
         case .drafts: "pencil.circle"
         case .unpaid: "clock"
-        case .overdue: "exclamationmark.circle"
-        case .thisMonth: "calendar"
         case .openAdvances: Symbols.advance
         }
-    }
-
-    /// Drafts, Overdue and Open advances carry a count badge in the sidebar.
-    var showsBadge: Bool {
-        self == .drafts || self == .overdue || self == .openAdvances
     }
 
     func matches(_ state: DocumentState, today: CalendarDay) -> Bool {
@@ -120,28 +101,22 @@ enum DocumentSmartFilter: String, CaseIterable, Identifiable, Sendable {
             return summary.status == .draft
         case .unpaid:
             return state.countsAsUnpaidInvoice
-        case .overdue:
-            // Like Unpaid: invoices and final invoices only. Overdue advances are counted on their own
-            // line (Open advances), and an advance deducted by a final invoice is never overdue (§2a).
-            return state.countsAsUnpaidInvoice && state.isOverdue
-        case .thisMonth:
-            // Issued this month: a draft has no issue date yet, whatever date it carries.
-            return summary.status == .issued && summary.issueDate.year == today.year && summary.issueDate.month == today.month
         case .openAdvances:
             return state.isOpenAdvance
         }
     }
 
-    /// Each filter opens with its own sort (screens-flows.md §2b); drafts by their last edit.
+    /// Each filter opens with its own sort (screens-flows.md §2b); Unpaid by due date, so overdue rows
+    /// come first.
     var defaultSortOrder: [KeyPathComparator<DocumentRow>] {
         switch self {
-        case .overdue, .unpaid:
+        case .unpaid:
             [KeyPathComparator(\DocumentRow.dueDate, order: .forward)]
         case .openAdvances:
             [KeyPathComparator(\DocumentRow.issueDate, order: .forward)]
         case .drafts:
             [KeyPathComparator(\DocumentRow.updatedAt, order: .reverse)]
-        case .all, .thisMonth:
+        case .all:
             [KeyPathComparator(\DocumentRow.issueDate, order: .reverse)]
         }
     }
@@ -156,14 +131,26 @@ enum SidebarItem: Hashable, Sendable, RawRepresentable {
 
     init?(rawValue: String) {
         if let section = AppSection(rawValue: rawValue) {
-            self = .section(section)
-        } else if rawValue.hasPrefix(Self.filterPrefix),
-                  let filter = DocumentSmartFilter(rawValue: String(rawValue.dropFirst(Self.filterPrefix.count))) {
-            self = .filter(filter)
+            self = section == .documents ? .filter(.all) : .section(section)
+        } else if rawValue.hasPrefix(Self.filterPrefix) {
+            let name = String(rawValue.dropFirst(Self.filterPrefix.count))
+            if let filter = DocumentSmartFilter(rawValue: name) {
+                self = .filter(filter)
+            } else if let filter = Self.removedFilters[name] {
+                self = .filter(filter)
+            } else {
+                return nil
+            }
+        } else if Self.removedSections.contains(rawValue) {
+            self = .section(.overview)
         } else {
             return nil
         }
     }
+
+    /// Rows of earlier versions restore to the nearest row (screens-flows.md §1.1, Restore).
+    private static let removedFilters: [String: DocumentSmartFilter] = ["overdue": .unpaid, "thisMonth": .all]
+    private static let removedSections: Set<String> = ["rates", "exports"]
 
     var rawValue: String {
         switch self {

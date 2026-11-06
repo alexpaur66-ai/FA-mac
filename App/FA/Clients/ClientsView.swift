@@ -1,5 +1,5 @@
-// Clients (screens-flows.md §2e): the table, the client detail with their documents, the inspector with
-// the client's defaults, and the client form.
+// Clients (screens-flows.md §2e): the table, the client page with the client's details, defaults and
+// documents (there is no inspector), and the client form.
 
 import InvoicingCore
 import InvoicingData
@@ -66,6 +66,10 @@ struct ClientsView: View {
     let documents: DocumentListModel
     @Binding var selection: String?
     let editClient: @MainActor (String?) -> Void
+    /// The row's context menu: New Invoice for the client, Duplicate of its last invoice.
+    let newInvoice: @MainActor (String) -> Void
+    let lastInvoiceNumber: @MainActor (String) -> String?
+    let duplicateLastInvoice: @MainActor (String) -> Void
 
     @State private var search = ""
     @State private var sortOrder = [KeyPathComparator(\ClientRow.name, comparator: .localizedStandard)]
@@ -113,7 +117,7 @@ struct ClientsView: View {
         }
         .navigationTitle(Text(L.clients))
         .navigationSubtitle(Text(verbatim: String(rows.count)))
-        .searchable(text: $search, placement: .toolbar)
+        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchClients))
         .toolbar {
             ToolbarItem {
                 Button { editClient(nil) } label: {
@@ -157,8 +161,14 @@ struct ClientsView: View {
             .alignment(.trailing)
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            if ids.count == 1, let id = ids.first {
-                Button { editClient(id) } label: { Text(L.editClientDetails) }
+            // At most two groups, unavailable items hidden (screens-flows.md §2e).
+            if ids.count == 1, let id = ids.first, let customer = clients.customer(id: id) {
+                Button { newInvoice(id) } label: { Text(L.newInvoiceFor(customer.party.name)) }
+                if let number = lastInvoiceNumber(id) {
+                    Button { duplicateLastInvoice(id) } label: { Text(L.duplicateNumbered(number)) }
+                }
+                Divider()
+                Button { editClient(id) } label: { Text(L.editClientEmpty) }
             }
         }
     }
@@ -169,8 +179,11 @@ struct ClientDetailView: View {
     let documents: DocumentListModel
     let customerID: String
     let editClient: @MainActor () -> Void
-    /// New Invoice / New Advance Invoice for this client (screens-flows.md §2e).
+    /// New Invoice for this client (screens-flows.md §2e); ⇧⌘N makes an advance for it.
     let newDocument: @MainActor (DocumentKind) -> Void
+    /// The number of the client's last invoice, which Duplicate copies; nil when it has none.
+    var lastInvoiceNumber: String? = nil
+    var duplicateLastInvoice: (@MainActor () -> Void)? = nil
 
     @State private var documentSelection: Set<String> = []
     @Environment(\.locale) private var locale
@@ -184,8 +197,8 @@ struct ClientDetailView: View {
             VStack(alignment: .leading, spacing: Spacing.l) {
                 header(customer)
                 HStack(spacing: Spacing.l) {
-                    figure(L.clientOpenBalance, row.open)
-                    figure(L.colOverdue, row.overdue)
+                    // Two figures, no Overdue tile: the open balance says in words what of it is overdue.
+                    figure(L.clientOpenBalance, row.open, overdue: row.overdue)
                     figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
                 Text(L.clientDocuments).textRole(.sectionTitle)
@@ -215,22 +228,26 @@ struct ClientDetailView: View {
             }
             .padding(Spacing.xl)
             .navigationTitle(Text(verbatim: customer.party.name))
+            // Fixed items (design-system.md §8.11): New Invoice · Duplicate · Edit; no buttons in the content.
             .toolbar {
-                ToolbarItemGroup {
+                ToolbarItem {
                     Button { newDocument(.invoice) } label: {
-                        Label { Text(L.newInvoice) } icon: { Image(systemName: DocumentKind.invoice.symbol) }
+                        Label { Text(L.newInvoice) } icon: { Image(systemName: "plus") }
                     }
-                    .help(Text(L.newInvoiceFor(customer.party.name)))
-                    Button { newDocument(.advanceRequest) } label: {
-                        Label { Text(L.newAdvance) } icon: { Image(systemName: DocumentKind.advanceRequest.symbol) }
+                    .help(Text(L.newInvoiceForHelp(customer.party.name)))
+                }
+                ToolbarItem {
+                    Button { duplicateLastInvoice?() } label: {
+                        Label { Text(L.duplicate) } icon: { Image(systemName: "plus.square.on.square") }
                     }
-                    .help(Text(L.newAdvanceFor(customer.party.name)))
+                    .disabled(duplicateLastInvoice == nil)
+                    .help(Text(lastInvoiceNumber.map { L.duplicateNumberedHelp($0) } ?? L.duplicateHelp))
                 }
                 ToolbarItem {
                     Button { editClient() } label: {
                         Label { Text(L.edit) } icon: { Image(systemName: "pencil") }
                     }
-                    .help(Text(L.editClientHelp))
+                    .help(Text(L.editThisClientHelp))
                 }
             }
         } else {
@@ -256,13 +273,37 @@ struct ClientDetailView: View {
                 }
             }
             ClientDefaultsChips(customer: customer)
+            // The contacts and the note, which the inspector used to show (screens-flows.md §2e).
+            if party.email != nil || party.phone != nil {
+                HStack(spacing: Spacing.l) {
+                    if let email = party.email {
+                        Text(verbatim: email).textRole(.rowSecondary).textSelection(.enabled)
+                    }
+                    if let phone = party.phone {
+                        Text(verbatim: phone).textRole(.rowSecondary).textSelection(.enabled)
+                    }
+                }
+            }
+            if !customer.notes.isEmpty {
+                Text(verbatim: customer.notes)
+                    .textRole(.body)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
-    private func figure(_ title: LocalizedStringResource, _ monies: [Money]) -> some View {
+    private func figure(_ title: LocalizedStringResource, _ monies: [Money], overdue: [Money] = []) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title).textRole(.label)
             MoneyListText(monies: monies, locale: locale, role: .amountStrong)
+            let overdueSums = MoneyList.sums(overdue)
+            if !overdueSums.isEmpty {
+                let amounts = overdueSums
+                    .map { MoneyText.format($0.amount, currency: $0.currency.code, locale: locale) }
+                    .joined(separator: " + ")
+                Text(L.clientOverdueAmount(amounts)).textRole(.rowSecondary)
+            }
         }
         .padding(Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,97 +338,6 @@ struct ClientDefaultsChips: View {
 
     private var dot: some View {
         Text(verbatim: "·").textRole(.rowSecondary).accessibilityHidden(true)
-    }
-}
-
-/// The inspector of Clients (design-system.md §8.12): the client's defaults, contacts and figures, read-only.
-struct ClientInspectorView: View {
-    let clients: ClientsModel
-    let documents: DocumentListModel
-    let customerID: String
-    @Environment(\.locale) private var locale
-
-    var body: some View {
-        if let customer = clients.customer(id: customerID) {
-            let row = ClientRow(customer: customer, states: documents.states)
-            Form {
-                Section {
-                    LabeledContent {
-                        Text(verbatim: customer.currency.code).textRole(.body)
-                    } label: {
-                        Text(L.fieldCurrency).textRole(.body)
-                    }
-                    LabeledContent {
-                        Text(customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays)).textRole(.body)
-                    } label: {
-                        Text(L.clientPaymentTerm).textRole(.body)
-                    }
-                    LabeledContent {
-                        Text(customer.language.title).textRole(.body)
-                    } label: {
-                        Text(L.fieldLanguage).textRole(.body)
-                    }
-                    LabeledContent {
-                        Text(customer.vatStatus.title).textRole(.body)
-                    } label: {
-                        Text(L.fieldVATTreatment).textRole(.body)
-                    }
-                } header: {
-                    Text(L.clientDefaultsTitle)
-                }
-                if customer.party.email != nil || customer.party.phone != nil {
-                    Section {
-                        if let email = customer.party.email {
-                            LabeledContent {
-                                Text(verbatim: email).textRole(.body).textSelection(.enabled)
-                            } label: {
-                                Text(L.fieldEmail).textRole(.body)
-                            }
-                        }
-                        if let phone = customer.party.phone {
-                            LabeledContent {
-                                Text(verbatim: phone).textRole(.body).textSelection(.enabled)
-                            } label: {
-                                Text(L.fieldPhone).textRole(.body)
-                            }
-                        }
-                    } header: {
-                        Text(L.clientContacts)
-                    }
-                }
-                Section {
-                    LabeledContent {
-                        MoneyListText(monies: row.open, locale: locale)
-                    } label: {
-                        Text(L.clientOpenBalance).textRole(.body)
-                    }
-                    LabeledContent {
-                        MoneyListText(monies: row.overdue, locale: locale)
-                    } label: {
-                        Text(L.colOverdue).textRole(.body)
-                    }
-                    LabeledContent {
-                        if let day = row.lastDocument { DayText(day) } else { Text(verbatim: "—").textRole(.body) }
-                    } label: {
-                        Text(L.colLastDocument).textRole(.body)
-                    }
-                } header: {
-                    Text(verbatim: Count.clientDocuments(row.documentCount))
-                }
-                if !customer.notes.isEmpty {
-                    Section {
-                        Text(verbatim: customer.notes).textRole(.body).textSelection(.enabled)
-                    } header: {
-                        Text(L.fieldNotes)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-        } else {
-            ContentUnavailableView {
-                Label { Text(L.noClientSelected) } icon: { Image(systemName: "person.2") }
-            }
-        }
     }
 }
 

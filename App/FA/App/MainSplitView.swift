@@ -1,5 +1,6 @@
-// The main window: one three-column NavigationSplitView for every section (screens-flows.md §1.2),
-// the result line, the document sheets, undo, and the actions the menu bar can call.
+// The main window: one three-column NavigationSplitView for every section (screens-flows.md §1.2), with
+// no inspector column; the result line, the document sheets, the Exchange Rates sheet and the ČNB import,
+// undo, and the actions the menu bar can call.
 
 import AppKit
 import Combine
@@ -13,18 +14,18 @@ struct MainSplitView: View {
     @SceneStorage("sidebar") private var sidebar: SidebarItem = .section(.overview)
     @State private var documents: DocumentListModel
     @State private var clients: ClientsModel
-    @State private var documentSelection: Set<String> = []
-    @State private var overviewSelection: String?
-    @State private var clientSelection: String?
+    /// The selections are kept per window (screens-flows.md §1.1, Restore); Documents as joined ids.
+    @SceneStorage("documents.selection") private var documentSelectionStored = ""
+    @SceneStorage("overview.selection") private var overviewSelection: String?
+    @SceneStorage("clients.selection") private var clientSelection: String?
     @State private var paymentDocumentSelection: String?
-    @State private var inspectorPresented = false
+    /// Restored ids whose documents are gone are dropped once, when the documents have loaded.
+    @State private var restoredSelectionsChecked = false
     @State private var sheet: MainSheet?
     /// The result or error of the last action, at the top of the content column (design-system.md §8.17);
     /// cleared when the user navigates or closes it.
     @State private var result: ResultLineModel?
-    /// Bumped after every rate import, so the coverage column reloads beside the rates table.
-    @State private var ratesVersion = 0
-    /// File ▸ Import ČNB Rates… opens the file importer of the Exchange rates section.
+    /// File ▸ Import ČNB Rates… opens the file importer from any section, without switching (§2g).
     @State private var ratesImporting = false
     /// The editor of the selected draft; replaced when another draft is selected (ADR 0009).
     @State private var editor: DraftEditorModel?
@@ -67,16 +68,19 @@ struct MainSplitView: View {
             })
     }
 
-    /// The inspector is a column of the sections that have one; elsewhere it stays closed.
-    private var inspectorBinding: Binding<Bool> {
-        Binding(
-            get: { inspectorPresented && sidebar.section.hasInspector },
-            set: { inspectorPresented = $0 })
+    /// The Documents selection, stored as the ids joined by commas (document ids are UUIDs).
+    private var documentSelection: Set<String> {
+        get { Set(documentSelectionStored.split(separator: ",").map(String.init)) }
+        nonmutating set { documentSelectionStored = newValue.sorted().joined(separator: ",") }
+    }
+
+    private var documentSelectionBinding: Binding<Set<String>> {
+        Binding(get: { documentSelection }, set: { documentSelection = $0 })
     }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: sidebarSelection, counts: documents.badgeCounts)
+            SidebarView(selection: sidebarSelection, badges: documents.badges)
                 .navigationSplitViewColumnWidth(
                     min: LayoutMetrics.sidebar.min, ideal: LayoutMetrics.sidebar.ideal, max: LayoutMetrics.sidebar.max)
         } content: {
@@ -91,16 +95,20 @@ struct MainSplitView: View {
         } detail: {
             detailColumn
                 .frame(minWidth: LayoutMetrics.detailMinWidth)
-                .inspector(isPresented: inspectorBinding) {
-                    inspectorColumn
-                        .inspectorColumnWidth(
-                            min: LayoutMetrics.inspector.min, ideal: LayoutMetrics.inspector.ideal, max: LayoutMetrics.inspector.max)
-                }
         }
         .frame(minWidth: LayoutMetrics.windowMin.width, minHeight: LayoutMetrics.windowMin.height)
         .focusedSceneValue(\.mainActions, mainActions)
         .onChange(of: selectedDraftID, initial: true) { _, id in
             syncEditor(id)
+        }
+        .onChange(of: documents.loaded, initial: true) { _, loaded in
+            if loaded { dropMissingRestoredSelections() }
+        }
+        .fileImporter(isPresented: $ratesImporting, allowedContentTypes: RateFileTypes.allowed, allowsMultipleSelection: false) { result in
+            guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
+            // An open draft takes the imported rate at once, as the editor's own rate form does.
+            if outcome.count != nil { editor?.refreshRate() }
+            report(outcome.line, kind: outcome.count == nil ? .error : .success)
         }
         .onChange(of: documents.restoreOutcome) { _, outcome in
             guard let outcome else { return }
@@ -116,8 +124,12 @@ struct MainSplitView: View {
                 documentSelection = [id]
             }
         }
-        // A client created or edited from the sheet must reach the open editor's Client picker.
-        .sheet(item: $sheet, onDismiss: { editor?.refreshReferenceData() }) { sheet in
+        // A client created or edited from the sheet must reach the open editor's Client picker, and a rate
+        // imported in the Exchange Rates sheet its rate form.
+        .sheet(item: $sheet, onDismiss: {
+            editor?.refreshReferenceData()
+            editor?.refreshRate()
+        }) { sheet in
             sheetView(sheet)
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
@@ -144,20 +156,17 @@ struct MainSplitView: View {
                 show: show, newDocument: newDraft, newClient: { sheet = .client(nil) }, importRates: importRates)
         case .documents:
             DocumentsView(
-                stores: stores, documents: documents, filter: sidebar.documentFilter, selection: $documentSelection,
-                inspectorPresented: $inspectorPresented, search: $documentsSearch, editingID: editor?.documentID,
+                stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,
+                search: $documentsSearch, editingID: editor?.documentID,
                 newDocument: newDraft, documentActions: documentActions(for:), deleteDrafts: deleteDrafts)
         case .clients:
-            ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) })
+            ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) },
+                        newInvoice: { newDraft(.invoice, customerID: $0) },
+                        lastInvoiceNumber: { lastInvoice(ofClient: $0)?.summary.number },
+                        duplicateLastInvoice: { id in if let last = lastInvoice(ofClient: id) { duplicate(last.id) } })
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
                          deletePayment: deletePayment)
-        case .rates:
-            RatesView(stores: stores, version: $ratesVersion, importing: $ratesImporting, report: { text, isError in
-                report(text, kind: isError ? .error : .success)
-            })
-        case .exports:
-            ExportsView(stores: stores)
         }
     }
 
@@ -179,8 +188,11 @@ struct MainSplitView: View {
             }
         case .clients:
             if let id = clientSelection {
+                let last = lastInvoice(ofClient: id)
                 ClientDetailView(clients: clients, documents: documents, customerID: id,
-                                 editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) })
+                                 editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) },
+                                 lastInvoiceNumber: last?.summary.number,
+                                 duplicateLastInvoice: duplicateAction(last))
             } else {
                 placeholder(L.noClientSelected, symbol: "person.2")
             }
@@ -189,29 +201,6 @@ struct MainSplitView: View {
                 documentDetail(id)
             } else {
                 placeholder(L.noSelection, symbol: "banknote")
-            }
-        case .rates:
-            RatesCoverageView(stores: stores, version: ratesVersion)
-        case .exports:
-            ExportsDetailView(stores: stores)
-        }
-    }
-
-    @ViewBuilder private var inspectorColumn: some View {
-        switch sidebar.section {
-        case .clients:
-            if let id = clientSelection {
-                ClientInspectorView(clients: clients, documents: documents, customerID: id)
-            } else {
-                placeholder(L.noClientSelected, symbol: "person.2")
-            }
-        case .documents where documentSelection.count > 1:
-            MultiSelectionView(rows: selectedRows)
-        default:
-            if let id = selectedDocumentID {
-                DocumentInspectorView(stores: stores, documents: documents, documentID: id, openDocument: openDocument(number:))
-            } else {
-                placeholder(L.noSelection, symbol: "sidebar.right")
             }
         }
     }
@@ -226,7 +215,7 @@ struct MainSplitView: View {
             if let editor, editor.documentID == id {
                 DraftEditorView(
                     stores: stores, documents: documents, model: editor, onIssued: issued,
-                    newClient: { sheet = .newClientForDraft($0) }, duplicate: duplicate,
+                    newClient: { sheet = .newClientForDraft($0) },
                     issueSheetPresented: $issueSheetPresented, previewShown: $previewShown)
             } else {
                 ProgressView()
@@ -269,7 +258,7 @@ struct MainSplitView: View {
         case .overview: overviewSelection
         case .documents: documentSelection.count == 1 ? documentSelection.first : nil
         case .payments: paymentDocumentSelection
-        case .clients, .rates, .exports: nil
+        case .clients: nil
         }
     }
 
@@ -279,7 +268,7 @@ struct MainSplitView: View {
         return id
     }
 
-    /// The client the Client menu acts on: the one selected in Clients, else the selected document's.
+    /// The client File ▸ Edit Client acts on: the one selected in Clients, else the selected document's.
     private var menuClientID: String? {
         if sidebar.section == .clients { return clientSelection }
         return selectedDocumentID.flatMap { documents.state(id: $0)?.summary.customerID }
@@ -304,19 +293,25 @@ struct MainSplitView: View {
             show: show,
             newDocument: newDraft,
             newClient: { sheet = .client(nil) },
+            showExchangeRates: { sheet = .exchangeRates },
             importRates: importRates,
             showGettingStarted: showGettingStarted)
         if let url = stores.databaseURL {
             actions.showDataFolder = { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
-        if sidebar.section.hasInspector {
-            actions.toggleInspector = { inspectorPresented.toggle() }
-            actions.inspectorShown = inspectorPresented
-        }
+        actions.currentFilter = sidebar.section == .documents ? sidebar.documentFilter : nil
         if let clientID = menuClientID, let customer = clients.customer(id: clientID) {
-            actions.clientName = customer.party.name
-            actions.newDocumentForClient = { newDraft($0, customerID: clientID) }
+            actions.editClientName = customer.party.name
             actions.editClient = { sheet = .client(clientID) }
+        }
+        // Client context (screens-flows.md §1.4): the New items name and prefill the selected client, and
+        // Duplicate copies the client's last invoice.
+        if sidebar.section == .clients, let clientID = clientSelection, let customer = clients.customer(id: clientID) {
+            actions.newDocumentClientName = customer.party.name
+            if let last = lastInvoice(ofClient: clientID) {
+                actions.document.duplicate = { duplicate(last.id) }
+                actions.document.duplicateSourceNumber = last.summary.number
+            }
         }
         if let id = selectedDocumentID {
             actions.document = documentActions(for: id)
@@ -358,14 +353,15 @@ struct MainSplitView: View {
         if let path = PDFActions.existingFile(stores, documentID: id) {
             actions.showPDFInFinder = { PDFFiles.reveal(path: path) }
         }
-        if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal {
+        // An issued advance with a payment, not closed, and not yet deducted or settled by a final invoice.
+        if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal && state.paid.amount > 0 {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
         }
-        // One received payment without a tax document: the menu creates it; with several, the payment rows do.
-        // An advance for § 64 goods needs none (ADR 0012).
+        // The oldest received payment without a tax document (screens-flows.md §1.4); the payment rows offer
+        // each one. An advance for § 64 goods needs none (ADR 0012).
         if summary.kind == .advanceRequest, state.taxDocumentRequired, let payments = try? stores.documents.payments(for: id) {
             let missing = TaxDocumentDraft.paymentsWithoutReceipt(payments)
-            if missing.count == 1, let payment = missing.first {
+            if let payment = missing.min(by: { $0.paidOn < $1.paidOn }) {
                 actions.createTaxDocument = { createTaxDocument(advanceID: id, payment: payment) }
             }
         }
@@ -392,22 +388,41 @@ struct MainSplitView: View {
     }
 
     private func show(_ item: SidebarItem) {
-        // The Documents section itself is its "All" filter.
+        // The Documents row itself is its "all" filter.
         sidebar = item == .section(.documents) ? .filter(.all) : item
         result = nil
     }
 
-    /// Shows an issued document in Documents ▸ All (the chain, a locked payment's tax document).
+    /// Duplicate as Draft of that document, for the client page's toolbar.
+    private func duplicateAction(_ state: DocumentState?) -> (@MainActor () -> Void)? {
+        guard let id = state?.id else { return nil }
+        return { duplicate(id) }
+    }
+
+    /// A client's last issued invoice (Faktura), which ⌘D copies in client context.
+    private func lastInvoice(ofClient id: String) -> DocumentState? {
+        documents.states
+            .filter { $0.summary.customerID == id && $0.summary.kind == .invoice && $0.summary.status == .issued }
+            .max { ($0.summary.issueDate, $0.summary.number ?? "") < ($1.summary.issueDate, $1.summary.number ?? "") }
+    }
+
+    /// Restored selections of documents that no longer exist are dropped once, after the first load; later
+    /// a selected id without a state is a draft just created, which the observation has not delivered yet.
+    private func dropMissingRestoredSelections() {
+        guard !restoredSelectionsChecked else { return }
+        restoredSelectionsChecked = true
+        let known = Set(documents.states.map(\.id))
+        let kept = documentSelection.filter { known.contains($0) }
+        if kept != documentSelection { documentSelection = kept }
+        if let id = overviewSelection, !known.contains(id) { overviewSelection = nil }
+        if let id = clientSelection, clients.customer(id: id) == nil { clientSelection = nil }
+    }
+
+    /// Shows an issued document in Documents (the chain, a locked payment's tax document).
     private func openDocument(id: String) {
         show(.filter(.all))
         documentsSearch = ""
         documentSelection = [id]
-    }
-
-    /// The same by number, for the inspector's chain, which knows numbers only.
-    private func openDocument(number: String) {
-        guard let state = documents.states.first(where: { $0.summary.number == number }) else { return }
-        openDocument(id: state.id)
     }
 
     private func showClient(ofDocument id: String) {
@@ -416,9 +431,8 @@ struct MainSplitView: View {
         show(.section(.clients))
     }
 
-    /// File ▸ Import ČNB Rates…: Exchange rates with its file importer open.
+    /// File ▸ Import ČNB Rates…: the file importer over the current section; the result line reports.
     private func importRates() {
-        show(.section(.rates))
         ratesImporting = true
     }
 
@@ -483,7 +497,7 @@ struct MainSplitView: View {
         issueSheetPresented = true
     }
 
-    /// After Issue: the document leaves Drafts, so the list switches to All and keeps it selected; the
+    /// After Issue: the document leaves Drafts, so the list switches to Documents and keeps it selected; the
     /// detail column shows the issued view (screens-flows.md §2c, "Afterwards").
     private func issued(_ document: Document) {
         issueSheetPresented = false
@@ -667,7 +681,7 @@ struct MainSplitView: View {
         }
     }
 
-    /// Delete Payment (the payment rows of the detail, ⌫ in Payments & Bank): Undo records the payment
+    /// Delete Payment (the payment rows of the detail, ⌫ in Payments): Undo records the payment
     /// again and relinks a draft tax document that was kept, except for credit legs and a payment deleted
     /// together with its draft tax document.
     private func deletePayment(_ payment: DocumentPayment, deletingDraftReceipt: Bool) {
@@ -706,7 +720,7 @@ struct MainSplitView: View {
             editor = nil
             issueSheetPresented = false
         }
-        documentSelection.remove(id)
+        if documentSelection.contains(id) { documentSelection.remove(id) }
         if overviewSelection == id { overviewSelection = nil }
         if paymentDocumentSelection == id { paymentDocumentSelection = nil }
     }
@@ -750,6 +764,8 @@ struct MainSplitView: View {
             ClientFormSheet(clients: clients, customer: id.flatMap { clients.customer(id: $0) }, onSaved: { saved in
                 if sidebar.section == .clients { clientSelection = saved }
             })
+        case .exchangeRates:
+            ExchangeRatesSheet(stores: stores)
         case .newClientForDraft(let name):
             // New Client “X”… from the editor's client field: the saved client becomes the draft's.
             ClientFormSheet(clients: clients, customer: nil, initialName: name, onSaved: { id in
@@ -769,6 +785,8 @@ enum MainSheet: Identifiable, Hashable {
     case client(String?)
     /// A new client typed into the editor's client field, picked into the draft when saved.
     case newClientForDraft(String)
+    /// File ▸ Exchange Rates.
+    case exchangeRates
 
     var id: String {
         switch self {
@@ -777,32 +795,43 @@ enum MainSheet: Identifiable, Hashable {
         case .closure(let id, let kind): "closure:" + kind.rawValue + ":" + id
         case .client(let id): "client:" + (id ?? "new")
         case .newClientForDraft: "newClientForDraft"
+        case .exchangeRates: "exchangeRates"
         }
     }
 }
 
-/// The detail column and the inspector with several documents selected: the count and the totals per
-/// currency (screens-flows.md §2b). The open balance counts issued documents with something left to pay.
+/// The detail column with several documents selected (screens-flows.md §2b): the count, then up to three
+/// figures per currency under the §2a aggregation rules. Drafts count in none of them.
 struct MultiSelectionView: View {
     let rows: [DocumentRow]
     @Environment(\.locale) private var locale
 
     var body: some View {
-        let totals = rows.compactMap { $0.summary.totalGross }
-        let open = rows.filter { $0.isIssued && $0.state.outstanding.amount > 0 }.map { $0.state.outstanding }
+        let issued = rows.filter(\.isIssued)
+        // Tax documents only; a final invoice net of the DDPPs it deducts, in full when it lists advances
+        // as paid in advance (EU goods), the same rule as the Overview's revenue.
+        let revenue = issued.compactMap { OverviewFigures.revenueAmount($0.summary) }
+        let open = issued.filter { $0.state.countsAsUnpaidInvoice && $0.state.outstanding.amount > 0 }.map(\.state.outstanding)
+        let advances = issued.filter { $0.state.isOpenAdvance && $0.state.outstanding.amount > 0 }.map(\.state.outstanding)
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text(L.selectedCount(rows.count)).textRole(.screenTitle)
+            Text(L.totalsPerCurrency).textRole(.caption)
             Grid(alignment: .leading, horizontalSpacing: Spacing.xl, verticalSpacing: Spacing.s) {
                 GridRow {
-                    Text(L.colTotal).textRole(.label)
-                    MoneyListText(monies: totals, locale: locale, role: .amountStrong)
+                    Text(L.selectionRevenue).textRole(.label)
+                    MoneyListText(monies: revenue, locale: locale, role: .amountStrong)
                 }
                 GridRow {
-                    Text(L.outstanding).textRole(.label)
+                    Text(L.openBalance).textRole(.label)
                     MoneyListText(monies: open, locale: locale, role: .amountStrong)
                 }
+                if !advances.isEmpty {
+                    GridRow {
+                        Text(L.unpaidAdvances).textRole(.label)
+                        MoneyListText(monies: advances, locale: locale, role: .amountStrong)
+                    }
+                }
             }
-            Text(L.totalsPerCurrency).textRole(.caption)
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

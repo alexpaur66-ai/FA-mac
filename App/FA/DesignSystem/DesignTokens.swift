@@ -45,7 +45,7 @@ enum Radius {
 // MARK: - Window and column sizes
 
 /// Minimum, ideal and maximum width of one split-view column.
-/// Apply with `navigationSplitViewColumnWidth(min:ideal:max:)` or `inspectorColumnWidth(min:ideal:max:)`.
+/// Apply with `navigationSplitViewColumnWidth(min:ideal:max:)`.
 struct ColumnWidth: Equatable, Sendable {
     let min: CGFloat
     let ideal: CGFloat
@@ -56,7 +56,6 @@ struct ColumnWidth: Equatable, Sendable {
 enum LayoutMetrics {
     static let sidebar = ColumnWidth(min: 180, ideal: 210, max: 280)
     static let content = ColumnWidth(min: 360, ideal: 560, max: 900)
-    static let inspector = ColumnWidth(min: 260, ideal: 300, max: 400)
 
     /// The draft editor's minimum width in the detail column.
     static let detailMinWidth: CGFloat = 520
@@ -65,15 +64,9 @@ enum LayoutMetrics {
     /// The column minimums (180 + 360 + 520 = 1060) plus slack, so every divider stays visible.
     static let windowMin = CGSize(width: 1080, height: 640)
 
-    /// Below this window width the app closes the inspector: the column minimums plus the inspector minimum.
-    static let inspectorBreakpoint: CGFloat = sidebar.min + content.min + detailMinWidth + inspector.min
-
-    /// The ČNB import review sheet is resizable within these sizes.
+    /// The Exchange Rates sheet (and later the ČNB import review) is resizable from these sizes.
     static let importReviewMinSize = CGSize(width: 560, height: 400)
     static let importReviewIdealSize = CGSize(width: 640, height: 480)
-
-    /// The command palette (⌘K) has a fixed width.
-    static let paletteWidth: CGFloat = 560
 }
 
 // MARK: - Typography
