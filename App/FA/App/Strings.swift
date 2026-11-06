@@ -670,7 +670,7 @@ enum L {
     static let menuKindAdvance = r("menu.kind.advance", "Advance Invoice")
     static let menuKindFinal = r("menu.kind.final", "Final Invoice")
     static let menuKindPaymentTaxDocument = r("menu.kind.paymentTaxDocument", "Tax Document for Received Payment")
-    static let fieldCompanyVATID = r("field.companyVATID", "VAT ID")
+    static let fieldCompanyVATID = r("field.companyVATID", "VAT ID (DIČ)")
     static func companyIDChip(_ value: String) -> LocalizedStringResource { r("client.companyIDChip", "IČO \(value)") }
     static func vatIDChip(_ value: String) -> LocalizedStringResource { r("client.vatIDChip", "VAT ID \(value)") }
     static let countryRequired = r("validation.countryRequired", "A country is required.")

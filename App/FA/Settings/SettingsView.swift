@@ -5,6 +5,7 @@
 // viewed last, and the Overview's setup card opens the pane of its step.
 
 import AppKit
+import Combine
 import InvoicingCore
 import InvoicingData
 import SwiftUI
@@ -159,6 +160,7 @@ struct CompanyPane: View {
     @State private var failure: String?
     @FocusState private var focus: Field?
     @Environment(\.locale) private var locale
+    @Environment(\.controlActiveState) private var activeState
 
     var body: some View {
         Form {
@@ -210,6 +212,14 @@ struct CompanyPane: View {
         }
         .onChange(of: countryCode) { commit() }
         .onChange(of: court) { commit() }
+        // Leaving the Settings window keeps the field's focus, so the window resigning key commits too, before
+        // the main window uses the profile; Quit runs no onDisappear (AppKit posts on the main thread).
+        .onChange(of: activeState) { _, state in
+            if state != .key { commit() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            commit()
+        }
     }
 
     @ViewBuilder
@@ -284,7 +294,12 @@ struct CompanyPane: View {
         // A court without a file number yet stores no entry and asks for nothing until a number is typed.
         var registry: RegistryEntry?
         if let court, !trimmed(fileNumber).isEmpty {
-            if let parsed = RegistryEntry(court: court, fileNumber: fileNumber) {
+            if var stored = previous?.registryEntry, trimmed(fileNumber) == stored.fileNumber {
+                // The stored entry as the pane shows it: kept even when an older form stored an insert this
+                // field would not take, such as "12345/A".
+                stored.court = court
+                registry = stored
+            } else if let parsed = RegistryEntry(court: court, fileNumber: fileNumber) {
                 registry = parsed
             } else {
                 problems[.fileNumber] = L.invalidFileNumber
@@ -334,7 +349,7 @@ struct CompanyPane: View {
     var run: (@MainActor () -> Void)?
 
     static func make() -> BankAccountUndo {
-        let action = BankAccountUndo.make()
+        let action = BankAccountUndo()
         registered.append(action)
         return action
     }
