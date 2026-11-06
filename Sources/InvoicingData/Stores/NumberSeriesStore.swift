@@ -65,30 +65,67 @@ public struct NumberSeriesStore: Sendable {
     // MARK: The three fixed series (set-09)
 
     /// The series a document of `kind` is numbered from: its section's series, when that numbers the kind.
-    /// Other stored series number nothing new (there is no series picker).
+    /// When it does not (an older install whose locked invoice series numbers invoices only, next to its
+    /// own final-invoice series), the series that numbered the kind before carries on: preferably one no
+    /// section shows, its counter untouched. A section without a series numbers nothing.
     public func issuingSeries(for kind: DocumentKind) throws -> StoredNumberSeries? {
-        guard let stored = try sections()[NumberingSection(kind)], stored.numbers(kind) else { return nil }
-        return stored
+        try database.queue.read { (db: Database) -> StoredNumberSeries? in
+            let sections = try Self.sections(db)
+            guard let stored = sections[NumberingSection(kind)] else { return nil }
+            if stored.numbers(kind) { return stored }
+            let mapped = Set(sections.values.map(\.id))
+            let all = try NumberSeriesRecord.order(Column("name")).fetchAll(db).map { try $0.stored() }
+            let candidates = all.filter { $0.numbers(kind) }
+            return candidates.first(where: { !mapped.contains($0.id) }) ?? candidates.first
+        }
     }
 
-    /// Each section's series: the one with the section's default id, else the first series (by name) that
-    /// numbers the section's first kind and no other section took.
+    /// Each section's series. First a series that has already issued numbers (with the section's default
+    /// id, or numbering the section's first kind): the latest issuing year, then the highest counter, so an
+    /// updated install keeps numbering where it stopped. Else the one with the section's default id, else
+    /// the first series (by name) that numbers the section's first kind. No two sections share a series.
     public func sections() throws -> [NumberingSection: StoredNumberSeries] {
         try database.queue.read { db in try Self.sections(db) }
     }
 
     static func sections(_ db: Database) throws -> [NumberingSection: StoredNumberSeries] {
         let all = try NumberSeriesRecord.order(Column("name")).fetchAll(db).map { try $0.stored() }
+        let defaultIDs = Set(NumberingSection.allCases.map(\.rawValue))
         var result: [NumberingSection: StoredNumberSeries] = [:]
         var taken: Set<String> = []
+        // A default id belongs to its own section; other series match by the section's first kind.
+        let candidates: (NumberingSection, Set<String>) -> [StoredNumberSeries] = { section, used in
+            all.filter { series in
+                guard !used.contains(series.id) else { return false }
+                if series.id == section.rawValue { return true }
+                return !defaultIDs.contains(series.id) && series.numbers(section.primaryKind)
+            }
+        }
         for section in NumberingSection.allCases {
-            if let byID = all.first(where: { $0.id == section.rawValue }) {
+            let issued = candidates(section, taken).filter { $0.series.lastIssuedYear != nil }
+            var best: StoredNumberSeries?
+            for series in issued {
+                guard let current = best else {
+                    best = series
+                    continue
+                }
+                let rank = (series.series.lastIssuedYear ?? 0, series.series.lastCounter)
+                let currentRank = (current.series.lastIssuedYear ?? 0, current.series.lastCounter)
+                if rank > currentRank { best = series }
+            }
+            if let best {
+                result[section] = best
+                taken.insert(best.id)
+            }
+        }
+        for section in NumberingSection.allCases where result[section] == nil {
+            if let byID = all.first(where: { $0.id == section.rawValue && !taken.contains($0.id) }) {
                 result[section] = byID
                 taken.insert(byID.id)
             }
         }
         for section in NumberingSection.allCases where result[section] == nil {
-            if let byKind = all.first(where: { !taken.contains($0.id) && $0.numbers(section.primaryKind) }) {
+            if let byKind = candidates(section, taken).first {
                 result[section] = byKind
                 taken.insert(byKind.id)
             }

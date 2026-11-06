@@ -89,9 +89,19 @@ struct IssueSheet: View {
             // A floating issue date is the day of Issue (docs-28): the sheet shows the day it will issue with.
             model.floatIssueDate()
             model.refreshRate()
-            if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
-                seriesID = model.series.first?.id
-            }
+            syncSeriesID()
+        }
+        // Settings ▸ Numbering saved while the sheet stayed open (Open Settings… on the no-series row): the
+        // series read again must also be the one Issue uses.
+        .onChange(of: model.series.map(\.id)) { _, _ in
+            syncSeriesID()
+        }
+    }
+
+    /// Keeps `seriesID` on a series the model still offers.
+    private func syncSeriesID() {
+        if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
+            seriesID = model.series.first?.id
         }
     }
 

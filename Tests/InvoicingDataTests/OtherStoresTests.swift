@@ -70,6 +70,37 @@ import GRDB
         #expect(try store.isNumberingConfirmed())
     }
 
+    @Test func theSeriesThatIssuedWinsTheSection() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        // An older install with two invoice series: "A" sorts first but never issued; "Invoices" issued up to 150.
+        try store.save(StoredNumberSeries(name: "A", kinds: [.invoice, .finalInvoice],
+                                          series: try DocumentNumberSeries(id: "fv-old", pattern: DocumentNumberPattern(template: "A-{YYYY}-{NNNN}"), year: 2026)),
+                       now: Fixtures.now)
+        try store.save(StoredNumberSeries(name: "Invoices", kinds: [.invoice, .finalInvoice],
+                                          series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNNN}"), year: 2026,
+                                                                           lastCounter: 150, lastIssuedYear: 2026)),
+                       now: Fixtures.now)
+        #expect(try store.sections()[.invoices]?.id == "fv")
+        #expect(try store.issuingSeries(for: .invoice)?.id == "fv")
+        #expect(try store.isNumberingConfirmed())
+    }
+
+    @Test func aLockedInvoiceOnlySeriesLeavesFinalInvoicesToTheirOwnSeries() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        try store.save(StoredNumberSeries(name: "Faktury", kinds: [.invoice],
+                                          series: try DocumentNumberSeries(id: "fv", pattern: DocumentNumberPattern(template: "FV-{YYYY}-{NNN}"), year: 2026,
+                                                                           lastCounter: 3, lastIssuedYear: 2026)),
+                       now: Fixtures.now)
+        try store.save(StoredNumberSeries(name: "Konečné faktury", kinds: [.finalInvoice],
+                                          series: try DocumentNumberSeries(id: "kf", pattern: DocumentNumberPattern(template: "KF-{YYYY}-{NNN}"), year: 2026)),
+                       now: Fixtures.now)
+        #expect(try store.sections()[.invoices]?.id == "fv")
+        #expect(try store.issuingSeries(for: .invoice)?.id == "fv")
+        #expect(try store.issuingSeries(for: .finalInvoice)?.id == "kf")
+    }
+
     @Test func savingNeverLowersTheCounter() throws {
         let database = try Fixtures.prepared()
         let documents = DocumentStore(database)
