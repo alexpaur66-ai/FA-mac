@@ -259,7 +259,7 @@ struct IssueSheet: View {
     /// "VAT 21 %", or "VAT after advances 21 %" on a final invoice.
     private func vatLabel(_ vatRow: VATSummaryRow, afterAdvances: Bool) -> LocalizedStringResource {
         guard let percent = vatRow.appliedRatePercent else { return afterAdvances ? L.vatAfterAdvances : L.vat }
-        let text = VATRateField.percentText(percent, locale: locale)
+        let text = VATRateField<EditorFocus>.percentText(percent, locale: locale)
         return afterAdvances ? L.vatAfterAdvancesAtRate(text) : L.vatAtRate(text)
     }
 
