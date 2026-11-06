@@ -477,10 +477,20 @@ struct DraftEditorView: View {
             }
             GridRow {
                 Text(L.fieldIssueDate).textRole(.label)
-                DatePicker(selection: dayBinding(document.issueDate) { model.setIssueDate($0) }, displayedComponents: .date) {
-                    Text(L.fieldIssueDate)
+                // Until it is set by hand, the issue date floats to the day of Issue and reads "On issue" (docs-18);
+                // turning the toggle off keeps today's date, set by hand, in a date picker.
+                HStack(spacing: Spacing.m) {
+                    Toggle(isOn: Binding(get: { !model.issueDateSetByHand },
+                                         set: { onIssue in model.setIssueDateOnIssue(onIssue) })) {
+                        Text(L.onIssue)
+                    }
+                    if model.issueDateSetByHand {
+                        DatePicker(selection: dayBinding(document.issueDate) { model.setIssueDate($0) }, displayedComponents: .date) {
+                            Text(L.fieldIssueDate)
+                        }
+                        .labelsHidden()
+                    }
                 }
-                .labelsHidden()
             }
             if document.kind != .advanceRequest {
                 GridRow {

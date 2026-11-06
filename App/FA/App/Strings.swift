@@ -415,6 +415,8 @@ enum L {
     static let fieldIssueDate = r("editor.issueDate", "Issue date")
     static let fieldTaxPoint = r("editor.taxPoint", "Date of taxable supply")
     static let sameAsIssueDate = r("editor.sameAsIssueDate", "Same as the issue date")
+    /// The issue date's toggle: on, the date floats to the day of Issue (docs-18, docs-28).
+    static let onIssue = r("editor.onIssue", "On issue")
     static let fieldDue = r("editor.due", "Due")
     static let dueDaysOne = r("editor.dueDaysOne", "1 day")
     static func dueDays(_ days: Int) -> LocalizedStringResource { r("editor.dueDays", "\(days) days") }
@@ -562,8 +564,14 @@ enum L {
     static let checkTitle = r("issue.check", "Check before issuing")
     static let checkedLabel = r("issue.checked", "Checked")
     static func issueDateNotToday(_ day: String) -> LocalizedStringResource { r("issue.dateNotToday", "The issue date \(day) is not today") }
+    /// A floating issue date moved a "Same as the issue date" DUZP out of the month the draft was started in (docs-28).
+    static func floatedIntoLaterMonth(_ started: String, _ today: String) -> LocalizedStringResource {
+        r("issue.floatedIntoLaterMonth", "The draft was started on \(started); issued today, its DUZP is \(today), in a later month")
+    }
     static let setToToday = r("issue.setToToday", "Set to today")
     static func issueFailed(_ error: String) -> LocalizedStringResource { r("issue.failed", "Issue failed: \(error)") }
+    /// Issue pressed after midnight: the floating issue date moved to the new day and nothing was issued (docs-28).
+    static let issueDateMovedToToday = r("issue.dateMovedToToday", "A new day has begun: the issue date is now today. Check the sheet, then issue again.")
     static func issuedResult(_ number: String) -> LocalizedStringResource { r("issue.result", "Issued \(number)") }
     static let draftGone = r("editor.gone", "This draft no longer exists.")
     static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {

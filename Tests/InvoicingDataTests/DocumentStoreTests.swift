@@ -38,6 +38,55 @@ import InvoicingCore
         #expect(again.number == nil)
     }
 
+    @Test func issueDateSetByHandIsKeptWithTheDraft() throws {
+        // docs-28: a new draft's issue date floats; the flag is kept outside the snapshot, a save without it
+        // keeps the stored value, and issuing keeps the snapshot free of it.
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        let draft = Fixtures.czkDraft()
+        try store.saveDraft(draft, now: Fixtures.now)
+        let created = try #require(try store.draftDating(id: draft.id))
+        #expect(created.issueDateSetByHand == false)
+        #expect(created.createdAt == Fixtures.now)
+
+        try store.saveDraft(draft, issueDateSetByHand: true, now: Fixtures.now.addingTimeInterval(60))
+        #expect(try store.draftDating(id: draft.id)?.issueDateSetByHand == true)
+        try store.saveDraft(draft, now: Fixtures.now.addingTimeInterval(120))
+        let kept = try #require(try store.draftDating(id: draft.id))
+        #expect(kept.issueDateSetByHand == true)
+        #expect(kept.createdAt == Fixtures.now)
+        #expect(try store.document(id: draft.id) == draft)
+
+        try store.saveDraft(draft, issueDateSetByHand: false, now: Fixtures.now.addingTimeInterval(180))
+        #expect(try store.draftDating(id: draft.id)?.issueDateSetByHand == false)
+        #expect(try store.draftDating(id: "no-such-document") == nil)
+    }
+
+    @Test func taxPointSetByHandIsKeptWithTheDraft() throws {
+        // docs-28: a tax point picked with "Same as the issue date" off is kept as such even on the issue date's
+        // day, so it does not float with it; a draft written back with its flags (Undo of Delete Draft) keeps them.
+        let database = try Fixtures.prepared()
+        let store = DocumentStore(database)
+        var draft = Fixtures.czkDraft()
+        draft.taxPointDate = draft.issueDate
+        try store.saveDraft(draft, issueDateSetByHand: true, taxPointSetByHand: true, now: Fixtures.now)
+        try store.saveDraft(draft, now: Fixtures.now.addingTimeInterval(60))
+        let kept = try #require(try store.draftDating(id: draft.id))
+        #expect(kept.issueDateSetByHand == true)
+        #expect(kept.taxPointSetByHand == true)
+
+        try store.deleteDraft(id: draft.id, now: Fixtures.now.addingTimeInterval(120))
+        try store.saveDraft(draft, issueDateSetByHand: kept.issueDateSetByHand, taxPointSetByHand: kept.taxPointSetByHand,
+                            now: Fixtures.now.addingTimeInterval(180))
+        let restored = try #require(try store.draftDating(id: draft.id))
+        #expect(restored.issueDateSetByHand == true)
+        #expect(restored.taxPointSetByHand == true)
+
+        try store.saveDraft(draft, taxPointSetByHand: false, now: Fixtures.now.addingTimeInterval(240))
+        #expect(try store.draftDating(id: draft.id)?.taxPointSetByHand == false)
+        #expect(try store.draftDating(id: draft.id)?.issueDateSetByHand == true)
+    }
+
     @Test func draftWithoutComputableAmountsHasNoTotals() throws {
         let database = try Fixtures.prepared()
         let store = DocumentStore(database)
