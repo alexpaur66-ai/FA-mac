@@ -38,14 +38,24 @@ public enum Backups {
         return names.map { folder.appendingPathComponent($0, isDirectory: false) }
     }
 
+    static let partialPrefix = ".partial-"
+
     /// Writes a backup of `database` into `folder` (created when missing), then deletes all but the newest
     /// `keepCount`. The copy is written under a hidden name and renamed when complete, so a failed backup
-    /// never leaves a half-written file among the backups. Returns the backup file.
+    /// never leaves a half-written file among the backups; hidden copies left by a backup that was cut off
+    /// (a crash or power loss) are deleted first. Pruning is best effort: an old backup that cannot be
+    /// deleted does not fail the backup just made. Returns the backup file.
     @discardableResult
     public static func make(of database: AppDatabase, in folder: URL, now: Date = Date(),
                             timeZone: TimeZone = .current) throws -> URL {
         let files = FileManager.default
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Backups run one at a time, so any hidden copy (and its -journal, -wal or -shm) is a leftover.
+        if let names = try? files.contentsOfDirectory(atPath: folder.path) {
+            for leftover in names where leftover.hasPrefix(partialPrefix) && leftover.contains("." + nameExtension) {
+                try? files.removeItem(at: folder.appendingPathComponent(leftover, isDirectory: false))
+            }
+        }
         let name = fileName(for: now, timeZone: timeZone)
         var target = folder.appendingPathComponent(name, isDirectory: false)
         var suffix = 2
@@ -54,7 +64,7 @@ public enum Backups {
             target = folder.appendingPathComponent(base + "-\(suffix)." + nameExtension, isDirectory: false)
             suffix += 1
         }
-        let partial = folder.appendingPathComponent(".partial-" + UUID().uuidString + "." + nameExtension, isDirectory: false)
+        let partial = folder.appendingPathComponent(partialPrefix + UUID().uuidString + "." + nameExtension, isDirectory: false)
         do {
             let destination = try DatabaseQueue(path: partial.path)
             try database.queue.backup(to: destination)
@@ -64,16 +74,19 @@ public enum Backups {
             try? files.removeItem(at: partial)
             throw error
         }
-        try prune(in: folder, keeping: keepCount)
+        // The backup is made; a folder that cannot be listed or pruned does not undo that.
+        try? prune(in: folder, keeping: keepCount)
         return target
     }
 
-    /// Deletes all but the newest `count` backups in `folder`.
+    /// Deletes all but the newest `count` backups in `folder`. A backup that cannot be deleted (locked, or
+    /// owned by someone else) is skipped, so the others are still deleted; throws only when the folder
+    /// cannot be listed.
     public static func prune(in folder: URL, keeping count: Int) throws {
         let all = try list(in: folder)
         guard all.count > count else { return }
         for url in all.prefix(all.count - count) {
-            try FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url)
         }
     }
 }

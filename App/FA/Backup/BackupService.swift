@@ -103,8 +103,10 @@ enum BackupStatus {
         if !failure.isEmpty { return String(localized: L.backupFailed(failure)) }
         guard lastSuccess > 0 else { return String(localized: L.backupNone) }
         let last = Date(timeIntervalSince1970: lastSuccess)
+        // "More than 7 days" is elapsed time, not calendar days.
+        guard now.timeIntervalSince(last) > 7 * 86_400 else { return nil }
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: last), to: calendar.startOfDay(for: now)).day ?? 0
-        return days > 7 ? String(localized: L.backupDaysAgo(days)) : nil
+        return String(localized: L.backupDaysAgo(max(days, 7)))
     }
 
     /// The caption under Backup folder in Settings ▸ General (§2i).
