@@ -344,6 +344,39 @@ enum Schema {
                 t.column("value", .text).notNull()
             }
         }
+
+        // v6 (screens-flows.md §2n, ADR 0013): rough stock. Items, and their movements in the order they were
+        // recorded (`sequence`); quantities are decimal text, so "1.5" stays exact. A count stores the figure the
+        // app had (`previousOnHand`), so its history line explains itself. The link of a draft's line to an item
+        // lives here, beside the document, so the document's snapshot, hash and PDF never mention stock.
+        migrator.registerMigration("v6") { db in
+            try db.create(table: "stockItem") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("unit", .text).notNull()
+                t.column("reorderLevel", .text)
+                t.column("archivedAt", .text)
+                t.column("createdAt", .text).notNull()
+                t.column("updatedAt", .text).notNull()
+            }
+            try db.create(table: "stockMovement") { t in
+                t.autoIncrementedPrimaryKey("sequence")
+                t.column("itemID", .text).notNull().indexed().references("stockItem")
+                t.column("kind", .text).notNull().check(sql: "kind IN ('in', 'out', 'count')")
+                t.column("day", .text).notNull()
+                t.column("quantity", .text).notNull()
+                t.column("previousOnHand", .text)
+                t.column("note", .text)
+                t.column("documentID", .text).indexed().references("document")
+                t.column("recordedAt", .text).notNull()
+            }
+            try db.create(table: "documentLineStock") { t in
+                t.column("documentID", .text).notNull().references("document", onDelete: .cascade)
+                t.column("lineID", .text).notNull()
+                t.column("itemID", .text).notNull().indexed().references("stockItem", onDelete: .cascade)
+                t.primaryKey(["documentID", "lineID"])
+            }
+        }
         return migrator
     }
 }
