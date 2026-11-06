@@ -37,6 +37,39 @@ import GRDB
         #expect(try store.series(id: "zf") == nil)
     }
 
+    @Test func aNewDatabaseGetsTheThreeFixedSeries() throws {
+        let database = try AppDatabase()
+        let store = NumberSeriesStore(database)
+        #expect(try store.ensureDefaultSeries(year: 2026, now: Fixtures.now) == ["invoice", "advance", "paymentReceipt"])
+        #expect(try store.ensureDefaultSeries(year: 2026, now: Fixtures.now).isEmpty)
+        #expect(try store.all().count == 3)
+        #expect(try store.issuingSeries(for: .finalInvoice)?.id == "invoice")
+        #expect(try store.issuingSeries(for: .advanceRequest)?.series.variableSymbolPrefix == "2")
+        #expect(try store.peekNextNumber(seriesID: "paymentReceipt", on: Fixtures.day("2026-11-06")) == "DD 2026-0001")
+        #expect(try store.isNumberingConfirmed() == false)
+        try store.confirmNumbering(now: Fixtures.now)
+        #expect(try store.isNumberingConfirmed())
+    }
+
+    @Test func anExistingDatabaseKeepsItsSeriesAndMapsThemByKind() throws {
+        let database = try Fixtures.prepared()
+        try Fixtures.addAdvanceSeries(database)
+        let store = NumberSeriesStore(database)
+        // "fv", "zf" and "dd" number one section each, so no second set is created.
+        #expect(try store.ensureDefaultSeries(year: 2026, now: Fixtures.now).isEmpty)
+        let sections = try store.sections()
+        #expect(sections[.invoices]?.id == "fv")
+        #expect(sections[.advances]?.id == "zf")
+        #expect(sections[.paymentReceipts]?.id == "dd")
+        #expect(try store.all().count == 3)
+        #expect(try store.isNumberingConfirmed() == false)
+        // A series that has issued a number counts as confirmed: an updated install does not block Issue.
+        let documents = DocumentStore(database)
+        try documents.saveDraft(Fixtures.czkDraft(), now: Fixtures.now)
+        try documents.issue(id: "doc-cz", seriesID: "fv", now: Fixtures.now)
+        #expect(try store.isNumberingConfirmed())
+    }
+
     @Test func savingNeverLowersTheCounter() throws {
         let database = try Fixtures.prepared()
         let documents = DocumentStore(database)

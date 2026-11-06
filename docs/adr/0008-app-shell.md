@@ -55,7 +55,8 @@ existing data to import.
   1 for invoices and final invoices, ZF with prefix 2, DD without a prefix). There are no Documents & PDF,
   VAT defaults or Backup panes; their contents are fixed rules, General or the File menu. Every pane but
   Numbering stores a field as soon as it is committed. The window reopens on the pane viewed last. The Overview
-  shows a "Getting started" card until company, bank account and series exist. *Amended by the lean pass
+  shows a "Getting started" card until company, bank account and the number series are confirmed (set-09).
+  *Amended by the lean pass
   (other-04, other-15):* the card has those three steps only and one Open Settings… button for the first
   unfinished pane; on a first run it is the Overview's only content, and a data error replaces it.
 - **Accent colour** is the asset-catalog colour `AccentColor` (light, dark, both high-contrast
@@ -107,10 +108,17 @@ existing data to import.
   and the client's VAT status from the goods-decisions country rule (goods decisions of 5 Nov 2026; ADR
   0011). The footer lives in Company, one for both document languages (answers R033); a new client's
   payment term is a fixed 14 days, and each client keeps its own term.
-- The Numbering pane and the series sheet compare the variable symbols and the document numbers of a
-  sample number across series (two series issuing the same numbers get a warning),
-  preview the next number as the store assigns it today, and lock year and counter once the app issued a
-  number from the series.
+- **Three fixed number series (lean pass set-09, PR E2).** The database creates Invoices (FV
+  `{YYYY}-{NNNN}`, VS prefix 1, invoices and final invoices), Advance invoices (ZF, prefix 2) and Tax
+  documents for received payments (DD, no prefix) when it is opened without them. A database that already
+  has series keeps them and gets no second set: they map to the three sections by the default ids
+  (invoice, advance, paymentReceipt), else by kind; any other series stays stored and numbers nothing new,
+  because there is no series sheet and no series picker. The Numbering pane shows three sections with the
+  pattern and the last number issued in another tool, and one Save that compares document numbers across
+  all three and variable symbols for FV and ZF, keeps a counter from going backwards, and records the
+  confirmation (`appState.numberingConfirmed`, schema v5). Issue waits for that confirmation, or for a
+  mapped series that has already issued a number. The yearly restart follows the pattern ({YYYY} or {YY}
+  restarts each year); pattern and counter lock once the app issued a number from the series.
 - The issued view's Activity maps the audit actions to sentences. The store also records `create` and
   `update` for every draft save: the first `create` shows as "Draft created", autosaves are not listed.
 

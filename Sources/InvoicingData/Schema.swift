@@ -335,6 +335,15 @@ enum Schema {
             // A draft saved before keeps the date it shows: only drafts created from now on float.
             try db.execute(sql: "UPDATE document SET issueDateSetByHand = 1 WHERE status = 'draft'")
         }
+
+        // v5 (set-09): small facts about the database itself, one row each; the first is that Saša confirmed
+        // the number series in Settings ▸ Numbering ("numberingConfirmed"), which Issue waits for.
+        migrator.registerMigration("v5") { db in
+            try db.create(table: "appState") { t in
+                t.column("key", .text).primaryKey()
+                t.column("value", .text).notNull()
+            }
+        }
         return migrator
     }
 }

@@ -539,45 +539,46 @@ struct BankAccountsPane: View {
 
 // MARK: - Numbering
 
+/// Three fixed sections, one per series (set-09): the pattern and the last number issued in another tool,
+/// with the live next number. One Save, because a used series cannot be changed back; it also confirms
+/// the series, which Issue and Getting started wait for. Edits that are not saved are dropped.
 struct NumberingPane: View {
     let stores: Stores
 
-    @State private var series: [StoredNumberSeries] = []
-    @State private var editing: SeriesDraft?
+    /// One section's fields and its stored series.
+    private struct Row: Equatable {
+        var stored: StoredNumberSeries?
+        var pattern: String
+        var lastIssued: String
+
+        /// The app issued a number from this series: the pattern and the counter are read-only.
+        var isLocked: Bool { stored?.series.lastIssuedYear != nil }
+    }
+
+    /// What a section's fields give: the series Save would store, or why they don't parse.
+    private enum Built {
+        case ready(DocumentNumberSeries)
+        case invalid(String)
+    }
+
+    @State private var rows: [NumberingSection: Row] = [:]
     @State private var message: LocalizedStringResource?
     @State private var isError = false
+    @Environment(\.locale) private var locale
+
+    private var today: CalendarDay { CalendarDay(Date(), in: .current) }
 
     var body: some View {
         Form {
             Section {
-                if series.isEmpty {
-                    Text(L.noSeries).textRole(.rowSecondary)
-                    Button { createDefaults() } label: { Text(L.createDefaultSeries) }
-                    Text(L.defaultSeriesCaption).textRole(.caption)
+                Text(L.numberingCaption).textRole(.caption)
+            }
+            ForEach(NumberingSection.allCases, id: \.self) { section in
+                Section {
+                    sectionContent(section)
+                } header: {
+                    Text(Self.title(section))
                 }
-                ForEach(series) { stored in
-                    LabeledContent {
-                        HStack(spacing: Spacing.m) {
-                            Text(verbatim: nextNumber(stored)).textRole(.amount)
-                            Button { editing = SeriesDraft(stored) } label: { Text(L.edit) }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: Spacing.xxs) {
-                            Text(verbatim: stored.name).textRole(.body)
-                            Text(verbatim: stored.series.pattern.template + " · "
-                                 + kindsText(stored) + (stored.series.variableSymbolPrefix.map { " · VS " + $0 + "…" } ?? ""))
-                                .textRole(.caption)
-                        }
-                    }
-                }
-                if numbersCollide {
-                    InlineMessage(L.seriesNumbersCollide, kind: .problem)
-                }
-                if collides {
-                    InlineMessage(L.seriesPrefixCollision, kind: .problem)
-                }
-            } header: {
-                Text(L.seriesTitle)
             }
             Section {
                 HStack {
@@ -589,300 +590,189 @@ struct NumberingPane: View {
                         }
                     }
                     Spacer()
-                    Button { editing = SeriesDraft() } label: { Text(L.newSeries) }
+                    Button { save() } label: { Text(L.save) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canSave)
                 }
             }
         }
         .formStyle(.grouped)
         .onAppear(perform: load)
-        .sheet(item: $editing) { draft in
-            SeriesFormSheet(stores: stores, draft: draft, others: series.filter { $0.id != draft.id }) {
-                load()
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: NumberingSection) -> some View {
+        if let row = rows[section] {
+            if row.isLocked, let stored = row.stored {
+                LabeledContent { Text(verbatim: stored.series.pattern.template).textRole(.amount) } label: { Text(L.seriesTemplate) }
+                LabeledContent { Text(verbatim: stored.series.lastNumber ?? "—").textRole(.amount) } label: { Text(L.seriesLastIssued) }
+            } else {
+                TextField(text: binding(section, \.pattern)) { Text(L.seriesTemplate) }
+                TextField(text: binding(section, \.lastIssued), prompt: Text(verbatim: samplePrompt(row))) { Text(L.seriesLastIssued) }
             }
+            switch build(section, row) {
+            case .ready(let series):
+                Text(nextLine(section, series)).textRole(.caption)
+            case .invalid(let text):
+                InlineMessage(text)
+            }
+            if let collision = collisionMessage(for: section) {
+                InlineMessage(collision, kind: .problem)
+            }
+        } else {
+            Text(L.noSeriesForKind).textRole(.rowSecondary)
+        }
+    }
+
+    private func binding(_ section: NumberingSection, _ field: WritableKeyPath<Row, String>) -> Binding<String> {
+        Binding(get: { rows[section]?[keyPath: field] ?? "" }, set: { value in
+            rows[section]?[keyPath: field] = value
+            message = nil
+        })
+    }
+
+    /// "FV 2026-0041": the pattern's number for this year with counter 41, as a hint of the form it takes.
+    private func samplePrompt(_ row: Row) -> String {
+        (try? DocumentNumberPattern(template: row.pattern))?.format(year: today.year, counter: 41) ?? ""
+    }
+
+    static func title(_ section: NumberingSection) -> LocalizedStringResource {
+        switch section {
+        case .invoices: L.numberingInvoices
+        case .advances: L.numberingAdvances
+        case .paymentReceipts: L.numberingReceipts
+        }
+    }
+
+    /// The same names in a sentence: "Invoices and Advance invoices would …".
+    static func name(_ section: NumberingSection) -> String {
+        switch section {
+        case .invoices: String(localized: L.numberingInvoicesName)
+        case .advances: String(localized: L.numberingAdvancesName)
+        case .paymentReceipts: String(localized: L.numberingReceiptsName)
         }
     }
 
     private func load() {
         do {
-            series = try stores.series.all()
+            let sections = try stores.series.sections()
+            var loaded: [NumberingSection: Row] = [:]
+            for section in NumberingSection.allCases {
+                if let stored = sections[section] {
+                    loaded[section] = Row(stored: stored, pattern: stored.series.pattern.template,
+                                          lastIssued: stored.series.lastNumber ?? "")
+                } else {
+                    loaded[section] = Row(stored: nil, pattern: section.defaultTemplate, lastIssued: "")
+                }
+            }
+            rows = loaded
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error, locale: locale))
         }
     }
 
-    private func nextNumber(_ stored: StoredNumberSeries) -> String {
-        (try? stores.series.peekNextNumber(seriesID: stored.id, on: CalendarDay(Date(), in: .current))) ?? "—"
-    }
-
-    private func kindsText(_ stored: StoredNumberSeries) -> String {
-        let kinds = DocumentKind.allCases.filter { stored.numbers($0) }
-        return kinds.map { String(localized: $0.shortTitle) }.joined(separator: ", ")
-    }
-
-    /// Two series whose numbers give one variable symbol (ADR 0003 addendum): "FV 2026-0042" and
-    /// "ZF 2026-0042" both become 20260042, so the check compares the symbols of a sample number.
-    private var collides: Bool {
-        var seen: Set<String> = []
-        for stored in series {
-            guard let symbol = SeriesFormSheet.sampleVariableSymbol(template: stored.series.pattern.template,
-                                                                     prefix: stored.series.variableSymbolPrefix) else { continue }
-            if !seen.insert(symbol).inserted { return true }
-        }
-        return false
-    }
-
-    /// Two series that issue the same document numbers ("FV {YYYY}-{NNNN}" twice, with other VS prefixes):
-    /// the second one's first number already exists, so issuing from it would fail.
-    private var numbersCollide: Bool {
-        var seen: Set<String> = []
-        for stored in series {
-            guard let number = SeriesFormSheet.sampleNumber(template: stored.series.pattern.template) else { continue }
-            if !seen.insert(number).inserted { return true }
-        }
-        return false
-    }
-
-    /// FV with prefix 1 for invoices and final invoices, ZF with prefix 2 for advance requests, DD without
-    /// a prefix for payment tax documents (screens-flows.md §2i; decision of 5 Nov 2026). English names:
-    /// the UI is English, the Czech titles stay on the PDF.
-    private func createDefaults() {
-        let year = CalendarDay(Date(), in: .current).year
+    /// The series a section's fields describe. A locked series is the stored one. Otherwise the pattern
+    /// decides the yearly restart ({YYYY} or {YY} restarts the counter each year, a pattern without a year
+    /// counts on), and the last issued number is read with the pattern: one from an earlier year means the
+    /// counter starts again at 1 this year. Empty starts at 1.
+    private func build(_ section: NumberingSection, _ row: Row) -> Built {
+        if row.isLocked, let stored = row.stored { return .ready(stored.series) }
+        let pattern: DocumentNumberPattern
         do {
-            let defaults: [(String, String, Set<DocumentKind>, String?, LocalizedStringResource)] = [
-                ("invoice", "FV {YYYY}-{NNNN}", [.invoice, .finalInvoice], "1", L.defaultSeriesInvoices),
-                ("advance", "ZF {YYYY}-{NNNN}", [.advanceRequest], "2", L.defaultSeriesAdvances),
-                ("paymentReceipt", "DD {YYYY}-{NNNN}", [.paymentTaxDocument], nil, L.defaultSeriesReceipts),
-            ]
-            for (id, template, kinds, prefix, name) in defaults {
-                let numbering = try DocumentNumberSeries(id: id, pattern: DocumentNumberPattern(template: template),
-                                                         year: year, variableSymbolPrefix: prefix)
-                try stores.series.save(StoredNumberSeries(name: String(localized: name), kinds: kinds, series: numbering))
+            pattern = try DocumentNumberPattern(template: row.pattern.trimmingCharacters(in: .whitespaces))
+        } catch {
+            return .invalid(ErrorText.message(error, locale: locale))
+        }
+        var counter = 0
+        let typed = row.lastIssued.trimmingCharacters(in: .whitespaces)
+        if !typed.isEmpty {
+            guard let parsed = pattern.parseIssuedNumber(typed, latestYear: today.year) else {
+                return .invalid(String(localized: L.lastIssuedNoMatch(pattern.format(year: today.year, counter: 41))))
             }
+            if !pattern.containsYear || parsed.year == today.year {
+                counter = parsed.counter
+            }
+        }
+        do {
+            let series = try DocumentNumberSeries(id: row.stored?.id ?? section.rawValue, pattern: pattern, resetsYearly: pattern.containsYear,
+                                                  year: today.year, lastCounter: counter, variableSymbolPrefix: section.variableSymbolPrefix)
+            return .ready(series)
+        } catch {
+            return .invalid(ErrorText.message(error, locale: locale))
+        }
+    }
+
+    private func builtSeries(_ section: NumberingSection) -> DocumentNumberSeries? {
+        guard let row = rows[section], case .ready(let series) = build(section, row) else { return nil }
+        return series
+    }
+
+    /// "Next number: FV 2026-0042 · VS 120260042 – assigned when you issue"; DD carries no payment request,
+    /// so its line has the number only.
+    private func nextLine(_ section: NumberingSection, _ series: DocumentNumberSeries) -> LocalizedStringResource {
+        guard let number = try? series.peek(on: today) else { return L.nextNumberUnknown }
+        if section != .paymentReceipts,
+           let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: series.variableSymbolPrefix) {
+            return L.nextNumberLine(number, symbol.digits)
+        }
+        return L.nextNumberLineNoVS(number)
+    }
+
+    /// The number of 2026 with counter 42 and its variable symbol, to compare two sections' patterns.
+    private func sample(_ series: DocumentNumberSeries) -> (number: String, symbol: String?) {
+        let number = series.pattern.format(year: 2026, counter: 42)
+        return (number, PaymentSymbol.variable(fromDocumentNumber: number, prefix: series.variableSymbolPrefix)?.digits)
+    }
+
+    /// Shown in the later of two colliding sections, naming both. Document numbers are compared across all
+    /// three; variable symbols for Invoices and Advance invoices only, since DD carries none.
+    private func collisionMessage(for section: NumberingSection) -> LocalizedStringResource? {
+        guard let mine = builtSeries(section) else { return nil }
+        let all = NumberingSection.allCases
+        guard let index = all.firstIndex(of: section) else { return nil }
+        for earlier in all[..<index] {
+            guard let other = builtSeries(earlier) else { continue }
+            if sample(mine).number == sample(other).number {
+                return L.seriesSameNumbers(Self.name(earlier), Self.name(section))
+            }
+            if section != .paymentReceipts, earlier != .paymentReceipts,
+               let symbol = sample(mine).symbol, symbol == sample(other).symbol {
+                return L.seriesSameVS(Self.name(earlier), Self.name(section))
+            }
+        }
+        return nil
+    }
+
+    private var canSave: Bool {
+        guard !rows.isEmpty else { return false }
+        return NumberingSection.allCases.allSatisfy { builtSeries($0) != nil && collisionMessage(for: $0) == nil }
+    }
+
+    /// Stores the unlocked series with their section's kinds, then records the confirmation. The store never
+    /// moves a counter backwards; when it kept its own counter, the pane says so.
+    private func save() {
+        guard canSave else { return }
+        do {
+            var keptCounter = false
+            for section in NumberingSection.allCases {
+                guard let row = rows[section], !row.isLocked, let series = builtSeries(section) else { continue }
+                let kinds = section.kinds.union(row.stored?.kinds ?? [])
+                let name = row.stored?.name ?? section.defaultName
+                try stores.series.save(StoredNumberSeries(name: name, kinds: kinds, series: series))
+                if let stored = try stores.series.series(id: series.id),
+                   stored.series.year != series.year || stored.series.lastCounter != series.lastCounter {
+                    keptCounter = true
+                }
+            }
+            try stores.series.confirmNumbering()
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             isError = false
-            message = L.saved
             load()
+            message = keptCounter ? L.seriesStoreKeptCounter : L.saved
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
-        }
-    }
-}
-
-/// The editable fields of one series.
-struct SeriesDraft: Identifiable, Hashable {
-    var id: String
-    var isNew: Bool
-    var name = ""
-    var template = "FV {YYYY}-{NNNN}"
-    var kinds: Set<DocumentKind> = [.invoice, .finalInvoice]
-    var year: Int
-    var lastCounter = 0
-    var lastIssuedYear: Int?
-    var resetsYearly = true
-    var prefix = ""
-
-    init() {
-        id = UUID().uuidString
-        isNew = true
-        year = CalendarDay(Date(), in: .current).year
-    }
-
-    init(_ stored: StoredNumberSeries) {
-        id = stored.id
-        isNew = false
-        name = stored.name
-        template = stored.series.pattern.template
-        kinds = stored.kinds
-        year = stored.series.year
-        lastCounter = stored.series.lastCounter
-        lastIssuedYear = stored.series.lastIssuedYear
-        resetsYearly = stored.series.resetsYearly
-        prefix = stored.series.variableSymbolPrefix ?? ""
-    }
-
-    /// The app issued a number from this series: its year and counter are no longer edited here
-    /// (screens-flows.md §2i).
-    var isLocked: Bool { lastIssuedYear != nil }
-}
-
-struct SeriesFormSheet: View {
-    let stores: Stores
-    @State var draft: SeriesDraft
-    /// The other stored series, for the variable-symbol collision check.
-    let others: [StoredNumberSeries]
-    let onSave: @MainActor () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var error: LocalizedStringResource?
-
-    private let currentYear = CalendarDay(Date(), in: .current).year
-
-    init(stores: Stores, draft: SeriesDraft, others: [StoredNumberSeries], onSave: @escaping @MainActor () -> Void) {
-        self.stores = stores
-        _draft = State(initialValue: draft)
-        self.others = others
-        self.onSave = onSave
-    }
-
-    private enum Preview {
-        case ready(number: String, symbol: String)
-        case invalid(String)
-    }
-
-    /// The next number as the store would assign it today (the same rule as the list), with its variable
-    /// symbol; or why the series is not valid yet.
-    private func preview() -> Preview {
-        do {
-            let series = try buildSeries()
-            let number = try series.peek(on: CalendarDay(Date(), in: .current))
-            let symbol = PaymentSymbol.variable(fromDocumentNumber: number, prefix: series.variableSymbolPrefix)?.digits ?? "—"
-            return .ready(number: number, symbol: symbol)
-        } catch {
-            return .invalid(ErrorText.message(error))
-        }
-    }
-
-    /// The variable symbol a series gives the sample number of 2026 with counter 42; two series with the
-    /// same digits would give two documents one symbol (ADR 0003 addendum, screens-flows.md §2i).
-    static func sampleVariableSymbol(template: String, prefix: String?) -> String? {
-        guard let pattern = try? DocumentNumberPattern(template: template) else { return nil }
-        let number = pattern.format(year: 2026, counter: 42)
-        return PaymentSymbol.variable(fromDocumentNumber: number, prefix: prefix)?.digits
-    }
-
-    /// The sample number of 2026 with counter 42; two series with the same one issue the same document
-    /// numbers. Nil while the template is not valid.
-    static func sampleNumber(template: String) -> String? {
-        guard let pattern = try? DocumentNumberPattern(template: template) else { return nil }
-        return pattern.format(year: 2026, counter: 42)
-    }
-
-    /// The stored series whose document numbers this draft would repeat, if any.
-    private var numberCollidingSeries: StoredNumberSeries? {
-        guard let mine = Self.sampleNumber(template: draft.template) else { return nil }
-        return others.first { other in Self.sampleNumber(template: other.series.pattern.template) == mine }
-    }
-
-    /// The stored series this draft would collide with, if any.
-    private var collidingSeries: StoredNumberSeries? {
-        let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
-        guard let mine = Self.sampleVariableSymbol(template: draft.template, prefix: prefix.isEmpty ? nil : prefix) else { return nil }
-        return others.first { other in
-            Self.sampleVariableSymbol(template: other.series.pattern.template, prefix: other.series.variableSymbolPrefix) == mine
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.l) {
-            Text(L.seriesTitle).textRole(.screenTitle)
-            Form {
-                TextField(text: $draft.name) { Text(L.seriesName) }
-                TextField(text: $draft.template) { Text(L.seriesTemplate) }
-                if let patternError {
-                    InlineMessage(patternError)
-                }
-                Section {
-                    ForEach(DocumentKind.allCases, id: \.self) { kind in
-                        Toggle(isOn: Binding(
-                            get: { draft.kinds.contains(kind) },
-                            set: { on in if on { draft.kinds.insert(kind) } else { draft.kinds.remove(kind) } })) {
-                            Text(verbatim: kind.pickerTitle)
-                        }
-                    }
-                    Text(L.seriesKindsCaption).textRole(.caption)
-                } header: {
-                    Text(L.seriesKinds)
-                }
-                if draft.isLocked {
-                    // Numbers were issued: the year and the counter are read-only (screens-flows.md §2i).
-                    LabeledContent { Text(verbatim: String(draft.year)).textRole(.amount) } label: { Text(L.seriesYear) }
-                    LabeledContent { Text(verbatim: String(draft.lastCounter)).textRole(.amount) } label: { Text(L.seriesLastCounter) }
-                    Text(L.seriesLockedNote).textRole(.caption)
-                } else {
-                    Stepper(value: $draft.year, in: 2000...max(2000, currentYear)) {
-                        LabeledContent { Text(verbatim: String(draft.year)) } label: { Text(L.seriesYear) }
-                    }
-                    if draft.year > currentYear {
-                        InlineMessage(L.seriesYearInFuture)
-                    }
-                    TextField(value: $draft.lastCounter, format: IntegerFormatStyle<Int>.number.grouping(.never)) {
-                        Text(L.seriesLastCounter)
-                    }
-                    Text(L.seriesLastCounterNote).textRole(.caption)
-                }
-                Toggle(isOn: $draft.resetsYearly) { Text(L.seriesResetsYearly) }
-                TextField(text: $draft.prefix) { Text(L.seriesVSPrefix) }
-                switch preview() {
-                case .ready(let number, let symbol):
-                    LabeledContent { Text(verbatim: number).textRole(.amount) } label: { Text(L.seriesNext) }
-                    LabeledContent { Text(verbatim: symbol).textRole(.amount) } label: { Text(L.seriesVSPreview) }
-                case .invalid(let text):
-                    if patternError == nil {
-                        InlineMessage(text)
-                    }
-                }
-                if let other = numberCollidingSeries {
-                    InlineMessage(L.seriesNumberCollisionWith(other.name), kind: .problem)
-                } else if let other = collidingSeries {
-                    InlineMessage(L.seriesCollisionWith(other.name), kind: .problem)
-                }
-                if let error {
-                    InlineMessage(error)
-                }
-            }
-            .formStyle(.grouped)
-            HStack {
-                Spacer()
-                Button { dismiss() } label: { Text(L.cancel) }
-                    .keyboardShortcut(.cancelAction)
-                Button { save() } label: { Text(L.save) }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty || draft.kinds.isEmpty)
-            }
-        }
-        .padding(Spacing.xl)
-        .frame(minHeight: 600)
-        .formSheetSized(minWidth: 520, maxWidth: 640)
-    }
-
-    /// The pattern's own problem, under the template field, where the preview would just disappear.
-    private var patternError: String? {
-        do {
-            _ = try DocumentNumberPattern(template: draft.template)
-            return nil
-        } catch {
-            return ErrorText.message(error)
-        }
-    }
-
-    private func buildSeries() throws -> DocumentNumberSeries {
-        let prefix = draft.prefix.trimmingCharacters(in: .whitespaces)
-        return try DocumentNumberSeries(
-            id: draft.id, pattern: DocumentNumberPattern(template: draft.template), resetsYearly: draft.resetsYearly,
-            year: draft.year, lastCounter: max(0, draft.lastCounter), lastIssuedYear: draft.lastIssuedYear,
-            variableSymbolPrefix: prefix.isEmpty ? nil : prefix)
-    }
-
-    private func save() {
-        do {
-            let numbering = try buildSeries()
-            let name = draft.name.trimmingCharacters(in: .whitespaces)
-            try stores.series.save(StoredNumberSeries(name: name, kinds: draft.kinds, series: numbering))
-            onSave()
-            NotificationCenter.default.post(name: .settingsDidSave, object: nil)
-            // A counter never goes backwards: when the store kept its own year or counter, say so and stay open.
-            if let stored = try stores.series.series(id: draft.id),
-               stored.series.year != numbering.year || stored.series.lastCounter != numbering.lastCounter {
-                draft = SeriesDraft(stored)
-                error = L.seriesStoreKeptCounter
-                return
-            }
-            dismiss()
-        } catch {
-            self.error = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error, locale: locale))
         }
     }
 }

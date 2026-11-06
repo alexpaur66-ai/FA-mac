@@ -254,22 +254,31 @@ enum L {
     static let bankNote = r("bank.note", "The first account in a currency is printed on documents in that currency; an account without a currency serves the rest.")
     static let companyFirst = r("bank.companyFirst", "Fill in the company profile first.")
     static let noAccounts = r("bank.noAccounts", "No bank accounts yet")
-    static let seriesName = r("series.name", "Series name")
     static let seriesTemplate = r("series.template", "Pattern ({YYYY}, {YY}, {NNNN})")
-    static let seriesKinds = r("series.kinds", "Numbers these types")
-    static let seriesYear = r("series.year", "Year")
-    static let seriesLastCounter = r("series.lastCounter", "Last issued counter")
-    static let seriesLastCounterNote = r("series.lastCounterNote", "To continue a series from another tool, enter the counter of the last number issued there. The counter never goes backwards.")
-    static let seriesResetsYearly = r("series.resetsYearly", "Restarts every year")
-    static let seriesVSPrefix = r("series.vsPrefix", "VS prefix (1 to 3 digits, no leading zero)")
-    static let seriesNext = r("series.next", "Next number")
-    static let seriesVSPreview = r("series.vsPreview", "Variable symbol")
-    static let seriesTitle = r("series.title", "Number Series")
-    static let newSeries = r("series.new", "New Series…")
-    static let createDefaultSeries = r("series.createDefaults", "Create Default Series")
-    static let defaultSeriesCaption = r("series.defaultsCaption", "FV for invoices and final invoices (VS prefix 1), ZF for advance invoices (prefix 2), DD for tax documents for payments (no prefix).")
-    static let noSeries = r("series.none", "No number series yet")
-    static let seriesPrefixCollision = r("series.collision", "Two series with the same pattern and the same prefix would give two documents the same variable symbol.")
+    static let seriesLastIssued = r("series.lastIssued", "Last issued number")
+    static let numberingCaption = r("series.numberingCaption", "Type the last number you issued in your previous tool. Leave it empty to start at 1. It can't be changed after the first document is issued.")
+    static let numberingInvoices = r("series.section.invoices", "Invoices")
+    static let numberingAdvances = r("series.section.advances", "Advance Invoices")
+    static let numberingReceipts = r("series.section.receipts", "Tax Documents for Received Payments")
+    static let numberingInvoicesName = r("series.name.invoices", "Invoices")
+    static let numberingAdvancesName = r("series.name.advances", "Advance invoices")
+    static let numberingReceiptsName = r("series.name.receipts", "Tax documents for received payments")
+    static func lastIssuedNoMatch(_ sample: String) -> LocalizedStringResource {
+        r("series.lastIssuedNoMatch", "Enter the number as the pattern writes it, such as \(sample), or leave it empty to start at 1.")
+    }
+    static func nextNumberLine(_ number: String, _ symbol: String) -> LocalizedStringResource {
+        r("series.nextLine", "Next number: \(number) · VS \(symbol) – assigned when you issue")
+    }
+    static func nextNumberLineNoVS(_ number: String) -> LocalizedStringResource {
+        r("series.nextLineNoVS", "Next number: \(number) – assigned when you issue")
+    }
+    static let nextNumberUnknown = r("series.nextUnknown", "Next number: –")
+    static func seriesSameNumbers(_ first: String, _ second: String) -> LocalizedStringResource {
+        r("series.sameNumbers", "\(first) and \(second) would issue the same numbers. Change one of the patterns.")
+    }
+    static func seriesSameVS(_ first: String, _ second: String) -> LocalizedStringResource {
+        r("series.sameVS", "\(first) and \(second) would give documents the same variable symbol. Change one of the patterns.")
+    }
 
     // MARK: Rates (screens-flows.md §2g)
 
@@ -515,6 +524,8 @@ enum L {
     static let issueTaxDocumentTitleNoNumber = r("issue.taxDocumentTitleNoNumber", "Issue the tax document?")
     static let issueFinalTitleNoNumber = r("issue.finalTitleNoNumber", "Issue the final invoice?")
     static let issueSubtitle = r("issue.subtitle", "Once issued, the document can't be edited or deleted.")
+    static let confirmNumberSeries = r("issue.confirmSeries", "Confirm your number series in Settings ▸ Numbering.")
+    static let fillIn = r("issue.fillIn", "Fill in…")
     static let noSeriesForKind = r("issue.noSeries", "No numbering series numbers this document type. Set one up in Settings ▸ Numbering.")
     static let summaryType = r("issue.type", "Type")
     static let summaryClient = r("issue.client", "Client")
@@ -557,7 +568,7 @@ enum L {
     static func issuedResult(_ number: String) -> LocalizedStringResource { r("issue.result", "Issued \(number)") }
     static let draftGone = r("editor.gone", "This draft no longer exists.")
     static func errorDayBeforeSeriesYear(_ year: String) -> LocalizedStringResource {
-        r("error.dayBeforeSeriesYear", "The issue date is before the series year \(year). Change the issue date or pick another series.")
+        r("error.dayBeforeSeriesYear", "The issue date is before the series year \(year). Change the issue date.")
     }
     static func finalInvoiceReceiptsPending(_ day: String) -> LocalizedStringResource {
         r("finalInvoice.receiptsPending", "Issue the tax document for the payment of \(day) first; otherwise its amount would not be deducted.")
@@ -631,10 +642,7 @@ enum L {
     static let fieldCompanyID = r("field.companyID", "Company ID (IČO)")
 
     // Settings
-    static let seriesLockedNote = r("series.lockedNote", "Numbers were issued from this series, so its year and counter can no longer be edited here.")
     static let seriesStoreKeptCounter = r("series.storeKeptCounter", "The stored counter was ahead and was kept; a counter never goes backwards.")
-    static let seriesYearInFuture = r("series.yearInFuture", "The year cannot be after this year.")
-    static let seriesKindsCaption = r("series.kindsCaption", "A document type numbered by two series picks one at issue.")
     static let errorPatternMissingCounter = r("error.patternMissingCounter", "The pattern needs one counter token, such as {NNNN}.")
     static let errorPatternMultipleCounters = r("error.patternMultipleCounters", "The pattern has more than one counter token.")
     static func errorPatternUnknownToken(_ token: String) -> LocalizedStringResource {
@@ -646,9 +654,6 @@ enum L {
     static func errorInvalidVSPrefix(_ prefix: String) -> LocalizedStringResource {
         r("error.invalidVSPrefix", "The VS prefix \(prefix) must be 1 to 3 digits without a leading zero.")
     }
-    static let defaultSeriesInvoices = r("series.defaultInvoices", "Invoices")
-    static let defaultSeriesAdvances = r("series.defaultAdvances", "Advance invoices")
-    static let defaultSeriesReceipts = r("series.defaultReceipts", "Tax documents for payments")
 
     // Exports and the database error
     static let backUpNow = r("exports.backUpNow", "Back Up Now")
@@ -690,9 +695,6 @@ enum L {
     static let openButton = r("action.open", "Open")
     static func vatIDChip(_ value: String) -> LocalizedStringResource { r("client.vatIDChip", "VAT ID \(value)") }
     static let countryRequired = r("validation.countryRequired", "A country is required.")
-    static func seriesCollisionWith(_ name: String) -> LocalizedStringResource {
-        r("series.collisionWith", "Would give the same variable symbol as the series \(name). Change the pattern or the VS prefix.")
-    }
     static func rateEqualsAmount(_ amount: Int, _ code: String, _ rate: String) -> LocalizedStringResource {
         r("rates.rateEqualsAmount", "\(amount) \(code) = \(rate) CZK")
     }
@@ -703,11 +705,6 @@ enum L {
     static let paymentRestoredUnlinked = r(
         "result.paymentRestoredUnlinked",
         "Payment restored without its draft tax document: the draft was issued, changed or linked to another payment.")
-    static let seriesNumbersCollide = r(
-        "series.numbersCollide", "Two series would issue the same document numbers; issuing from the second one would fail. Change a pattern.")
-    static func seriesNumberCollisionWith(_ name: String) -> LocalizedStringResource {
-        r("series.numberCollisionWith", "Would give the same document numbers as the series \(name). Change the pattern.")
-    }
 
     // MARK: Advances paid on EU goods (ADR 0012, the design thread's spec of 5 Nov 2026)
 

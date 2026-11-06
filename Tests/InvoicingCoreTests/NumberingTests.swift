@@ -52,6 +52,23 @@ import Testing
         #expect(!yearless.containsYear)
     }
 
+    @Test func parsesTheLastIssuedNumber() throws {
+        let pattern = try DocumentNumberPattern(template: "FV {YYYY}-{NNNN}")
+        let full = try #require(pattern.parseIssuedNumber(" FV 2026-0041 ", latestYear: 2026))
+        #expect(full.year == 2026 && full.counter == 41)
+        let bare = try #require(pattern.parseIssuedNumber("2025-0107", latestYear: 2026))
+        #expect(bare.year == 2025 && bare.counter == 107)
+        #expect(pattern.parseIssuedNumber("ZF 2026-0041", latestYear: 2026) == nil)
+        #expect(pattern.parseIssuedNumber("FV 2027-0001", latestYear: 2026) == nil)
+        #expect(pattern.parseIssuedNumber("", latestYear: 2026) == nil)
+        let short = try DocumentNumberPattern(template: "{YY}{NNN}")
+        let shortParsed = try #require(short.parseIssuedNumber("26042", latestYear: 2026))
+        #expect(shortParsed.year == 2026 && shortParsed.counter == 42)
+        let plain = try DocumentNumberPattern(template: "DD-{NNNNN}")
+        let plainParsed = try #require(plain.parseIssuedNumber("00012", latestYear: 2026))
+        #expect(plainParsed.year == 2026 && plainParsed.counter == 12)
+    }
+
     @Test func rejectsBadTemplates() {
         #expect(throws: DocumentNumberPattern.PatternError.missingCounter) { try DocumentNumberPattern(template: "FV-{YYYY}") }
         #expect(throws: DocumentNumberPattern.PatternError.multipleCounters) { try DocumentNumberPattern(template: "{NN}-{NN}") }
