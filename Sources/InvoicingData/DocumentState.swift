@@ -55,3 +55,24 @@ public struct DocumentState: Hashable, Sendable, Identifiable {
     public var id: String { summary.id }
     public var markedForCreditNote: Bool { closure?.kind == .markedForCreditNote }
 }
+
+extension DocumentState {
+    /// Record Payment… applies: an issued document with an open balance that is not a payment tax document
+    /// (the store refuses those) and has no closing event. An advance that an issued final invoice deducted
+    /// or settled as paid in advance takes none: money that arrives later is recorded on the final invoice,
+    /// so it cannot change what the final invoice counted (the design thread's lean pass, ADR 0012). Shared
+    /// by the toolbar, the context menu, the menu bar and the bank matching.
+    public var acceptsPayment: Bool {
+        takesIncomingPayment && outstanding.amount > 0
+    }
+
+    /// Record Refund… applies: an overpaid document gives the surplus back (screens-flows.md §2f).
+    public var acceptsRefund: Bool {
+        summary.status == .issued && summary.kind != .paymentTaxDocument && closure == nil && outstanding.amount < 0
+    }
+
+    /// Money may still arrive on it, as a payment or an overpayment: `acceptsPayment` without the open balance.
+    var takesIncomingPayment: Bool {
+        summary.status == .issued && summary.kind != .paymentTaxDocument && closure == nil && !deductedInFinal
+    }
+}
