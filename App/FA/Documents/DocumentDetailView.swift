@@ -179,12 +179,27 @@ struct DocumentDetailView: View {
                 }
             }
             if summary.status == .issued {
-                Label {
-                    Text(lockLine(summary))
-                } icon: {
-                    Image(systemName: "lock.fill")
+                if let repair = actions.repair {
+                    // Repair mode (§2m, design-system.md §8.18): the lock is open and every change is logged.
+                    HStack(spacing: Spacing.m) {
+                        Label {
+                            Text(L.repairLockLine)
+                        } icon: {
+                            Image(systemName: "lock.open.fill")
+                                .help(Text(L.repairUnlockedLabel))
+                                .accessibilityLabel(Text(L.repairUnlockedLabel))
+                        }
+                        .textRole(.legalNote)
+                        Button { repair() } label: { Text(L.repairDocument) }
+                    }
+                } else {
+                    Label {
+                        Text(lockLine(summary))
+                    } icon: {
+                        Image(systemName: "lock.fill")
+                    }
+                    .textRole(.legalNote)
                 }
-                .textRole(.legalNote)
                 paymentsSection(state)
             }
             if let loadError {
@@ -562,9 +577,17 @@ struct DocumentActivityList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             ForEach(events.reversed()) { event in
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(verbatim: Self.sentence(event, currency: currency, locale: locale)).textRole(.body).textSelection(.enabled)
-                    Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                    // The only Activity symbol: a Repair mode change (design-system.md §8.15).
+                    if event.action == "repair" {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(verbatim: Self.sentence(event, currency: currency, locale: locale)).textRole(.body).textSelection(.enabled)
+                        Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
+                    }
                 }
                 .help(Text(verbatim: Self.timestamp(event.at, locale: locale, full: true)))
                 .accessibilityElement(children: .combine)
@@ -609,9 +632,26 @@ struct DocumentActivityList: View {
             return String(localized: L.activityDeleted)
         case "create":
             return String(localized: L.activityDraftCreated)
+        case "repair":
+            return repairSentence(details, locale: locale)
+        case "pdfReplaced":
+            return String(localized: L.activityPDFReplaced)
         default:
             return event.action
         }
+    }
+
+    /// "Client address: Krátká 1 → Nová 5 · Wrong address"; a date in the UI's format, a missing value as "—".
+    private static func repairSentence(_ details: [String: String], locale: Locale) -> String {
+        let raw = details["field"] ?? ""
+        let field = RepairField(rawValue: raw)
+        func value(_ text: String?) -> String {
+            guard let text, !text.isEmpty else { return "—" }
+            if field == .dueDate, let day = CalendarDay(iso: text) { return day.formatted(locale) }
+            return text
+        }
+        let name = field.map { String(localized: $0.title) } ?? raw
+        return String(localized: L.activityRepair(name, value(details["old"]), value(details["new"]), details["reason"] ?? ""))
     }
 
     /// The stored ISO 8601 timestamp in the UI locale (with seconds in the tooltip); the raw text when it

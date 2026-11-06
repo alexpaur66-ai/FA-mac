@@ -403,6 +403,44 @@ enum Schema {
                 t.column("updatedAt", .text).notNull()
             }
         }
+
+        // v9 (screens-flows.md §2m, Repair mode): the locks on an issued document and its stored PDF give way
+        // only inside a repair transaction, which puts its row in `repairUnlock` first and takes it out before
+        // it commits, so no other write ever sees the lock open. The audit log never unlocks. A replaced PDF's
+        // bytes move to `documentPDFHistory`, which only grows.
+        migrator.registerMigration("v9") { db in
+            try db.create(table: "repairUnlock") { t in
+                t.column("token", .text).primaryKey()
+            }
+            try db.execute(sql: "DROP TRIGGER document_frozen_update")
+            try db.execute(sql: """
+                CREATE TRIGGER document_frozen_update BEFORE UPDATE ON document
+                WHEN OLD.status = 'issued' AND NOT EXISTS (SELECT 1 FROM repairUnlock)
+                BEGIN SELECT RAISE(ABORT, 'issued documents are frozen'); END
+                """)
+            try db.execute(sql: "DROP TRIGGER documentPDF_frozen")
+            try db.execute(sql: """
+                CREATE TRIGGER documentPDF_frozen BEFORE UPDATE OF data, sha256, renderedAt ON documentPDF
+                WHEN NOT EXISTS (SELECT 1 FROM repairUnlock)
+                BEGIN SELECT RAISE(ABORT, 'a stored PDF is frozen'); END
+                """)
+            try db.create(table: "documentPDFHistory") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("documentID", .text).notNull().indexed().references("document", onDelete: .restrict)
+                t.column("data", .blob).notNull()
+                t.column("sha256", .text).notNull()
+                t.column("renderedAt", .text).notNull()
+                t.column("replacedAt", .text).notNull()
+            }
+            try db.execute(sql: """
+                CREATE TRIGGER documentPDFHistory_append_only_update BEFORE UPDATE ON documentPDFHistory
+                BEGIN SELECT RAISE(ABORT, 'replaced PDFs are kept as they were'); END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER documentPDFHistory_append_only_delete BEFORE DELETE ON documentPDFHistory
+                BEGIN SELECT RAISE(ABORT, 'replaced PDFs are kept as they were'); END
+                """)
+        }
         return migrator
     }
 }

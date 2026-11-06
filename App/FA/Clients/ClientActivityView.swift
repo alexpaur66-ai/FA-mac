@@ -304,13 +304,21 @@ struct ClientActivityView: View {
             .help(Text(verbatim: DocumentActivityList.timestamp(note.createdAt, locale: locale, full: true)))
             .accessibilityElement(children: .combine)
         case .event(let event, _, let number, let currency):
-            // A system event: immutable, in the secondary style, starting with its document's number.
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(verbatim: Self.sentence(event, number: number, currency: currency, locale: locale))
-                    .textRole(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(verbatim: DocumentActivityList.timestamp(event.at, locale: locale)).textRole(.caption)
+            // A system event: immutable, in the secondary style, starting with its document's number; a
+            // Repair mode change carries the only Activity symbol (design-system.md §8.15).
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                if event.action == "repair" {
+                    Image(systemName: "wrench.and.screwdriver.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(verbatim: Self.sentence(event, number: number, currency: currency, locale: locale))
+                        .textRole(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: DocumentActivityList.timestamp(event.at, locale: locale)).textRole(.caption)
+                }
             }
             .help(Text(verbatim: DocumentActivityList.timestamp(event.at, locale: locale, full: true)))
             .accessibilityElement(children: .combine)

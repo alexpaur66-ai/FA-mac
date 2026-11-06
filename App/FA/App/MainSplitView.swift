@@ -10,6 +10,10 @@ import SwiftUI
 
 struct MainSplitView: View {
     let stores: Stores
+    /// Repair mode (screens-flows.md §2m), shared by the windows.
+    let repairMode: RepairModeModel
+    /// This window's repairs and their Undo.
+    @State private var repairer: DocumentRepairer
 
     @SceneStorage("sidebar") private var sidebar: SidebarItem = .section(.overview)
     @State private var documents: DocumentListModel
@@ -74,8 +78,11 @@ struct MainSplitView: View {
     /// The result line left by a restore, shown once when the rebuilt window appears.
     let takeNotice: (@MainActor () -> String?)?
 
-    init(stores: Stores, restoreFromBackup: (@MainActor () -> Void)? = nil, takeNotice: (@MainActor () -> String?)? = nil) {
+    init(stores: Stores, repairMode: RepairModeModel, restoreFromBackup: (@MainActor () -> Void)? = nil,
+         takeNotice: (@MainActor () -> String?)? = nil) {
         self.stores = stores
+        self.repairMode = repairMode
+        _repairer = State(initialValue: DocumentRepairer(stores: stores, repairMode: repairMode))
         self.restoreFromBackup = restoreFromBackup
         self.takeNotice = takeNotice
         _documents = State(initialValue: DocumentListModel(stores: stores))
@@ -124,8 +131,12 @@ struct MainSplitView: View {
         } content: {
             contentColumn
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    if let result {
-                        ResultLine(model: result) { self.result = nil }
+                    VStack(spacing: 0) {
+                        // Repair mode's bar comes first and never hides on a timer (§2m).
+                        RepairModeBanner(repairMode: repairMode)
+                        if let result {
+                            ResultLine(model: result) { self.result = nil }
+                        }
                     }
                 }
                 .navigationSplitViewColumnWidth(
@@ -197,6 +208,16 @@ struct MainSplitView: View {
         }
         .onAppear {
             if let notice = takeNotice?() { report(notice) }
+        }
+        // Repair mode ended: the result line counts its changes, and its Undo leaves the Edit menu.
+        .onChange(of: repairMode.endedNotice) { _, notice in
+            repairer.dropUndo()
+            if let notice { report(notice.text) }
+        }
+        .onChange(of: repairer.outcome) { _, outcome in
+            guard let outcome else { return }
+            report(outcome.text, kind: outcome.isProblem ? .problem : .done)
+            if outcome.documentID != nil { pdfVersion += 1 }
         }
     }
 
@@ -384,6 +405,12 @@ struct MainSplitView: View {
         }
         actions.newStockItem = newStockItem
         actions.exportForAccountant = { sheet = .exportForAccountant(nil) }
+        if repairMode.isOn {
+            let mode = repairMode
+            actions.endRepairMode = { mode.end() }
+        } else {
+            actions.turnOnRepairMode = { sheet = .repairMode }
+        }
         // View ▸ Client Tab ▸, while a client page is shown (§1.4); Items once a stock item exists.
         if sidebar.section == .clients, clientSelection != nil {
             actions.clientTab = clientTab == .items && !stock.hasItems ? .documents : clientTab
@@ -445,6 +472,10 @@ struct MainSplitView: View {
         let summary = state.summary
         if summary.customerID != nil {
             actions.showClient = { showClient(ofDocument: id) }
+        }
+        // Repair mode (§2m): an issued document's Repair… in the lock line and the Document menu.
+        if repairMode.isOn, summary.status == .issued {
+            actions.repair = { sheet = .repairDocument(id) }
         }
         if summary.status == .draft {
             actions.deleteDraft = { deleteDrafts([id]) }
@@ -1019,6 +1050,17 @@ struct MainSplitView: View {
             })
         case .exchangeRates:
             ExchangeRatesSheet(stores: stores)
+        case .repairMode:
+            RepairModeSheet(repairMode: repairMode)
+        case .repairDocument(let id):
+            if let document = try? stores.documents.document(id: id) {
+                let current = document.customerID.flatMap { try? stores.customers.customer(id: $0) }
+                let model = repairer
+                let undo = undoManager
+                DocumentRepairSheet(document: document, currentCustomer: current, reason: repairMode.reason) { repair, reason in
+                    model.save(documentID: id, repair: repair, reason: reason, undoManager: undo)
+                }
+            }
         case .exportForAccountant(let month):
             AccountantExportSheet(stores: stores, month: month) { text, problem in
                 report(text, kind: problem ? .problem : .done)
@@ -1051,6 +1093,10 @@ enum MainSheet: Identifiable, Hashable {
     case exchangeRates
     /// File ▸ Export for Accountant…, on the previous month (nil) or on the month of the Overview's row.
     case exportForAccountant(CalendarDay?)
+    /// File ▸ Repair Mode…: the reason, then Touch ID or the password (§2m).
+    case repairMode
+    /// Repair… on an issued document while the mode is on.
+    case repairDocument(String)
 
     var id: String {
         switch self {
@@ -1061,6 +1107,8 @@ enum MainSheet: Identifiable, Hashable {
         case .newClientForDraft: "newClientForDraft"
         case .exchangeRates: "exchangeRates"
         case .exportForAccountant(let month): "export:" + (month?.isoString ?? "previous")
+        case .repairMode: "repairMode"
+        case .repairDocument(let id): "repair:" + id
         }
     }
 }

@@ -22,6 +22,7 @@ struct Stores: Sendable {
     var stock: StockStore { StockStore(database) }
     var exports: ExportStore { ExportStore(database) }
     var clientNotes: ClientNoteStore { ClientNoteStore(database) }
+    var repairs: RepairStore { RepairStore(database) }
 }
 
 @MainActor @Observable
@@ -43,6 +44,9 @@ final class AppModel {
 
     /// The database file, known even when opening it failed, so the error view can show the folder.
     let databaseURL: URL?
+
+    /// Repair mode (screens-flows.md §2m), for every window; each launch starts locked.
+    let repairMode = RepairModeModel()
 
     /// Restore from Backup… (screens-flows.md §2h): the picked file and what it holds, while the preview
     /// is up.
@@ -143,6 +147,7 @@ final class AppModel {
             // or not the restore succeeds, so none keeps an editor that no longer saves. A Remove Bank Account
             // made before it can no longer be undone, even from a Settings window that is closed now.
             BankAccountUndo.invalidateAll()
+            repairMode.endQuietly()
             NotificationCenter.default.post(name: .dataWillBeReplaced, object: nil)
             defer { generation += 1 }
             // Not pruned: the oldest backup may be the one being restored. The next backup prunes.

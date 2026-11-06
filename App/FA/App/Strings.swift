@@ -1123,4 +1123,53 @@ enum L {
     }
     static let noteTextRequired = r("activity.textRequired", "Type the note first.")
     static let noteMissing = r("activity.noteMissing", "This note is no longer there.")
+
+    // Repair mode (screens-flows.md §2m, design-system.md §8.18)
+    static let menuRepairMode = r("menu.repairMode", "Repair Mode…")
+    static let repairEnd = r("repair.end", "End Repair Mode")
+    static let repairTurnOnTitle = r("repair.turnOnTitle", "Turn On Repair Mode?")
+    static let repairTurnOnText = r("repair.turnOnText", "Repair mode unlocks every record, issued documents included. Every change is written to the audit log with a reason. The audit log stays on this Mac.")
+    static let repairReason = r("repair.reason", "Reason")
+    static let repairReasonPrompt = r("repair.reasonPrompt", "Wrong client address on FV 2026-0042")
+    static let repairUnlock = r("repair.unlock", "Unlock…")
+    static let repairNotUnlocked = r("repair.notUnlocked", "Not unlocked")
+    /// The system's Touch ID or password prompt: what the unlock is for, without the app's name.
+    static let repairAuthPrompt = r("repair.authPrompt", "unlock every record for repair")
+    static let repairBanner = r("repair.banner", "Repair mode is on. Every change to a locked record is logged.")
+    static let repairEndedByTimeout = r("repair.endedByTimeout", "Repair mode ended after 10 minutes without changes")
+    static func repairEnded(_ count: Int) -> LocalizedStringResource { r("repair.ended", "Repair mode ended · \(count) changes logged") }
+    static let repairEndedOne = r("repair.endedOne", "Repair mode ended · 1 change logged")
+    static let repairLockLine = r("repair.lockLine", "Repair mode: changes are logged")
+    static let repairUnlockedLabel = r("repair.unlockedLabel", "Unlocked for repair")
+    static let repairDocument = r("repair.document", "Repair…")
+    static func repairDocumentTitle(_ number: String) -> LocalizedStringResource { r("repair.documentTitle", "Repair \(number)") }
+    static let repairDocumentText = r("repair.documentText", "Each change is written to the audit log with the reason. The document gets a new PDF; the old one is kept. Amounts, dates of the tax point and lines can't be repaired yet.")
+    static let repairClientOnDocument = r("repair.clientOnDocument", "Client on the document")
+    static let repairClientNow = r("repair.clientNow", "Client now")
+    static let repairUseCurrentDetails = r("repair.useCurrentDetails", "Use the client's current details")
+    static let repairClientHint = r("repair.clientHint", "To fix the client's details, change the client with Edit Client… first; they can then replace the ones on this document.")
+    static let repairOrderReference = r("repair.orderReference", "Order reference")
+    static let repairNote = r("repair.note", "Note")
+    static let repairSave = r("repair.save", "Save Repair")
+    static let repairReasonRequired = r("repair.reasonRequired", "Give the reason for the change.")
+    static let repairNothingChanged = r("repair.nothingChanged", "Nothing was changed.")
+    static let repairModeOff = r("repair.modeOff", "Repair mode has ended. Turn it on again with File ▸ Repair Mode… to save this change.")
+    static func repairDone(_ number: String, _ count: Int) -> LocalizedStringResource {
+        r("repair.done", "\(number) repaired · \(count) changes logged")
+    }
+    static func repairDoneOne(_ number: String) -> LocalizedStringResource { r("repair.doneOne", "\(number) repaired · 1 change logged") }
+    static func repairUndoReason(_ reason: String) -> LocalizedStringResource { r("repair.undoReason", "Undo: \(reason)") }
+    static let undoRepair = r("repair.undoName", "Repair")
+    static let repairFieldClientName = r("repair.field.clientName", "Client name")
+    static let repairFieldClientAddress = r("repair.field.clientAddress", "Client address")
+    static let repairFieldClientCompanyID = r("repair.field.clientCompanyID", "Client IČO")
+    static let repairFieldClientVATID = r("repair.field.clientVATID", "Client DIČ")
+    static let repairFieldClientRegistry = r("repair.field.clientRegistry", "Client registry entry")
+    static let repairFieldClientEmail = r("repair.field.clientEmail", "Client email")
+    static let repairFieldClientPhone = r("repair.field.clientPhone", "Client phone")
+    /// A repair event in the Activity: "Client address: Krátká 1 → Nová 5 · Wrong address".
+    static func activityRepair(_ field: String, _ old: String, _ new: String, _ reason: String) -> LocalizedStringResource {
+        r("activity.repair", "\(field): \(old) → \(new) · \(reason)")
+    }
+    static let activityPDFReplaced = r("activity.pdfReplaced", "New PDF after a repair; the old one is kept")
 }
