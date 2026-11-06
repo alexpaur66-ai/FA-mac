@@ -238,6 +238,11 @@ struct MainSplitView: View {
                 DraftEditorView(
                     stores: stores, documents: documents, model: editor, onIssued: issued,
                     newClient: { sheet = .newClientForDraft($0) },
+                    openChainItem: { item in
+                        guard let target = item.documentID else { return }
+                        if item.isDraft { openDraft(target) } else { openDocument(id: target) }
+                    },
+                    chainAction: performChainStep,
                     issueSheetPresented: $issueSheetPresented, previewShown: $previewShown)
             } else {
                 ProgressView()

@@ -374,7 +374,6 @@ enum L {
     static let newAdvanceTitle = r("editor.newAdvanceTitle", "New Advance Invoice")
     static let newFinalInvoiceTitle = r("editor.newFinalInvoiceTitle", "New Final Invoice")
     static let newTaxDocumentTitle = r("editor.newTaxDocumentTitle", "New Tax Document")
-    static let readyToIssue = r("editor.ready", "Ready to issue")
     static let oneProblem = r("editor.oneProblem", "1 problem")
     static func problems(_ count: Int) -> LocalizedStringResource { r("editor.problems", "\(count) problems") }
     static let issueButton = r("editor.issueButton", "Issue")
@@ -409,15 +408,11 @@ enum L {
     static let clientPrompt = r("editor.clientPrompt", "Name, IČO or VAT ID")
     static func newClientNamed(_ query: String) -> LocalizedStringResource { r("editor.newClientNamed", "New Client “\(query)”…") }
     static let newClientEllipsis = r("editor.newClient", "New Client…")
-    static func clientSuggestionLine(_ ico: String, _ country: String, _ currency: String, _ language: String, _ treatment: String) -> LocalizedStringResource {
-        r("editor.clientSuggestionLine", "IČO \(ico) · \(country) · \(currency) · \(language) · \(treatment)")
-    }
-    static func clientSuggestionLineNoICO(_ country: String, _ currency: String, _ language: String, _ treatment: String) -> LocalizedStringResource {
-        r("editor.clientSuggestionLineNoICO", "\(country) · \(currency) · \(language) · \(treatment)")
+    static func clientSuggestionLine(_ currency: String, _ days: String, _ treatment: String) -> LocalizedStringResource {
+        r("editor.clientSuggestionLine", "\(currency) · \(days) · \(treatment)")
     }
     static let vatIDMissing = r("editor.vatIDMissing", "VAT ID missing")
     static let addressMissing = r("editor.addressMissing", "Address missing")
-    static let fieldType = r("editor.type", "Type")
     static let fieldIssueDate = r("editor.issueDate", "Issue date")
     static let fieldTaxPoint = r("editor.taxPoint", "Date of taxable supply")
     static let sameAsIssueDate = r("editor.sameAsIssueDate", "Same as the issue date")
@@ -442,9 +437,7 @@ enum L {
     static func accountWithBankAndCurrency(_ bank: String, _ iban: String, _ currency: String) -> LocalizedStringResource {
         r("editor.accountWithBankAndCurrency", "\(bank) · \(iban) · \(currency)")
     }
-    static let defaultAccount = r("editor.defaultAccount", "Default account for the currency")
     static let fieldOrderReference = r("editor.orderReference", "Order reference")
-    static let fieldRelatedDocument = r("editor.relatedDocument", "Related document number")
     static let notesOnPDF = r("editor.notesOnPDF", "Notes on the PDF")
     static let fieldNote = r("editor.note", "Note above the lines")
     /// The banner on an advance (screens-flows.md §0 rule 3); the printed clause comes from InvoicingCore.
@@ -473,11 +466,9 @@ enum L {
     static let insertLineBelow = r("editor.insertLineBelow", "Insert Line Below")
     static let moveLineUp = r("editor.moveLineUp", "Move Line Up")
     static let moveLineDown = r("editor.moveLineDown", "Move Line Down")
-    static let rateReverseCharge = r("editor.rate.rc", "RC")
     static let reverseChargeItem = r("editor.reverseChargeItem", "Reverse charge")
-    /// The § 64 notice in the totals bar's VAT place, until the cuts give every untaxed treatment "Total · <short form>".
+    /// The § 64 treatment as the totals bar's single Total names it: "Total · Exempt (§ 64)".
     static let exemptSection64Item = r("editor.exemptSection64Item", "Exempt (§ 64)")
-    static let rateExempt = r("editor.rate.exempt", "exempt")
     static let rateNotInForce = r("editor.rateNotInForce", "Not in force")
     static func vatRateFixIt(_ rates: String) -> LocalizedStringResource { r("editor.vatRateFixIt", "Enter one of the rates in force: \(rates)") }
     static func enterNumber(_ example: String) -> LocalizedStringResource { r("editor.enterNumber", "Enter a number, such as \(example)") }
@@ -846,4 +837,20 @@ enum L {
     static func numberAndClient(_ number: String, _ client: String) -> LocalizedStringResource {
         r("closure.subtitle", "\(number) · \(client)")
     }
+
+    // MARK: Lean editor (docs-17..26)
+
+    static func editorSubtitle(_ type: String, _ state: String) -> LocalizedStringResource { r("editor.subtitle", "\(type) · \(state)") }
+    static let subtitleInvoice = r("editor.subtitle.invoice", "Invoice")
+    static let subtitleAdvance = r("editor.subtitle.advance", "Advance invoice")
+    static let subtitlePaymentTaxDocument = r("editor.subtitle.paymentTaxDocument", "Tax document for payment")
+    static let subtitleFinal = r("editor.subtitle.final", "Final invoice")
+    /// "→ Wed 19. 11. 2026" after the due days.
+    static func dueOnDate(_ weekday: String, _ day: String) -> LocalizedStringResource { r("editor.dueOnDate", "→ \(weekday) \(day)") }
+    /// "Total · Exempt (§ 64)": the one figure of a document without Czech VAT.
+    static func totalWithTreatment(_ treatment: String) -> LocalizedStringResource { r("editor.totalWithTreatment", "Total · \(treatment)") }
+    /// "· for 30. 10. 2026 · Typed" after "1 EUR = 24,315 CZK".
+    static func rateLineDetails(_ day: String, _ source: String) -> LocalizedStringResource { r("editor.rateLineDetails", "· for \(day) · \(source)") }
+    static let addDiscount = r("editor.addDiscount", "Add Discount")
+    static let menuBankAccount = r("menu.bankAccount", "Bank Account")
 }

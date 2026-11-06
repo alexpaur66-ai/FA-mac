@@ -146,6 +146,16 @@ extension DocumentKind {
         }
     }
 
+    /// The type in the editor's window subtitle, "Invoice · Draft · Saved" (docs-18).
+    var editorSubtitleTitle: LocalizedStringResource {
+        switch self {
+        case .invoice: L.subtitleInvoice
+        case .advanceRequest: L.subtitleAdvance
+        case .paymentTaxDocument: L.subtitlePaymentTaxDocument
+        case .finalInvoice: L.subtitleFinal
+        }
+    }
+
     /// The menu item of Document ▸ Change Type (screens-flows.md §1.4): title case, no Czech title.
     var menuTitle: LocalizedStringResource {
         switch self {
