@@ -52,12 +52,18 @@ final class StockModel {
         let item = try stock.add(name: name, unit: unit, reorderLevel: reorderLevel, onHand: onHand,
                                  day: CalendarDay(Date(), in: .current))
         reload()
+        let itemID = item.id
+        // Only what this action recorded: the item and its initial count, if any.
+        let initial = Set(movements(itemID: itemID).map(\.sequence))
         register(undoManager, name: L.undoNewStockItem) { model in
+            // A movement recorded since (another window) keeps the item and its movements in place.
+            let current = Set(model.movements(itemID: itemID).map(\.sequence))
+            guard current == initial else { return }
             // The count recorded with it goes first, then the item, which now has no movements.
-            for movement in model.movements(itemID: item.id) {
-                try? model.stock.deleteMovement(sequence: movement.sequence)
+            for sequence in initial {
+                try? model.stock.deleteMovement(sequence: sequence)
             }
-            _ = try? model.stock.delete(id: item.id)
+            _ = try? model.stock.delete(id: itemID)
         }
         return item
     }

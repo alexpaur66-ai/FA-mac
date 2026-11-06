@@ -143,7 +143,7 @@ struct StockView: View {
             TableColumn(Text(L.colOnHand), value: \.onHand) { row in
                 HStack(spacing: Spacing.s) {
                     if row.isLow {
-                        StatusBadge(style: .stockLow, compact: true)
+                        StatusBadge(style: .stockLow)
                     }
                     Text(verbatim: StockFormat.quantity(row.onHand, unit: row.unit, locale: locale))
                         .textRole(.amount)
@@ -241,8 +241,10 @@ struct StockItemDetailView: View {
         if let state = stock.state(id: itemID) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.xl) {
+                    // Keyed on the id, so a saved edit keeps the header and its focus; the header refreshes its
+                    // fields when the stored item changes (Undo, Redo).
                     StockItemHeader(stock: stock, item: state.item)
-                        .id(state.item)
+                        .id(state.item.id)
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(verbatim: StockFormat.quantity(state.onHand, unit: state.item.unit, locale: locale))
                             .textRole(.kpi)
@@ -377,6 +379,12 @@ private struct StockItemHeader: View {
             }
         }
         .onAppear { reorder = item.reorderLevel.map { StockFormat.number($0, locale: locale) } ?? "" }
+        .onChange(of: item) { _, new in
+            // The stored item changed (a commit, Undo, Redo): the fields show it, so none keeps an older value.
+            name = new.name
+            unit = new.unit
+            reorder = new.reorderLevel.map { StockFormat.number($0, locale: locale) } ?? ""
+        }
         .onChange(of: focus) { old, _ in
             if old != nil { commit() }
         }
@@ -384,6 +392,8 @@ private struct StockItemHeader: View {
     }
 
     private func commit() {
+        // A header whose item is no longer the stored one (Undo, Redo, a deleted item) writes nothing.
+        guard stock.state(id: item.id)?.item == item else { return }
         let trimmedReorder = reorder.trimmingCharacters(in: .whitespacesAndNewlines)
         var level: Decimal? = nil
         if !trimmedReorder.isEmpty {
@@ -397,6 +407,10 @@ private struct StockItemHeader: View {
         updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.unit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.reorderLevel = level
+        guard updated != item else {
+            problem = nil
+            return
+        }
         do {
             try stock.update(updated, undoManager: undoManager)
             problem = nil
