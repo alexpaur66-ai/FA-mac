@@ -325,7 +325,8 @@ struct MainSplitView: View {
             let filter = sidebar.documentFilter
             actions.sort = SortMenuActions(
                 current: DocumentSortMemory.sort(for: filter, in: documentsSortStored),
-                set: { setDocumentsSort($0, for: filter) })
+                set: { setDocumentsSort($0, for: filter) },
+                columns: DocumentSortColumn.sortMenuColumns(for: filter))
         }
         // Clients and Payments get theirs with their own searchable(isPresented:).
         if sidebar.section == .documents || sidebar.section == .overview {
@@ -365,7 +366,7 @@ struct MainSplitView: View {
         }
         if summary.status == .draft {
             actions.deleteDraft = { deleteDrafts([id]) }
-            actions.related = relatedDocuments(of: id)
+            actions.related = relatedDocuments(in: try? AdvanceChain.of(id, stores: stores, states: documents.states))
             if let editor, editor.documentID == id {
                 actions.issue = { requestIssue(id) }
                 // A draft prints as its watermarked preview (screens-flows.md §1.4).
@@ -385,10 +386,12 @@ struct MainSplitView: View {
         if let path = PDFActions.existingFile(stores, documentID: id) {
             actions.showPDFInFinder = { PDFFiles.reveal(path: path) }
         }
-        actions.related = relatedDocuments(of: id)
+        let chain = try? AdvanceChain.of(id, stores: stores, states: documents.states)
+        actions.related = relatedDocuments(in: chain)
         // An issued advance with a payment, not closed, and not yet deducted or settled by a final invoice.
         if summary.kind == .advanceRequest && state.closure == nil && !state.deductedInFinal && state.paid.amount > 0 {
             actions.createFinalInvoice = { createFinalInvoice(from: id) }
+            if case .createFinalInvoice? = chain?.nextStep { actions.finalInvoiceIsNextStep = true }
         }
         // The oldest received payment without a tax document (screens-flows.md §1.4); the payment rows offer
         // each one. An advance for § 64 goods needs none (ADR 0012).
@@ -452,8 +455,8 @@ struct MainSplitView: View {
     }
 
     /// Document ▸ Show Related Documents ▸: the chain's other documents; empty outside a chain.
-    private func relatedDocuments(of id: String) -> [RelatedDocumentAction] {
-        guard let chain = try? AdvanceChain.of(id, stores: stores, states: documents.states) else { return [] }
+    private func relatedDocuments(in chain: AdvanceChain?) -> [RelatedDocumentAction] {
+        guard let chain else { return [] }
         return chain.relatedDocuments.compactMap { item in
             guard let documentID = item.documentID else { return nil }
             let isDraft = item.isDraft
@@ -663,6 +666,12 @@ struct MainSplitView: View {
             guard advanceState.closure == nil else { return }
             guard !advanceState.deductedInFinal else {
                 report(L.advanceAlreadyInFinalInvoice(advanceState.deductedBy.joined(separator: ", ")), kind: .info)
+                return
+            }
+            // A draft final invoice of this advance opens instead of a second one (the chain line offers none).
+            if let draft = try AdvanceChain.finalInvoices(of: advanceState, stores: stores, states: documents.states)
+                .first(where: { $0.isDraft }), let draftID = draft.documentID {
+                openDraft(draftID)
                 return
             }
             let goodsOnly = advance.isIntraCommunityGoodsOnly

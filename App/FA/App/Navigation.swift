@@ -128,6 +128,12 @@ enum DocumentSortColumn: String, CaseIterable, Identifiable, Sendable {
     /// The columns View ▸ Sort By ▸ lists, in header order.
     static let menuColumns: [DocumentSortColumn] = [.number, .type, .client, .issued, .due, .total, .open, .taxPoint, .vs]
 
+    /// View ▸ Sort By ▸ on `filter`: Drafts also lists Last Edited, the sort it opens with, so that its
+    /// checkmark shows and it can be chosen again after another column.
+    static func sortMenuColumns(for filter: DocumentSmartFilter) -> [DocumentSortColumn] {
+        filter.defaultSort.column == .updated ? menuColumns + [.updated] : menuColumns
+    }
+
     var title: LocalizedStringResource {
         switch self {
         case .number: L.colNumber

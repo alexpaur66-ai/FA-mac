@@ -32,10 +32,13 @@ struct DocumentsView: View {
 
     private var rows: [DocumentRow] {
         documents.rows(for: filter)
-            .filter { row in
-                row.id == editingID || row.matches(search: search, extra: { documents.searchText(for: row.state) })
-            }
+            .filter { row in row.id == editingID || matchesSearch(row) }
             .sorted(using: sortOrder)
+    }
+
+    /// The row is a result of the search; the open draft's row is listed without being one.
+    private func matchesSearch(_ row: DocumentRow) -> Bool {
+        row.matches(search: search, extra: { documents.searchText(for: row.state) })
     }
 
     /// The selection without the documents the filter or the search hides, so the detail column, the
@@ -61,9 +64,9 @@ struct DocumentsView: View {
         .navigationTitle(Text(L.documents))
         .navigationSubtitle(Text(subtitle(count: rows.count)))
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: Text(L.searchDocuments))
-        // ↩ in the field moves focus to the first result (screens-flows.md §2b).
+        // ↩ in the field moves focus to the first result (screens-flows.md §2b), not to the open draft's row.
         .onSubmit(of: .search) {
-            guard let first = rows.first else { return }
+            guard let first = rows.first(where: { matchesSearch($0) }) else { return }
             selection = [first.id]
             tableFocused = true
         }
@@ -199,10 +202,11 @@ struct DocumentsView: View {
                 Button { paymentAction() } label: { Text(actions.paymentTitle) }
             }
             // At most one create item, the chain's next step (screens-flows.md §2b): a payment waiting for
-            // its tax document comes before the final invoice. The Document menu may show both.
+            // its tax document comes before the final invoice, which shows only where the chain line offers
+            // it. The Document menu may show both.
             if let createTaxDocument = actions.createTaxDocument {
                 Button { createTaxDocument() } label: { Text(L.createTaxDocumentForPayment) }
-            } else if let createFinalInvoice = actions.createFinalInvoice {
+            } else if actions.finalInvoiceIsNextStep, let createFinalInvoice = actions.createFinalInvoice {
                 Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
             }
             if let duplicate = actions.duplicate {

@@ -79,6 +79,11 @@ struct AdvanceChain: Equatable {
         items.filter { $0.documentID != nil && !$0.isCurrent }
     }
 
+    /// The step the line offers as its button, for the row's context menu (screens-flows.md §2b).
+    var nextStep: ChainNextStep? {
+        items.first { $0.next != nil }?.next
+    }
+
     /// The chain of `documentID`, or nil when the document is in none: an invoice, a final invoice that
     /// deducts no advance, or an advance with no step besides itself (closed without payment).
     static func of(_ documentID: String, stores: Stores, states: [DocumentState]) throws -> AdvanceChain? {
@@ -105,9 +110,10 @@ struct AdvanceChain: Equatable {
             if summary.status == .issued {
                 advanceIDs = try stores.documents.deductions(ofFinalInvoice: documentID).compactMap(\.advanceRequestID)
                 advanceIDs += try stores.documents.paidAdvances(ofFinalInvoice: documentID).map(\.advanceRequestID)
-            }
-            if advanceIDs.isEmpty, let advance = state(number: summary.relatedDocumentNumber) {
-                advanceIDs = [advance.id]
+            } else {
+                // A draft: the advance it was made from, and those whose rows the editor added (Change Type).
+                if let advance = state(number: summary.relatedDocumentNumber) { advanceIDs = [advance.id] }
+                advanceIDs += try draftAdvanceIDs(ofFinal: documentID, stores: stores, states: states)
             }
         }
         advanceIDs = DocumentLinks.unique(advanceIDs)
@@ -174,20 +180,50 @@ struct AdvanceChain: Equatable {
     }
 
     /// The final invoices of an advance: the issued ones that deducted its tax documents or settled its
-    /// payments as paid in advance, and the drafts made from it (their related document is its number).
-    private static func finalInvoices(of advance: DocumentState, stores: Stores, states: [DocumentState]) throws -> [ChainItem] {
+    /// payments as paid in advance, the drafts made from it (their related document is its number), and the
+    /// drafts of the same client whose rows deduct or settle it (a Change Type final). Create Final Invoice
+    /// opens such a draft instead of making a second one.
+    static func finalInvoices(of advance: DocumentState, stores: Stores, states: [DocumentState]) throws -> [ChainItem] {
         var ids = try stores.documents.deductions(ofAdvanceRequest: advance.id).map(\.finalInvoiceID)
         ids += try stores.documents.paidAdvances(ofAdvanceRequest: advance.id).map(\.finalInvoiceID)
+        let drafts = states.filter { $0.summary.kind == .finalInvoice && $0.summary.status == .draft }
         if let number = advance.summary.number {
-            ids += states.filter {
-                $0.summary.kind == .finalInvoice && $0.summary.status == .draft && $0.summary.relatedDocumentNumber == number
-            }.map(\.id)
+            ids += drafts.filter { $0.summary.relatedDocumentNumber == number }.map(\.id)
+        }
+        for draft in drafts where draft.summary.customerID == advance.summary.customerID && !ids.contains(draft.id) {
+            if try draftAdvanceIDs(ofFinal: draft.id, stores: stores, states: states).contains(advance.id) {
+                ids.append(draft.id)
+            }
         }
         return DocumentLinks.unique(ids).map { id in
             let invoice = states.first { $0.id == id }
             return ChainItem(id: "final-\(id)", role: .finalInvoice, documentID: id, number: invoice?.summary.number,
                              isDraft: invoice?.summary.status == .draft)
         }
+    }
+
+    /// The advances a draft final invoice deducts or settles as paid in advance, read from its own rows: the
+    /// store links them only once it is issued. A deduction names its tax document, whose payment names the
+    /// advance; a "Paid in advance" row names the advance.
+    private static func draftAdvanceIDs(ofFinal id: String, stores: Stores, states: [DocumentState]) throws -> [String] {
+        guard let draft = try stores.documents.document(id: id) else { return [] }
+        var ids: [String] = []
+        for number in DocumentLinks.unique(draft.advanceDeductions.map(\.documentNumber)) {
+            guard let receipt = states.first(where: { $0.summary.kind == .paymentTaxDocument && $0.summary.number == number })
+            else { continue }
+            if let payment = try stores.documents.payment(ofReceipt: receipt.id) {
+                ids.append(payment.documentID)
+            } else if let related = receipt.summary.relatedDocumentNumber,
+                      let advance = states.first(where: { $0.summary.kind == .advanceRequest && $0.summary.number == related }) {
+                ids.append(advance.id)
+            }
+        }
+        for paid in draft.paidAdvances ?? [] {
+            if let advance = states.first(where: { $0.summary.kind == .advanceRequest && $0.summary.number == paid.advanceNumber }) {
+                ids.append(advance.id)
+            }
+        }
+        return DocumentLinks.unique(ids)
     }
 
     /// The advance's next step (screens-flows.md §2d): Create Tax Document for the oldest received payment

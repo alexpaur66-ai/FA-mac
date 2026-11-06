@@ -24,6 +24,9 @@ struct DocumentActions {
     /// The number of the issued document Duplicate would copy: "Duplicate FV-2026-007 as Draft".
     var duplicateSourceNumber: String?
     var createFinalInvoice: (@MainActor () -> Void)?
+    /// Create Final Invoice is the chain line's next step: no payment waits for its tax document and no
+    /// draft final invoice exists. The context menu offers it only then; the Document menu refuses instead.
+    var finalInvoiceIsNextStep = false
     var createTaxDocument: (@MainActor () -> Void)?
     var savePDF: (@MainActor () -> Void)?
     var showPDFInFinder: (@MainActor () -> Void)?
@@ -62,6 +65,8 @@ struct RelatedDocumentAction: Identifiable {
 struct SortMenuActions {
     var current: DocumentSort
     var set: @MainActor (DocumentSort) -> Void
+    /// The columns the menu lists, in header order.
+    var columns: [DocumentSortColumn] = DocumentSortColumn.menuColumns
 }
 
 struct MainActions {
@@ -358,7 +363,7 @@ struct AppCommands: Commands {
                 set: { column in
                     if let column, let sort { sort.set(DocumentSort(column: column, ascending: sort.current.ascending)) }
                 })) {
-                ForEach(DocumentSortColumn.menuColumns) { column in
+                ForEach(sort?.columns ?? DocumentSortColumn.menuColumns) { column in
                     Text(column.title).tag(Optional(column))
                 }
             } label: {
