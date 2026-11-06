@@ -41,6 +41,8 @@ struct MainSplitView: View {
     @State private var documentsSearch = ""
     /// Edit ▸ Jump to Search Field presents the Documents search through this.
     @State private var documentsSearchPresented = false
+    /// The Clients search; cleared when a client is opened from elsewhere, so the search cannot hide its row.
+    @State private var clientsSearch = ""
     /// Each Documents filter's sort, kept with the window (`DocumentSortMemory`).
     @SceneStorage("documents.sort") private var documentsSortStored = ""
     /// ↩ on an issued document in the table: its issued view takes keyboard focus.
@@ -182,10 +184,8 @@ struct MainSplitView: View {
                 newDocument: newDraft, documentActions: documentActions(for:), deleteDrafts: deleteDrafts,
                 open: openFromList)
         case .clients:
-            ClientsView(clients: clients, documents: documents, selection: $clientSelection, editClient: { sheet = .client($0) },
-                        newInvoice: { newDraft(.invoice, customerID: $0) },
-                        lastInvoiceNumber: { lastInvoice(ofClient: $0)?.summary.number },
-                        duplicateLastInvoice: { id in if let last = lastInvoice(ofClient: id) { duplicate(last.id) } })
+            ClientsView(clients: clients, documents: documents, selection: $clientSelection, search: $clientsSearch,
+                        editClient: { sheet = .client($0) })
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
                          deletePayment: deletePayment)
@@ -214,7 +214,8 @@ struct MainSplitView: View {
                 ClientDetailView(clients: clients, documents: documents, customerID: id,
                                  editClient: { sheet = .client(id) }, newDocument: { newDraft($0, customerID: id) },
                                  lastInvoiceNumber: last?.summary.number,
-                                 duplicateLastInvoice: duplicateAction(last))
+                                 duplicateLastInvoice: duplicateAction(last),
+                                 openDocument: { openDocument(id: $0) })
             } else {
                 placeholder(L.noClientSelected)
             }
@@ -536,6 +537,7 @@ struct MainSplitView: View {
 
     private func showClient(ofDocument id: String) {
         guard let customerID = documents.state(id: id)?.summary.customerID else { return }
+        clientsSearch = ""
         clientSelection = customerID
         show(.section(.clients))
     }
@@ -881,13 +883,26 @@ struct MainSplitView: View {
         case .client(let id):
             // A new client is selected in Clients once saved (screens-flows.md §2e).
             ClientFormSheet(clients: clients, customer: id.flatMap { clients.customer(id: $0) }, onSaved: { saved in
-                if sidebar.section == .clients { clientSelection = saved }
+                if sidebar.section == .clients {
+                    clientsSearch = ""
+                    clientSelection = saved
+                }
+            }, onOpenExisting: { existing in
+                // "Possible duplicate … – open it?": the existing client is shown in Clients.
+                show(.section(.clients))
+                clientsSearch = ""
+                clientSelection = existing
             })
         case .exchangeRates:
             ExchangeRatesSheet(stores: stores)
         case .newClientForDraft(let name):
             // New Client “X”… from the editor's client field: the saved client becomes the draft's.
             ClientFormSheet(clients: clients, customer: nil, initialName: name, onSaved: { id in
+                editor?.refreshReferenceData()
+                editor?.setCustomer(id)
+                editor?.requestFocus(.firstLineText)
+            }, onOpenExisting: { id in
+                // Opened from a draft, the existing client is picked into it.
                 editor?.refreshReferenceData()
                 editor?.setCustomer(id)
                 editor?.requestFocus(.firstLineText)
