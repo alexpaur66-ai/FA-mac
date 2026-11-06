@@ -36,6 +36,8 @@ enum DocumentFixtures {
     }()
 
     static let eurRate = ExchangeRate(currency: .eur, amount: 1, czkPerAmount: d("24.310"), validFor: day("2026-11-04"), source: .cnb(order: 212))
+    /// The rate of the fixtures' issue date, 5 November 2026.
+    static let eurRateOfIssueDay = ExchangeRate(currency: .eur, amount: 1, czkPerAmount: d("24.300"), validFor: day("2026-11-05"), source: .cnb(order: 213))
 
     /// A reverse-charge invoice in EUR to the German customer: 10 hours at 100 EUR.
     static func euInvoice() -> Document {
@@ -45,6 +47,17 @@ enum DocumentFixtures {
                  lines: [DocumentLine(id: "l1", text: "Consulting – November 2026", quantity: 10, unit: "h", unitPrice: 100, treatment: .reverseChargeEU)],
                  exchangeRate: eurRate,
                  payment: PaymentInstructions.standard(for: "FV-2026-001", bankConnection: bank, currency: .eur))
+    }
+
+    /// Goods sent to the German customer, exempt under § 64: ten bearings at 100 EUR, dispatched on
+    /// 4 November and invoiced on 5 November, so converted at the rate of the issue date (§ 22 odst. 1,
+    /// § 4 odst. 8 ZDPH).
+    static func euGoodsInvoice() -> Document {
+        var document = euInvoice()
+        document.id = "doc-goods"
+        document.lines = [DocumentLine(id: "l1", text: "Spindle bearing SKF 7014", quantity: 10, unit: "pcs", unitPrice: 100, treatment: .intraCommunityGoods)]
+        document.exchangeRate = eurRateOfIssueDay
+        return document
     }
 
     /// A domestic CZK invoice: three lines of 0.35 CZK at 21 %, the § 37 rounding example of ADR 0002.
@@ -224,6 +237,13 @@ enum DocumentFixtures {
         #expect(IssueDeadline.lastDay(treatment: .reverseChargeEU, taxPoint: day("2026-11-04")) == day("2026-12-15"))
         #expect(IssueDeadline.lastDay(treatment: .reverseChargeEU, taxPoint: day("2026-11-30")) == day("2026-12-15"))
         #expect(IssueDeadline.lastDay(treatment: .outsideEU, taxPoint: day("2026-02-01")) == day("2026-03-15"))
+    }
+
+    @Test func endOfMonthPlusFifteenForGoodsToAnotherMemberState() {
+        // § 28 odst. 9 písm. a) ZDPH.
+        #expect(IssueDeadline.lastDay(treatment: .intraCommunityGoods, taxPoint: day("2026-11-04")) == day("2026-12-15"))
+        #expect(IssueDeadline.lastDay(treatment: .intraCommunityGoods, taxPoint: day("2026-12-31")) == day("2027-01-15"))
+        #expect(IssueDeadline.lastDay(for: DocumentFixtures.euGoodsInvoice()) == day("2026-12-15"))
     }
 
     @Test func documentTakesTheStrictestDeadline() {
@@ -475,6 +495,117 @@ enum DocumentFixtures {
         }
         #expect(DocumentLabel.amountDue.text(language: .czech) == "K úhradě")
         #expect(DocumentLabel.taxPointDate.text(language: .english) == "Date of taxable supply")
+    }
+}
+
+@Suite struct IntraCommunityGoodsTests {
+    @Test func goodsInvoiceIsExemptAndCitesSection64() throws {
+        let document = DocumentFixtures.euGoodsInvoice()
+        #expect(DocumentValidator.validate(document).isEmpty)
+        #expect(document.hasIntraCommunityGoods)
+        #expect(!document.hasReverseCharge)
+        #expect(document.requiresCustomerVATID)
+        #expect(DocumentClause.clauses(for: document) == [.intraCommunitySupply, .exchangeRate(DocumentFixtures.eurRateOfIssueDay)])
+        #expect(DocumentClause.intraCommunitySupply.text(language: .czech)
+                == "Dodání zboží do jiného členského státu, osvobozeno od daně podle § 64 odst. 1 zákona č. 235/2004 Sb., o dani z přidané hodnoty.")
+        #expect(DocumentClause.intraCommunitySupply.text(language: .english)
+                == "Intra-Community supply of goods, exempt from VAT under Section 64(1) of the Czech VAT Act and Article 138 of Council Directive 2006/112/EC.")
+        let totals = try DocumentTotals.compute(for: document)
+        let row = try #require(totals.rows.first)
+        #expect(totals.rows.count == 1)
+        #expect(row.treatment == .intraCommunityGoods)
+        #expect(row.rate == nil)
+        #expect(row.base == 1000)
+        #expect(row.vat == 0)
+        #expect(row.taxableBaseCZK == d("24300.00"))
+        #expect(totals.taxableVATCZK == 0)
+        #expect(totals.amountDue == 1000)
+    }
+
+    @Test func goodsNeedTheCustomersVATIDFromAnotherMemberState() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.customer.vatIdentifier = nil
+        let missing = DocumentValidator.validate(document)
+        #expect(missing.contains { $0.code == .intraCommunityGoodsVATIdentifierRequired && $0.isError })
+        #expect(!missing.contains { $0.code == .customerVATIdentifierRequired })
+        #expect(!DocumentValidator.canIssue(document))
+        document.customer = DocumentFixtures.czechCustomer
+        let czech = DocumentValidator.validate(document)
+        #expect(czech.contains { $0.code == .intraCommunityGoodsVATIdentifierNotEU && $0.detail == "CZ25596641" && $0.isError })
+        #expect(!czech.contains { $0.code == .customerVATIdentifierNotEU })
+        #expect(ValidationIssue(code: .intraCommunityGoodsVATIdentifierRequired, severity: .error).message(language: .czech)
+                .contains("§ 64 odst. 1 písm. a) ZDPH"))
+    }
+
+    @Test func goodsAndServicesOnOneDocumentCiteBothRules() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.lines.append(DocumentLine(id: "l2", text: "Fitting advice", quantity: 1, unit: "h", unitPrice: 50, treatment: .reverseChargeEU))
+        #expect(Array(DocumentClause.clauses(for: document).prefix(2)) == [.intraCommunitySupply, .reverseCharge])
+        document.customer.vatIdentifier = nil
+        let codes = DocumentValidator.validate(document).map(\.code)
+        #expect(codes.contains(.intraCommunityGoodsVATIdentifierRequired))
+        #expect(codes.contains(.customerVATIdentifierRequired))
+    }
+
+    @Test func goodsInvoicedBeforeTheyLeaveRaiseNoServicesWarning() {
+        var document = DocumentFixtures.euGoodsInvoice()
+        document.taxPointDate = day("2026-11-10")
+        #expect(!DocumentValidator.validate(document).contains { $0.code == .taxPointAfterIssueDate })
+        document.lines[0].treatment = .reverseChargeEU
+        #expect(DocumentValidator.validate(document).contains { $0.code == .taxPointAfterIssueDate })
+    }
+
+    @Test func goodsAreConvertedAtTheRateOfTheSection22Day() {
+        // § 4 odst. 8 ZDPH: the rate of the day the obligation to declare the supply arose, for § 64 goods the
+        // § 22 odst. 1 day. Dispatched on 4 November and invoiced on 5 November → the rate of 5 November.
+        let goods = DocumentFixtures.euGoodsInvoice()
+        #expect(goods.exchangeRateDay == day("2026-11-05"))
+        #expect(!DocumentValidator.validate(goods).contains { $0.code == .exchangeRateAfterTaxPoint || $0.code == .exchangeRateStale })
+        var later = goods
+        later.exchangeRate = ExchangeRate(currency: .eur, czkPerAmount: d("24.320"), validFor: day("2026-11-06"), source: .cnb(order: 214))
+        #expect(DocumentValidator.validate(later).contains { $0.code == .exchangeRateAfterTaxPoint && $0.isError && $0.detail == "2026-11-06" })
+        // Invoiced on 30 November before the goods leave on 2 December → the rate of 30 November, which is
+        // published by the issue date, not that of the later date of supply.
+        var early = goods
+        early.issueDate = day("2026-11-30")
+        early.taxPointDate = day("2026-12-02")
+        early.dueDate = day("2026-12-14")
+        let rateOfNovember30 = ExchangeRate(currency: .eur, czkPerAmount: d("24.250"), validFor: day("2026-11-30"), source: .cnb(order: 231))
+        early.exchangeRate = rateOfNovember30
+        #expect(early.exchangeRateDay == day("2026-11-30"))
+        #expect(DocumentValidator.validate(early).isEmpty)
+        #expect(DocumentClause.clauses(for: early) == [.intraCommunitySupply, .exchangeRate(rateOfNovember30)])
+        // Invoiced on or after the 15th of the next month → the 15th.
+        var late = goods
+        late.issueDate = day("2026-12-20")
+        #expect(late.exchangeRateDay == day("2026-12-15"))
+        // Services, goods mixed with services and a payment tax document keep the tax point.
+        var services = DocumentFixtures.euInvoice()
+        #expect(services.exchangeRateDay == day("2026-11-04"))
+        services.exchangeRate = DocumentFixtures.eurRateOfIssueDay
+        #expect(DocumentValidator.validate(services).contains { $0.code == .exchangeRateAfterTaxPoint && $0.isError })
+        var mixed = goods
+        mixed.lines.append(DocumentLine(id: "l2", text: "Fitting advice", quantity: 1, unit: "h", unitPrice: 50, treatment: .reverseChargeEU))
+        #expect(mixed.exchangeRateDay == day("2026-11-04"))
+        var receipt = goods
+        receipt.kind = .paymentTaxDocument
+        #expect(receipt.exchangeRateDay == day("2026-11-04"))
+    }
+
+    @Test func goodsCountOnTheFifteenthOrTheEarlierIssueDate() {
+        // § 22 odst. 1 ZDPH: delivered on 20 November and invoiced before 15 December → the issue date.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-11-25")) == day("2026-11-25"))
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-14")) == day("2026-12-14"))
+        // Invoiced on or after the 15th → the 15th.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-15")) == day("2026-12-15"))
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-11-20"), issueDate: day("2026-12-20")) == day("2026-12-15"))
+        // Invoiced before the goods leave → the issue date, even in the month before.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-12-02"), issueDate: day("2026-11-30")) == day("2026-11-30"))
+        // Across the year end.
+        #expect(ReportingDay.day(treatment: .intraCommunityGoods, taxPoint: day("2026-12-31"), issueDate: day("2027-01-20")) == day("2027-01-15"))
+        // Every other treatment counts on the tax point.
+        #expect(ReportingDay.day(treatment: .reverseChargeEU, taxPoint: day("2026-11-20"), issueDate: day("2026-12-20")) == day("2026-11-20"))
+        #expect(ReportingDay.day(treatment: .taxable(.standard), taxPoint: day("2026-11-20"), issueDate: day("2026-11-21")) == day("2026-11-20"))
     }
 }
 

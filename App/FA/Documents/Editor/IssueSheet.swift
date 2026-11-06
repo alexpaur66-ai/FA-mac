@@ -71,7 +71,7 @@ struct IssueSheet: View {
         .defaultFocus($focus, model.rateIsMissing ? .rate : .checkbox)
         .onAppear {
             // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
-            // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the tax point's rate).
+            // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the rate day's rate).
             model.refreshReferenceData()
             model.refreshRate()
             if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
@@ -176,7 +176,7 @@ struct IssueSheet: View {
 
     private func clientLine(_ document: Document) -> LocalizedStringResource {
         let name = document.customer.name.isEmpty ? String(localized: L.noClient) : document.customer.name
-        let treatment = String(localized: model.treatmentChoice.title)
+        let treatment = String(localized: model.treatmentChoice.shortTitle)
         if let vatID = document.customer.vatIdentifier {
             return L.clientSummaryWithVATID(name, vatID.value, treatment)
         }
@@ -214,6 +214,9 @@ struct IssueSheet: View {
                             dashRow(L.vatInCZK, clause: nil)
                         }
                     }
+                } else if document.hasIntraCommunityGoods && !document.hasReverseCharge {
+                    // § 64 goods: the same notice as the editor's totals bar.
+                    dashRow(L.exemptSection64Item, clause: nil)
                 } else {
                     // Reverse charge: the dash carries the notice the PDF prints (§ 29 odst. 2 písm. c) ZDPH).
                     dashRow(L.vat, clause: document.hasReverseCharge ? DocumentClause.reverseChargeNotice : nil)
@@ -393,7 +396,7 @@ struct IssueSheet: View {
             if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
                 resource = L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
             } else {
-                resource = L.rateFallback(document.taxPoint.formatted(locale), used)
+                resource = L.rateFallback(document.exchangeRateDay.formatted(locale), used)
             }
             lines.append(String(localized: resource))
         }

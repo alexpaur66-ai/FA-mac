@@ -396,7 +396,8 @@ extension CustomerVATStatus {
         switch self {
         case .czechVATPayer: L.vatCzechPayer
         case .czechNonPayer: L.vatCzechNonPayer
-        case .euBusiness: L.vatEUBusiness
+        case .euBusinessGoods: L.vatEUBusinessGoods
+        case .euBusinessServices: L.vatEUBusinessServices
         case .euConsumer: L.vatEUConsumer
         case .nonEUBusiness: L.vatNonEUBusiness
         case .nonEUConsumer: L.vatNonEUConsumer
@@ -412,7 +413,8 @@ extension DocumentLanguage {
 }
 
 /// New Client / Client details (screens-flows.md §2e). IČO and VAT ID are checked by the core's parsers;
-/// there is no online check. A new client gets the defaults of 5 Nov 2026: EUR, 14 days, EU reverse charge.
+/// there is no online check. A new client gets the defaults of 5 Nov 2026: EUR, 14 days, an EU business
+/// buying goods (Saša's sales are mostly goods).
 struct ClientFormSheet: View {
     let clients: ClientsModel
     let customer: Customer?
@@ -429,7 +431,7 @@ struct ClientFormSheet: View {
     @State private var countryCode = "CZ"
     @State private var ico = ""
     @State private var vatID = ""
-    @State private var vatStatus: CustomerVATStatus = .euBusiness
+    @State private var vatStatus: CustomerVATStatus = .euBusinessGoods
     @State private var email = ""
     @State private var phone = ""
     @State private var currencyCode = "EUR"
@@ -497,8 +499,8 @@ struct ClientFormSheet: View {
                     } label: {
                         Text(L.fieldVATTreatment)
                     }
-                    if vatStatus == .euBusiness && vatID.trimmingCharacters(in: .whitespaces).isEmpty {
-                        InlineMessage(L.reverseChargeNeedsVATID, kind: .warning)
+                    if vatStatus.isEUBusiness && vatID.trimmingCharacters(in: .whitespaces).isEmpty {
+                        InlineMessage(vatStatus == .euBusinessGoods ? L.goodsExemptionNeedsVATID : L.reverseChargeNeedsVATID, kind: .warning)
                     }
                 }
                 Section {

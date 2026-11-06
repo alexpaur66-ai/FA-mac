@@ -9,25 +9,55 @@ import Observation
 
 /// The document-level VAT treatment the header offers. Under Czech VAT each line keeps its own rate; the
 /// other treatments apply to every line (screens-flows.md §2c: mixed documents are the accountant's
-/// decision and are not offered).
+/// decision and are not offered). The order is the design thread's (5 Nov 2026): the two EU choices
+/// first, as most of Saša's sales go to EU businesses, then a divider and the rest.
 enum TreatmentChoice: Hashable, CaseIterable, Identifiable {
-    case czechVAT, reverseChargeEU, outsideEU, exempt
+    case intraCommunityGoods, reverseChargeEU, czechVAT, outsideEU, exempt
 
     var id: Self { self }
+
+    /// The pop-up and the menu show these two groups with a divider between them.
+    static let euChoices: [TreatmentChoice] = [.intraCommunityGoods, .reverseChargeEU]
+    static let otherChoices: [TreatmentChoice] = [.czechVAT, .outsideEU, .exempt]
 
     init(_ treatment: VATTreatment) {
         switch treatment {
         case .taxable: self = .czechVAT
+        case .intraCommunityGoods: self = .intraCommunityGoods
         case .reverseChargeEU: self = .reverseChargeEU
         case .outsideEU: self = .outsideEU
         case .exempt: self = .exempt
         }
     }
 
+    /// The name in the editor's pop-up.
     var title: LocalizedStringResource {
         switch self {
-        case .czechVAT: L.treatmentCzechVAT
+        case .intraCommunityGoods: L.treatmentEUGoods
         case .reverseChargeEU: L.treatmentReverseCharge
+        case .czechVAT: L.treatmentCzechVAT
+        case .outsideEU: L.treatmentOutsideEU
+        case .exempt: L.treatmentExempt
+        }
+    }
+
+    /// The item under Document ▸ VAT Treatment, in title case.
+    var menuTitle: LocalizedStringResource {
+        switch self {
+        case .intraCommunityGoods: L.menuTreatmentEUGoods
+        case .reverseChargeEU: L.menuTreatmentReverseCharge
+        case .czechVAT: L.menuTreatmentCzechVAT
+        case .outsideEU: L.menuTreatmentOutsideEU
+        case .exempt: L.menuTreatmentExempt
+        }
+    }
+
+    /// The short form for the client suggestion line and the Issue summary.
+    var shortTitle: LocalizedStringResource {
+        switch self {
+        case .intraCommunityGoods: L.shortTreatmentEUGoods
+        case .reverseChargeEU: L.treatmentReverseCharge
+        case .czechVAT: L.shortTreatmentCzechVAT
         case .outsideEU: L.treatmentOutsideEU
         case .exempt: L.treatmentExempt
         }
@@ -36,11 +66,13 @@ enum TreatmentChoice: Hashable, CaseIterable, Identifiable {
     /// The treatment a line takes under this choice; a Czech rate the line already had is kept.
     func apply(to existing: VATTreatment?, exemptReference: String) -> VATTreatment {
         switch self {
+        case .intraCommunityGoods:
+            return .intraCommunityGoods
+        case .reverseChargeEU:
+            return .reverseChargeEU
         case .czechVAT:
             if case .taxable(let kind)? = existing { return .taxable(kind) }
             return .taxable(.standard)
-        case .reverseChargeEU:
-            return .reverseChargeEU
         case .outsideEU:
             return .outsideEU
         case .exempt:
@@ -118,7 +150,8 @@ struct NumberCell: Hashable {
     private(set) var treatmentChoice: TreatmentChoice = .czechVAT
     /// The exemption reference typed in the header, kept while another treatment is selected.
     private(set) var exemptReference = ""
-    /// How the rate for the tax point was found (§ 4 odst. 8 ZDPH); nil while no rate is needed.
+    /// How the rate for the document's rate day was found (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`);
+    /// nil while no rate is needed.
     private(set) var rateResolution: ExchangeRateTable.Resolution?
     /// The payment a draft payment tax document is the receipt of; nil when no payment names it.
     private(set) var receiptPayment: DocumentPayment?
@@ -172,7 +205,7 @@ struct NumberCell: Hashable {
                 treatmentChoice = TreatmentChoice(first)
                 if case .exempt(let reference) = first { exemptReference = reference }
             } else if let customer = customers.first(where: { $0.id == document.customerID }) {
-                treatmentChoice = TreatmentChoice(customer.vatStatus.defaultServiceTreatment)
+                treatmentChoice = TreatmentChoice(customer.vatStatus.defaultTreatment)
             }
             // A payment tax document's tax point is the day of its payment and never follows the issue date.
             taxPointExplicit = document.kind == .paymentTaxDocument || document.taxPointDate.map { $0 != document.issueDate } ?? false
@@ -395,7 +428,7 @@ struct NumberCell: Hashable {
             doc.dueDate = doc.issueDate.adding(days: chosen.paymentTermDays)
             doc.payment = nil
             doc.exchangeRate = nil
-            treatmentChoice = TreatmentChoice(chosen.vatStatus.defaultServiceTreatment)
+            treatmentChoice = TreatmentChoice(chosen.vatStatus.defaultTreatment)
             for index in doc.lines.indices {
                 doc.lines[index].treatment = treatmentChoice.apply(to: doc.lines[index].treatment, exemptReference: exemptReference)
             }
@@ -543,7 +576,7 @@ struct NumberCell: Hashable {
         refreshRate()
     }
 
-    /// A line under reverse charge, outside EU or exempt has no VAT rate cell, so typed text that was not
+    /// A line under any treatment but Czech VAT has no VAT rate cell, so typed text that was not
     /// a rate in force no longer blocks Issue.
     private func dropRateCellsOfUntaxedLines() {
         guard let document else { return }
@@ -674,6 +707,8 @@ struct NumberCell: Hashable {
         invalidCells = invalidCells.filter { $0.key.lineID != id }
         if focusedLineID == id { focusedLineID = nil }
         if document?.lines.isEmpty == true { appendBlankLine() }
+        // Deleting the other treatment's lines can leave § 64 goods alone, which need another day's rate.
+        refreshRate()
     }
 
     func moveLine(_ id: String, by offset: Int) {
@@ -742,8 +777,9 @@ struct NumberCell: Hashable {
 
     // MARK: Exchange rate
 
-    /// A tax document in a foreign currency needs the rate of its tax point (§ 4 odst. 8 ZDPH):
-    /// `ExchangeRateTable.resolve` gives the day's rate, or on a weekend or holiday the last working
+    /// A tax document in a foreign currency needs the rate of the day the obligation to declare arose
+    /// (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`): the tax point, or for § 64 goods the § 22 odst. 1
+    /// day. `ExchangeRateTable.resolve` gives the day's rate, or on a weekend or holiday the last working
     /// day's, and nothing otherwise; then the user types the rate or imports the ČNB file.
     var needsExchangeRate: Bool {
         guard let document else { return false }
@@ -754,13 +790,14 @@ struct NumberCell: Hashable {
         needsExchangeRate && document?.exchangeRate == nil
     }
 
-    /// The day whose rate stands in for the tax point, when it is not the tax point itself.
+    /// The day whose rate stands in for the rate day, when it is not the rate day itself.
     var rateFallbackFrom: CalendarDay? { rateResolution?.fallbackFrom }
 
-    /// The day whose published rate the document needs: the tax point, or the last working day before it.
+    /// The day whose published rate the document needs: the rate day (`Document.exchangeRateDay`), or the
+    /// last working day before it.
     var neededRateDay: CalendarDay {
         if let rateResolution { return rateResolution.publicationDay }
-        if let document { return CzechHolidays.lastWorkingDay(onOrBefore: document.taxPoint) }
+        if let document { return CzechHolidays.lastWorkingDay(onOrBefore: document.exchangeRateDay) }
         return CalendarDay(Date(), in: .current)
     }
 
@@ -773,7 +810,7 @@ struct NumberCell: Hashable {
             return
         }
         do {
-            let resolution = try stores.rates.table(for: document.currency).resolve(document.currency, on: document.taxPoint)
+            let resolution = try stores.rates.table(for: document.currency).resolve(document.currency, on: document.exchangeRateDay)
             rateResolution = resolution
             if resolution.rate != document.exchangeRate { update { $0.exchangeRate = resolution.rate } }
         } catch {
@@ -782,14 +819,15 @@ struct NumberCell: Hashable {
     }
 
     /// Saves a typed rate for `day` (the needed publication day when nil) with the source "Typed", and
-    /// applies whatever the tax point then resolves to. Without `replace`, a rate already stored for that
+    /// applies whatever the rate day then resolves to. Without `replace`, a rate already stored for that
     /// day (an import meanwhile) is kept and taken; Change… replaces it, which is how a typo is fixed.
     func saveManualRate(_ czkPerUnit: Decimal, validFor day: CalendarDay? = nil, replace: Bool = false) {
         guard let document, czkPerUnit > 0 else { return }
         rateError = nil
         let day = day ?? neededRateDay
-        guard day <= document.taxPoint else {
-            rateError = String(localized: L.rateAfterTaxPoint)
+        let rateDay = document.exchangeRateDay
+        guard day <= rateDay else {
+            rateError = String(localized: L.rateAfterRateDay(rateDay.formatted(.current)))
             return
         }
         do {
@@ -805,7 +843,7 @@ struct NumberCell: Hashable {
                     ? String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
                     : String(localized: L.rateAlreadyStored(day.formatted(.current)))
             } else if saved, let applied = self.document?.exchangeRate, applied.validFor != day || applied.czkPerUnit != czkPerUnit {
-                // Saved for a day the tax point does not resolve to: the document keeps the rate it had, and
+                // Saved for a day the rate day does not resolve to: the document keeps the rate it had, and
                 // the popover stays open to say so instead of closing as if the rate had changed.
                 rateError = String(localized: L.rateSavedForOtherDay(day.formatted(.current), neededRateDay.formatted(.current)))
             }
@@ -930,7 +968,7 @@ struct NumberCell: Hashable {
         var result = deductionWarnings
         if let document, let customer, document.kind != .paymentTaxDocument {
             if document.currency != customer.currency { result.append(String(localized: L.currencyDiffersFromClient)) }
-            if TreatmentChoice(customer.vatStatus.defaultServiceTreatment) != treatmentChoice {
+            if TreatmentChoice(customer.vatStatus.defaultTreatment) != treatmentChoice {
                 result.append(String(localized: L.treatmentDiffersFromClient))
             }
         }
@@ -971,7 +1009,8 @@ struct NumberCell: Hashable {
     /// Writes the draft, then issues it in the data layer's one transaction (ADR 0005): number, symbol,
     /// validation, totals, hash, audit. The clients, the company profile and the series are read again
     /// first, so the supplier and client copies follow a Settings save made meanwhile, and so is the rate
-    /// of the tax point (§ 4 odst. 8 ZDPH: a day's file may have been imported since the editor opened).
+    /// of the rate day (§ 4 odst. 8 ZDPH, `Document.exchangeRateDay`: a day's file may have been imported
+    /// since the editor opened).
     /// The returned document carries its number.
     func issue(seriesID: String) throws -> Document {
         refreshReferenceData()

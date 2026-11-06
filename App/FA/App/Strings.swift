@@ -283,7 +283,7 @@ enum L {
     static let noSeries = r("series.none", "No number series yet")
     static let seriesPrefixCollision = r("series.collision", "Two series with the same pattern and the same prefix would give two documents the same variable symbol.")
     static let documentsPaneNote = r("settings.documentsNote", "The QR code default per client and the payment tolerance arrive with later steps.")
-    static let vatPaneNote = r("settings.vatNote", "Rates 21 / 12 / 0 %, the treatments (Czech, EU reverse charge, outside the EU, exempt) and the default treatment by client country live in InvoicingCore. The pane to edit them arrives with the draft editor.")
+    static let vatPaneNote = r("settings.vatNote", "Rates 21 / 12 / 0 %, the treatments (Czech VAT, EU goods exempt under § 64, EU services with reverse charge, services outside the EU, other exemptions) and the default treatment by client status live in InvoicingCore. A pane to edit them is not built yet.")
     static let backupPaneNote = r("settings.backupNote", "Backup folder, automatic backups and Restore arrive with the export step. Until then: quit the app and copy the data file shown under General.")
 
     // MARK: Rates (screens-flows.md §2g)
@@ -395,6 +395,11 @@ enum L {
     static let menuCurrency = r("menu.currency", "Currency")
     static let menuDocumentLanguage = r("menu.documentLanguage", "Document Language")
     static let menuVATTreatment = r("menu.vatTreatment", "VAT Treatment")
+    static let menuTreatmentEUGoods = r("menu.treatment.euGoods", "EU Goods, Exempt (§ 64)")
+    static let menuTreatmentReverseCharge = r("menu.treatment.reverseCharge", "EU Services, Reverse Charge")
+    static let menuTreatmentCzechVAT = r("menu.treatment.czech", "Czech VAT")
+    static let menuTreatmentOutsideEU = r("menu.treatment.outsideEU", "Outside EU, Services")
+    static let menuTreatmentExempt = r("menu.treatment.exempt", "Other Exemption")
     static let menuEnterRate = r("menu.enterRate", "Enter Rate…")
 
     // The English names of the types with the printed Czech title (screens-flows.md §5, design-system.md §9).
@@ -424,10 +429,15 @@ enum L {
     static let dueDaysOne = r("editor.dueDaysOne", "1 day")
     static func dueDays(_ days: Int) -> LocalizedStringResource { r("editor.dueDays", "\(days) days") }
     static let fieldTreatment = r("editor.treatment", "VAT treatment")
+    // The treatment names agreed with the design thread on 5 Nov 2026: the pop-up, the short form for the
+    // client line, chips and the Issue summary, and the menu items above in title case.
+    static let treatmentEUGoods = r("editor.treatment.euGoods", "EU goods, exempt (§ 64)")
+    static let treatmentReverseCharge = r("editor.treatment.reverseCharge", "EU services, reverse charge")
     static let treatmentCzechVAT = r("editor.treatment.czech", "Czech VAT (rate per line)")
-    static let treatmentReverseCharge = r("editor.treatment.reverseCharge", "EU reverse charge")
-    static let treatmentOutsideEU = r("editor.treatment.outsideEU", "Outside EU")
-    static let treatmentExempt = r("editor.treatment.exempt", "Exempt")
+    static let treatmentOutsideEU = r("editor.treatment.outsideEU", "Outside EU, services")
+    static let treatmentExempt = r("editor.treatment.exempt", "Other exemption")
+    static let shortTreatmentEUGoods = r("editor.treatment.short.euGoods", "EU goods, exempt")
+    static let shortTreatmentCzechVAT = r("editor.treatment.short.czech", "Czech VAT")
     static let exemptReference = r("editor.exemptReference", "Exemption reference (§)")
     static let fieldBankAccount = r("editor.bankAccount", "Bank account")
     static func accountIBAN(_ iban: String) -> LocalizedStringResource { r("editor.accountIBAN", "\(iban)") }
@@ -469,6 +479,8 @@ enum L {
     static let moveLineDown = r("editor.moveLineDown", "Move Line Down")
     static let rateReverseCharge = r("editor.rate.rc", "RC")
     static let reverseChargeItem = r("editor.reverseChargeItem", "Reverse charge")
+    /// The § 64 notice in the totals bar's VAT place, until the cuts give every untaxed treatment "Total · <short form>".
+    static let exemptSection64Item = r("editor.exemptSection64Item", "Exempt (§ 64)")
     static let rateExempt = r("editor.rate.exempt", "exempt")
     static let rateNotInForce = r("editor.rateNotInForce", "Not in force")
     static func vatRateFixIt(_ rates: String) -> LocalizedStringResource { r("editor.vatRateFixIt", "Enter one of the rates in force: \(rates)") }
@@ -500,7 +512,9 @@ enum L {
     static func rateNotPublished(_ wanted: String, _ used: String) -> LocalizedStringResource {
         r("editor.rateNotPublished", "The ČNB published no rate for \(wanted); the last published rate, for \(used), applies")
     }
-    static let rateAfterTaxPoint = r("editor.rateAfterTaxPoint", "The rate date cannot be after the date of taxable supply.")
+    static func rateAfterRateDay(_ day: String) -> LocalizedStringResource {
+        r("editor.rateAfterRateDay", "The rate date cannot be after \(day), the day this document needs the rate for.")
+    }
     static func rateSavedForOtherDay(_ saved: String, _ needed: String) -> LocalizedStringResource {
         r("editor.rateSavedForOtherDay", "The rate was saved for \(saved); this document needs the rate for \(needed).")
     }
@@ -642,11 +656,13 @@ enum L {
     static let fieldVATTreatment = r("field.vatTreatment", "VAT treatment")
     static let vatCzechPayer = r("vat.czechPayer", "Czech VAT payer")
     static let vatCzechNonPayer = r("vat.czechNonPayer", "Czech business, not a VAT payer")
-    static let vatEUBusiness = r("vat.euBusiness", "EU business (reverse charge)")
+    static let vatEUBusinessGoods = r("vat.euBusinessGoods", "EU business, goods")
+    static let vatEUBusinessServices = r("vat.euBusiness", "EU business, services")
     static let vatEUConsumer = r("vat.euConsumer", "EU consumer")
-    static let vatNonEUBusiness = r("vat.nonEUBusiness", "Business outside the EU")
+    static let vatNonEUBusiness = r("vat.nonEUBusiness", "Business outside the EU, services")
     static let vatNonEUConsumer = r("vat.nonEUConsumer", "Consumer outside the EU")
     static let reverseChargeNeedsVATID = r("client.reverseChargeNeedsVATID", "EU reverse charge needs the client's VAT ID; the validator will block issuing without it.")
+    static let goodsExemptionNeedsVATID = r("client.goodsNeedsVATID", "The § 64 exemption needs the client's VAT ID. Add it to issue documents for this client.")
     static let clientDefaultsTitle = r("client.defaults", "Defaults")
     static let clientContacts = r("client.contacts", "Contacts")
     static func clientDocumentsCount(_ count: Int) -> LocalizedStringResource { r("client.documentsCount", "\(count) documents") }

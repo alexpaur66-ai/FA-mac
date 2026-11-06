@@ -13,6 +13,7 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case supplierNameMissing, supplierAddressIncomplete, supplierVATIdentifierMissing
         case supplierIdentificationNumberMissing, supplierRegistryEntryMissing
         case customerNameMissing, customerAddressIncomplete, customerVATIdentifierRequired, customerVATIdentifierNotEU
+        case intraCommunityGoodsVATIdentifierRequired, intraCommunityGoodsVATIdentifierNotEU
         case numberMissing, noLines, lineTextMissing, lineQuantityNegative, lineQuantityZero, lineDiscountOutOfRange
         case rateNotInForce, exemptReferenceMissing, mixedTreatments
         case taxPointDateMissing, taxPointAfterIssueDate, issuedAfterDeadline, dueDateBeforeIssueDate
@@ -81,6 +82,12 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
         case .customerVATIdentifierNotEU:
             return ("DIČ odběratele {detail} není z jiného členského státu EU; přenesení daňové povinnosti podle § 9 odst. 1 ZDPH se neuplatní.",
                     "The customer's VAT ID {detail} is not from another EU member state; the § 9(1) reverse charge does not apply.")
+        case .intraCommunityGoodsVATIdentifierRequired:
+            return ("Dodání zboží do jiného členského státu je osvobozeno, jen když odběratel sdělil své DIČ z jiného členského státu (§ 64 odst. 1 písm. a) ZDPH); doklad ho musí uvádět (§ 29 odst. 1 písm. d) ZDPH).",
+                    "Goods supplied to another member state are exempt only when the customer has given their VAT ID from another member state (§ 64(1)(a) of the VAT Act); the document must carry it (§ 29(1)(d) of the VAT Act).")
+        case .intraCommunityGoodsVATIdentifierNotEU:
+            return ("DIČ odběratele {detail} není z jiného členského státu EU; osvobození podle § 64 ZDPH se neuplatní.",
+                    "The customer's VAT ID {detail} is not from another EU member state; the § 64 exemption does not apply.")
         case .numberMissing:
             return ("Doklad nemá evidenční číslo (§ 29 odst. 1 písm. e) ZDPH).",
                     "The document has no number (§ 29(1)(e) of the VAT Act).")
@@ -127,11 +134,11 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
             return ("Kurz je pro měnu {detail}, doklad je v jiné měně.",
                     "The exchange rate is for {detail}, not the document's currency.")
         case .exchangeRateAfterTaxPoint:
-            return ("Kurz ze dne {detail} je pozdější než datum plnění (§ 4 odst. 8 ZDPH).",
-                    "The exchange rate of {detail} is later than the date of supply (§ 4(8) of the VAT Act).")
+            return ("Kurz ze dne {detail} je pozdější než den vzniku povinnosti přiznat daň nebo uskutečnění plnění (§ 4 odst. 8 ZDPH): datum plnění nebo přijetí platby, u dokladu za dodání zboží osvobozené podle § 64 den podle § 22 odst. 1.",
+                    "The exchange rate of {detail} is later than the day the obligation to declare the tax or the supply arose (§ 4(8) of the VAT Act): the date of supply or of the payment, or on a document of goods exempt under § 64 the day under § 22(1).")
         case .exchangeRateStale:
-            return ("Kurz je ze dne {detail}, více než týden před datem plnění; zkontrolujte, zda je kurzovní lístek úplný.",
-                    "The exchange rate is from {detail}, more than a week before the date of supply; check that the rate table is complete.")
+            return ("Kurz je ze dne {detail}, více než týden před dnem, pro který doklad kurz potřebuje; zkontrolujte, zda je kurzovní lístek úplný.",
+                    "The exchange rate is from {detail}, more than a week before the day the document needs the rate for; check that the rate table is complete.")
         case .advanceDeductionsOnWrongKind:
             return ("Zálohy lze odečíst jen na konečné faktuře.",
                     "Advances can only be deducted on a final invoice.")
@@ -177,8 +184,9 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
 
 /// Checks a document against § 29 and § 28 ZDPH, § 435 of the Civil Code and its own consistency.
 public enum DocumentValidator {
-    /// Days between the exchange rate's day and the tax point beyond which the rate most likely comes from
-    /// an incomplete rate table rather than from a weekend or holiday (the ČNB publishes every working day).
+    /// Days between the exchange rate's day and the day the document needs the rate for
+    /// (`Document.exchangeRateDay`) beyond which the rate most likely comes from an incomplete rate table
+    /// rather than from a weekend or holiday (the ČNB publishes every working day).
     public static let exchangeRateStaleAfterDays = 7
 
     /// All issues of `document`. `forIssue` adds the checks that only matter when the document is issued,
@@ -197,17 +205,19 @@ public enum DocumentValidator {
         if document.supplier.identificationNumber == nil { add(.supplierIdentificationNumberMissing, .warning) }
         if document.supplier.registryEntry == nil && document.supplier.address.isCzech { add(.supplierRegistryEntryMissing, .warning) }
 
-        // Customer: § 29 odst. 1 písm. c) and d), odst. 2 písm. c) ZDPH.
+        // Customer: § 29 odst. 1 písm. c) and d), odst. 2 písm. c) ZDPH; § 64 odst. 1 písm. a) ZDPH.
         if document.customer.name.trimmingWhitespace().isEmpty { add(.customerNameMissing, .error) }
         if !Self.isComplete(document.customer.address) { add(.customerAddressIncomplete, .error) }
         let treatments = document.treatments
-        if document.hasReverseCharge {
+        // A VAT ID from another member state: the reverse charge prints it, the § 64 exemption depends on it.
+        for treatment in treatments where treatment.requiresCustomerVATID {
+            let goods = treatment == .intraCommunityGoods
             if let vatIdentifier = document.customer.vatIdentifier {
                 if vatIdentifier.isCzech || !vatIdentifier.isEU {
-                    add(.customerVATIdentifierNotEU, .error, detail: vatIdentifier.value)
+                    add(goods ? .intraCommunityGoodsVATIdentifierNotEU : .customerVATIdentifierNotEU, .error, detail: vatIdentifier.value)
                 }
             } else {
-                add(.customerVATIdentifierRequired, .error)
+                add(goods ? .intraCommunityGoodsVATIdentifierRequired : .customerVATIdentifierRequired, .error)
             }
         }
 
@@ -234,7 +244,7 @@ public enum DocumentValidator {
                 }
             case .exempt(let reference):
                 if reference.trimmingWhitespace().isEmpty { add(.exemptReferenceMissing, .error, line: line.id) }
-            case .reverseChargeEU, .outsideEU:
+            case .intraCommunityGoods, .reverseChargeEU, .outsideEU:
                 break
             }
         }
@@ -242,7 +252,10 @@ public enum DocumentValidator {
 
         // Dates: § 29 odst. 1 písm. g) and h), § 28 ZDPH.
         if isTaxDocument && document.taxPointDate == nil { add(.taxPointDateMissing, .error) }
-        if let taxPointDate = document.taxPointDate, taxPointDate > document.issueDate {
+        // The warning is about services (§ 21 odst. 3); goods sent to another member state may be invoiced
+        // before they leave, and § 22 odst. 1 then counts them on the issue date.
+        let intraCommunityGoodsOnly = !treatments.isEmpty && treatments.allSatisfy { $0 == .intraCommunityGoods }
+        if let taxPointDate = document.taxPointDate, taxPointDate > document.issueDate, !intraCommunityGoodsOnly {
             add(.taxPointAfterIssueDate, .warning, detail: taxPointDate.isoString)
         }
         if document.dueDate < document.issueDate { add(.dueDateBeforeIssueDate, .error, detail: document.dueDate.isoString) }
@@ -266,14 +279,16 @@ public enum DocumentValidator {
             }
         }
 
-        // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH.
+        // Amounts and the exchange rate: § 29 odst. 1 písm. j) and l), § 4 odst. 8 ZDPH. The rate is the one
+        // valid on the day the obligation to declare arose: the tax point, for § 64 goods the § 22 odst. 1 day.
         do {
             let totals = try DocumentTotals.compute(for: document)
             if isTaxDocument && document.currency != .czk {
                 if let rate = document.exchangeRate {
-                    if rate.validFor > document.taxPoint {
+                    let rateDay = document.exchangeRateDay
+                    if rate.validFor > rateDay {
                         add(.exchangeRateAfterTaxPoint, .error, detail: rate.validFor.isoString)
-                    } else if document.taxPoint.days(since: rate.validFor) > exchangeRateStaleAfterDays {
+                    } else if rateDay.days(since: rate.validFor) > exchangeRateStaleAfterDays {
                         add(.exchangeRateStale, .warning, detail: rate.validFor.isoString)
                     }
                 } else {

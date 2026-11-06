@@ -163,6 +163,17 @@ enum PDFFixtures {
         return document
     }
 
+    /// Goods sent to the German customer, exempt under § 64, bilingual: dispatched on 4 November and
+    /// invoiced on 5 November, so converted at the rate of the issue date (§ 22 odst. 1, § 4 odst. 8 ZDPH).
+    static func euGoodsInvoice() -> Document {
+        var document = euInvoice()
+        document.id = "doc-eu-goods"
+        document.number = "FV-2026-004"
+        document.lines = [DocumentLine(id: "l1", text: "Spindle bearing SKF 7014", quantity: 10, unit: "pcs", unitPrice: 100, treatment: .intraCommunityGoods)]
+        document.exchangeRate = ExchangeRate(currency: .eur, amount: 1, czkPerAmount: d("24.300"), validFor: day("2026-11-05"), source: .cnb(order: 213))
+        return document
+    }
+
     /// Czech VAT and reverse charge on one document (the validator only warns).
     static func mixedTreatmentsInvoice() -> Document {
         var document = euInvoiceWithCzechVAT()
@@ -266,6 +277,28 @@ enum PDFInspection {
         }
         #expect(!text.contains("Sazba DPH"), "no VAT rate column without Czech VAT")
         #expect(!text.contains("Celkem bez DPH"), "no VAT total without Czech VAT")
+    }
+
+    @Test func aGoodsInvoiceCitesSection64AndShowsNoVAT() throws {
+        let document = PDFFixtures.euGoodsInvoice()
+        let text = PDFInspection.text(try PDFInspection.document(try DocumentPDF.render(document)))
+        let words = PDFInspection.words(text)
+        for expected in ["Dodání", "osvobozeno", "Intra-Community", "Article", "2006/112/EC."] {
+            #expect(words.contains(expected), "missing \(expected)")
+        }
+        #expect(text.contains("1 000,00 €"))
+        #expect(text.contains("DIČ / VAT ID DE123456789"))
+        #expect(!text.contains("Daň odvede zákazník"), "goods are exempt, not reverse charged")
+        #expect(!text.contains("Sazba DPH"), "no VAT rate column without Czech VAT")
+        // The rate of the issue date, the § 22 odst. 1 day, not of the date of supply (§ 4 odst. 8 ZDPH).
+        #expect(words.contains("24,300"), "the rate in the Czech clause")
+        #expect(words.contains("24.300"), "the rate in the English clause")
+        #expect(words.joined(separator: " ").contains("of 5 November 2026"), "the rate of the issue date")
+        let totals = try DocumentTotals.compute(for: document)
+        let rows = DocumentPDFRenderer(document: document, totals: totals, totalPages: nil).summaryRows()
+        let goods = try #require(rows.first { $0.caption.hasPrefix("EU – dodání zboží, osvobozeno (§ 64)") })
+        #expect(goods.caption == "EU – dodání zboží, osvobozeno (§ 64) / intra-Community supply of goods, exempt")
+        #expect(goods.values == [1000], "the total alone without Czech VAT")
     }
 
     @Test func aForeignCurrencyInvoiceWithCzechVATPrintsTheTaxInCZK() throws {

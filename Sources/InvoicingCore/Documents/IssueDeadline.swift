@@ -13,11 +13,12 @@ public enum IssueDeadline {
     }
 
     /// 15 days from the day the obligation arose for supplies taxed or exempt in the Czech Republic
-    /// (§ 28 odst. 8 ZDPH); 15 days from the end of the month for services with the place of supply in
-    /// another member state or a third country, and for advances received on them (§ 28 odst. 9 písm. b)–d)).
+    /// (§ 28 odst. 8 ZDPH); 15 days from the end of the month for goods supplied to another member state
+    /// exempt under § 64 (§ 28 odst. 9 písm. a)) and for services with the place of supply in another
+    /// member state or a third country, and for advances received on them (§ 28 odst. 9 písm. b)–d)).
     public static func lastDay(treatment: VATTreatment, taxPoint: CalendarDay) -> CalendarDay {
         switch treatment {
-        case .reverseChargeEU, .outsideEU:
+        case .intraCommunityGoods, .reverseChargeEU, .outsideEU:
             return taxPoint.endOfMonth.adding(days: 15)
         case .taxable, .exempt:
             return taxPoint.adding(days: 15)
