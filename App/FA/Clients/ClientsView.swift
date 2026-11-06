@@ -57,28 +57,33 @@ struct ClientRow: Identifiable, Hashable {
     var name: String { customer.party.name }
     var country: String { customer.party.address.countryCode }
     var vatID: String { customer.party.vatIdentifier?.value ?? "" }
-    var currencyCode: String { customer.currency.code }
+    var companyID: String { customer.party.identificationNumber?.digits ?? "" }
+    var city: String { customer.party.address.city.trimmingCharacters(in: .whitespaces) }
     var lastDocumentText: String { lastDocument?.isoString ?? "" }
+
+    /// Search (other-05): the name, the IČO and the VAT ID.
+    func matches(search: String) -> Bool {
+        let needle = search.folded
+        guard !needle.isEmpty else { return true }
+        return [name, companyID, vatID].contains { $0.folded.contains(needle) }
+    }
 }
 
 struct ClientsView: View {
     let clients: ClientsModel
     let documents: DocumentListModel
     @Binding var selection: String?
+    /// The Clients search, kept by the window so that opening a client from elsewhere can clear it.
+    @Binding var search: String
     let editClient: @MainActor (String?) -> Void
-    /// The row's context menu: New Invoice for the client, Duplicate of its last invoice.
-    let newInvoice: @MainActor (String) -> Void
-    let lastInvoiceNumber: @MainActor (String) -> String?
-    let duplicateLastInvoice: @MainActor (String) -> Void
 
-    @State private var search = ""
     @State private var sortOrder = [KeyPathComparator(\ClientRow.name, comparator: .localizedStandard)]
     @Environment(\.locale) private var locale
 
     private var rows: [ClientRow] {
         clients.customers
             .map { ClientRow(customer: $0, states: documents.states) }
-            .filter { search.isEmpty || $0.name.folded.contains(search.folded) || $0.vatID.folded.contains(search.folded) }
+            .filter { $0.matches(search: search) }
             .sorted(using: sortOrder)
     }
 
@@ -128,10 +133,16 @@ struct ClientsView: View {
         }
     }
 
+    // Name · Country · VAT ID · Open balance · Last document (other-05, shell-21).
     private func table(_ rows: [ClientRow]) -> some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn(Text(L.colName), value: \.name) { row in
-                Text(verbatim: row.name).textRole(.body)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(verbatim: row.name).textRole(.body)
+                    if let second = secondLine(row) {
+                        Text(verbatim: second).textRole(.rowSecondary)
+                    }
+                }
             }
             TableColumn(Text(L.colCountry), value: \.country) { row in
                 Text(verbatim: row.country).textRole(.body)
@@ -141,19 +152,16 @@ struct ClientsView: View {
                 Text(verbatim: row.vatID).textRole(.amount)
             }
             .width(min: 90, ideal: 120)
-            TableColumn(Text(L.colCurrency), value: \.currencyCode) { row in
-                Text(verbatim: row.currencyCode).textRole(.body)
-            }
-            .width(min: 50, ideal: 60)
             TableColumn(Text(L.colOpenBalance)) { row in
-                MoneyListText(monies: row.open, locale: locale)
+                VStack(alignment: .trailing, spacing: Spacing.xxs) {
+                    MoneyListText(monies: row.open, locale: locale)
+                    // The overdue part in words, not a colour or a column.
+                    if !row.overdue.isEmpty {
+                        Text(L.clientOverdueAmount(Self.amounts(row.overdue, locale: locale))).textRole(.rowSecondary)
+                    }
+                }
             }
-            .width(min: 110, ideal: 150)
-            .alignment(.trailing)
-            TableColumn(Text(L.colOverdue)) { row in
-                MoneyListText(monies: row.overdue, locale: locale)
-            }
-            .width(min: 110, ideal: 150)
+            .width(min: 110, ideal: 160)
             .alignment(.trailing)
             TableColumn(Text(L.colLastDocument), value: \.lastDocumentText) { row in
                 if let day = row.lastDocument { DayText(day) } else { Text(verbatim: "—").textRole(.body) }
@@ -161,16 +169,27 @@ struct ClientsView: View {
             .alignment(.trailing)
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            // At most two groups, unavailable items hidden (screens-flows.md §2e).
-            if ids.count == 1, let id = ids.first, let customer = clients.customer(id: id) {
-                Button { newInvoice(id) } label: { Text(L.newInvoiceFor(customer.party.name)) }
-                if let number = lastInvoiceNumber(id) {
-                    Button { duplicateLastInvoice(id) } label: { Text(L.duplicateNumbered(number)) }
-                }
-                Divider()
-                Button { editClient(id) } label: { Text(L.editClientEmpty) }
+            if ids.count == 1, let id = ids.first {
+                Button { editClient(id) } label: { Text(L.editClientDetails) }
             }
         }
+    }
+
+    /// "Praha · IČO 12345678": the city and, when present, the IČO.
+    private func secondLine(_ row: ClientRow) -> String? {
+        switch (row.city.isEmpty, row.companyID.isEmpty) {
+        case (false, false): return String(localized: L.clientCityAndCompanyID(row.city, row.companyID))
+        case (false, true): return row.city
+        case (true, false): return String(localized: L.companyIDChip(row.companyID))
+        case (true, true): return nil
+        }
+    }
+
+    /// Amounts per currency, never summed: "1 200,00 € + 3 000 Kč".
+    static func amounts(_ monies: [Money], locale: Locale) -> String {
+        MoneyList.sums(monies)
+            .map { MoneyText.format($0.amount, currency: $0.currency.code, locale: locale) }
+            .joined(separator: " + ")
     }
 }
 
@@ -184,6 +203,8 @@ struct ClientDetailView: View {
     /// The number of the client's last invoice, which Duplicate copies; nil when it has none.
     var lastInvoiceNumber: String? = nil
     var duplicateLastInvoice: (@MainActor () -> Void)? = nil
+    /// ↩ or a double-click on a document row shows it in Documents ▸ All (other-07).
+    var openDocument: (@MainActor (String) -> Void)? = nil
 
     @State private var documentSelection: Set<String> = []
     @Environment(\.locale) private var locale
@@ -225,23 +246,32 @@ struct ClientDetailView: View {
                     }
                     .alignment(.trailing)
                 }
+                .contextMenu(forSelectionType: String.self) { _ in
+                    EmptyView()
+                } primaryAction: { ids in
+                    if ids.count == 1, let id = ids.first { openDocument?(id) }
+                }
             }
             .padding(Spacing.xl)
             .navigationTitle(Text(verbatim: customer.party.name))
-            // Fixed items (design-system.md §8.11): New Invoice · Duplicate · Edit; no buttons in the content.
+            // Fixed items (other-06): the New Invoice split button and Edit; no buttons in the content.
             .toolbar {
                 ToolbarItem {
-                    Button { newDocument(.invoice) } label: {
+                    // A click makes an invoice for this client; the menu adds an advance and a copy of the
+                    // client's last invoice (File ▸ New Invoice / New Advance Invoice / Duplicate in client context).
+                    Menu {
+                        Button { newDocument(.invoice) } label: { Text(L.newInvoice) }
+                        Button { newDocument(.advanceRequest) } label: { Text(L.newAdvance) }
+                        Button { duplicateLastInvoice?() } label: {
+                            Text(lastInvoiceNumber.map { L.duplicateNumbered($0) } ?? L.duplicateAsDraft)
+                        }
+                        .disabled(duplicateLastInvoice == nil)
+                    } label: {
                         Label { Text(L.newInvoice) } icon: { Image(systemName: "plus") }
+                    } primaryAction: {
+                        newDocument(.invoice)
                     }
                     .help(Text(L.newInvoiceForHelp(customer.party.name)))
-                }
-                ToolbarItem {
-                    Button { duplicateLastInvoice?() } label: {
-                        Label { Text(L.duplicate) } icon: { Image(systemName: "plus.square.on.square") }
-                    }
-                    .disabled(duplicateLastInvoice == nil)
-                    .help(Text(lastInvoiceNumber.map { L.duplicateNumberedHelp($0) } ?? L.duplicateHelp))
                 }
                 ToolbarItem {
                     Button { editClient() } label: {
@@ -319,7 +349,8 @@ struct ClientDetailView: View {
     }
 }
 
-/// "EUR · Czech + English · EU business (reverse charge) · 14 days" (screens-flows.md §2e).
+/// "EUR · Czech + English · EU services, reverse charge · 30 days" (other-06): the client's defaults once,
+/// with the treatment in the editor's short form.
 struct ClientDefaultsChips: View {
     let customer: Customer
 
@@ -329,7 +360,7 @@ struct ClientDefaultsChips: View {
             dot
             Text(customer.language.title).textRole(.rowSecondary)
             dot
-            Text(customer.vatStatus.title).textRole(.rowSecondary)
+            Text(TreatmentChoice(customer.vatStatus.defaultTreatment).shortTitle).textRole(.rowSecondary)
             dot
             Text(customer.paymentTermDays == 1 ? L.dueDaysOne : L.dueDays(customer.paymentTermDays)).textRole(.rowSecondary)
         }
@@ -362,9 +393,10 @@ extension DocumentLanguage {
     }
 }
 
-/// New Client / Client details (screens-flows.md §2e). IČO and VAT ID are checked by the core's parsers;
-/// there is no online check. A new client gets the defaults of 5 Nov 2026: EUR, 14 days, an EU business
-/// buying goods (Saša's sales are mostly goods).
+/// New Client / Client details (screens-flows.md §2e, other-08, shell-23). IČO and VAT ID are checked by the
+/// core's parsers; there is no online check. A new client starts with no country; until each is picked by
+/// hand, the client type, the currency and the document language follow the VAT ID and the country as they
+/// are typed. The Edit sheet never re-infers.
 struct ClientFormSheet: View {
     let clients: ClientsModel
     let customer: Customer?
@@ -372,16 +404,22 @@ struct ClientFormSheet: View {
     var initialName: String? = nil
     /// Called with the saved client's id before the sheet closes (the editor picks it into the draft).
     var onSaved: (@MainActor (String) -> Void)? = nil
+    /// "Possible duplicate: … – open it?": called with the existing client's id after the sheet closes
+    /// without saving.
+    var onOpenExisting: (@MainActor (String) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var street = ""
     @State private var city = ""
     @State private var postalCode = ""
-    @State private var countryCode = "CZ"
+    @State private var countryCode = ""
     @State private var ico = ""
     @State private var vatID = ""
     @State private var vatStatus: CustomerVATStatus = .euBusinessGoods
+    /// False until the client type or the currency was picked by hand (other-08).
+    @State private var vatStatusPicked = false
+    @State private var currencyPicked = false
     @State private var email = ""
     @State private var phone = ""
     @State private var currencyCode = "EUR"
@@ -428,6 +466,76 @@ struct ClientFormSheet: View {
             })
     }
 
+    private var vatStatusBinding: Binding<CustomerVATStatus> {
+        Binding(
+            get: { vatStatus },
+            set: { newValue in
+                vatStatus = newValue
+                vatStatusPicked = true
+            })
+    }
+
+    private var currencyBinding: Binding<String> {
+        Binding(
+            get: { currencyCode },
+            set: { newValue in
+                currencyCode = newValue
+                currencyPicked = true
+            })
+    }
+
+    /// The client types in the pop-up's order (other-08): the EU business pair, a divider, the rest.
+    static let euBusinessTypes: [CustomerVATStatus] = [.euBusinessGoods, .euBusinessServices]
+    static let otherTypes: [CustomerVATStatus] = [.czechVATPayer, .czechNonPayer, .euConsumer, .nonEUBusiness, .nonEUConsumer]
+
+    /// The client type a VAT ID and a country imply (other-08, shell-23): with no country yet, an EU
+    /// business buying goods; otherwise the core's country rule (CustomerVATStatus.inferred), except that an
+    /// EU client without a VAT ID yet is taken as an EU business buying goods, with the warning below.
+    static func inferredStatus(vatID: String, countryCode: String) -> CustomerVATStatus {
+        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+        let parsed = VATIdentifier(vatID.trimmingCharacters(in: .whitespaces))
+        guard parsed != nil || !country.isEmpty else { return .euBusinessGoods }
+        let status = CustomerVATStatus.inferred(vatIdentifier: parsed, countryCode: country)
+        return status == .euConsumer ? .euBusinessGoods : status
+    }
+
+    /// CZK for a Czech client, EUR otherwise and while no country is set; USD only by hand.
+    static func inferredCurrency(countryCode: String) -> String {
+        countryCode.uppercased() == "CZ" ? Currency.czk.code : Currency.eur.code
+    }
+
+    /// True for an EU member state's ISO country code other than CZ. The VAT prefixes name Greece "EL",
+    /// so "GR" is mapped as the core's CustomerVATStatus.inferred does.
+    static func isEUCountryOtherThanCZ(_ countryCode: String) -> Bool {
+        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+        guard country != "CZ" else { return false }
+        return VATIdentifier.euPrefixes.contains(country == "GR" ? "EL" : country)
+    }
+
+    /// The new client's derived values, for each not yet picked by hand; the Edit sheet never re-infers.
+    private func reinfer() {
+        guard customer == nil else { return }
+        if !vatStatusPicked { vatStatus = Self.inferredStatus(vatID: vatID, countryCode: countryCode) }
+        if !currencyPicked { currencyCode = Self.inferredCurrency(countryCode: countryCode) }
+        if !languagePicked { language = countryCode.uppercased() == "CZ" ? .czech : .english }
+    }
+
+    private var trimmedICO: String { ico.trimmingCharacters(in: .whitespaces) }
+    private var trimmedVATID: String { vatID.trimmingCharacters(in: .whitespaces) }
+
+    /// Another client with the same IČO or VAT ID (other-08: "Possible duplicate: Acme GmbH – open it?").
+    private var possibleDuplicate: Customer? {
+        let icoDigits = IdentificationNumber(trimmedICO)?.digits
+        let vat = VATIdentifier(trimmedVATID)?.value
+        guard icoDigits != nil || vat != nil else { return nil }
+        return clients.customers.first { other in
+            guard other.id != customer?.id else { return false }
+            if let icoDigits, other.party.identificationNumber?.digits == icoDigits { return true }
+            if let vat, other.party.vatIdentifier?.value == vat { return true }
+            return false
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.l) {
             Text(customer == nil ? L.newClientTitle : L.editClientTitle).textRole(.screenTitle)
@@ -441,15 +549,39 @@ struct ClientFormSheet: View {
                 }
                 Section {
                     TextField(text: $ico) { Text(L.fieldICO) }
+                    if !trimmedICO.isEmpty && IdentificationNumber(trimmedICO) == nil {
+                        InlineMessage(L.invalidICO, kind: .problem)
+                    }
                     TextField(text: $vatID) { Text(L.fieldVATID) }
-                    Picker(selection: $vatStatus) {
-                        ForEach(CustomerVATStatus.allCases, id: \.self) { status in
+                    if !trimmedVATID.isEmpty && VATIdentifier(trimmedVATID) == nil {
+                        InlineMessage(L.invalidVATID, kind: .problem)
+                    }
+                    if let duplicate = possibleDuplicate {
+                        HStack(spacing: Spacing.m) {
+                            InlineMessage(L.possibleDuplicate(duplicate.party.name), kind: .problem)
+                            if let onOpenExisting {
+                                Button {
+                                    let id = duplicate.id
+                                    dismiss()
+                                    onOpenExisting(id)
+                                } label: { Text(L.openButton) }
+                            }
+                        }
+                    }
+                    Picker(selection: vatStatusBinding) {
+                        ForEach(Self.euBusinessTypes, id: \.self) { status in
+                            Text(status.title).tag(status)
+                        }
+                        Divider()
+                        ForEach(Self.otherTypes, id: \.self) { status in
                             Text(status.title).tag(status)
                         }
                     } label: {
-                        Text(L.fieldVATTreatment)
+                        Text(L.fieldClientType)
                     }
-                    if vatStatus.isEUBusiness && vatID.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // For an EU country other than CZ while the VAT ID is empty, not on the status alone
+                    // (other-08, shell-23).
+                    if vatStatus.isEUBusiness && Self.isEUCountryOtherThanCZ(countryCode) && trimmedVATID.isEmpty {
                         InlineMessage(vatStatus == .euBusinessGoods ? L.goodsExemptionNeedsVATID : L.reverseChargeNeedsVATID, kind: .problem)
                     }
                 }
@@ -458,7 +590,7 @@ struct ClientFormSheet: View {
                     TextField(text: $phone) { Text(L.fieldPhone) }
                 }
                 Section {
-                    Picker(selection: $currencyCode) {
+                    Picker(selection: currencyBinding) {
                         ForEach(currencyOptions, id: \.code) { currency in
                             Text(verbatim: currency.code).tag(currency.code)
                         }
@@ -495,14 +627,14 @@ struct ClientFormSheet: View {
         .frame(minHeight: 640)
         .formSheetSized(minWidth: 520, maxWidth: 640)
         .onAppear(perform: fill)
-        .onChange(of: countryCode) { _, code in
-            if !languagePicked { language = code == "CZ" ? .czech : .english }
-        }
+        .onChange(of: countryCode) { reinfer() }
+        .onChange(of: vatID) { reinfer() }
     }
 
     private func fill() {
         guard let customer else {
             if let initialName { name = initialName }
+            reinfer()
             return
         }
         let party = customer.party
@@ -520,6 +652,8 @@ struct ClientFormSheet: View {
         paymentTermDays = customer.paymentTermDays
         language = customer.language
         languagePicked = true
+        vatStatusPicked = true
+        currencyPicked = true
         notes = customer.notes
     }
 
@@ -568,7 +702,9 @@ struct CountryPicker: View {
     private var options: [ClientFormSheet.CountryOption] {
         var options = ClientFormSheet.countries
         if !options.contains(where: { $0.code == code }) {
-            options.insert(ClientFormSheet.CountryOption(code: code, name: code), at: 0)
+            // A new client starts with no country: the explicit empty entry reads "Choose…" (shell-23).
+            let name = code.isEmpty ? String(localized: L.chooseCountry) : code
+            options.insert(ClientFormSheet.CountryOption(code: code, name: name), at: 0)
         }
         return options
     }
