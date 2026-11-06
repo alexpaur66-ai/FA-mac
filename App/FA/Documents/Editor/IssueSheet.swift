@@ -1,6 +1,7 @@
-// The review-and-issue sheet (screens-flows.md §2c, ADR 0009 and its amendments): the number the series
-// would assign, what the document will say, then the problems in three severities. ↩ issues when nothing
-// blocks and every ⚠ row is checked; the data layer issues in one transaction (ADR 0005).
+// The review-and-issue sheet (screens-flows.md §2c, ADR 0009 and its amendments, lean pass docs-27/28): the
+// number the series would assign, seven summary rows and two conditional ones, then what blocks Issue and
+// what to check. ↩ issues when nothing blocks and every ⚠ row is ticked; the data layer issues in one
+// transaction (ADR 0005).
 
 import InvoicingCore
 import InvoicingData
@@ -11,14 +12,23 @@ struct IssueSheet: View {
     let onIssued: @MainActor (Document) -> Void
 
     enum Field: Hashable {
-        case checkbox
+        /// The Checked tick of one ⚠ row, by the row's id.
+        case check(String)
         case rate
+    }
+
+    /// One ⚠ row: its words, and Set to Today for the issue date.
+    struct CheckRow: Identifiable {
+        let id: String
+        let text: String
+        var setsToday = false
     }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var seriesID: String?
-    @State private var checked = false
+    /// The ⚠ rows ticked so far; a row whose words change is a new row and needs its own tick.
+    @State private var checkedIDs: Set<String> = []
     @State private var issuing = false
     @State private var error: String?
     @FocusState private var focus: Field?
@@ -67,8 +77,9 @@ struct IssueSheet: View {
         }
         .padding(Spacing.xl)
         .formSheetSized()
-        // The rate field comes first when a rate is missing: it is the one thing to type here (E073).
-        .defaultFocus($focus, model.rateIsMissing ? .rate : .checkbox)
+        // The rate field comes first when a rate is missing: it is the one thing to type here (E073); else
+        // the first ⚠ row's tick (docs-28).
+        .defaultFocus($focus, initialFocus)
         .onAppear {
             // Settings may have changed the series or the accounts, a client sheet the clients, and a rate
             // file may have been imported while the editor was open (§ 4 odst. 8 ZDPH: the rate day's rate).
@@ -78,8 +89,12 @@ struct IssueSheet: View {
                 seriesID = model.series.first?.id
             }
         }
-        // A changed set of ⚠ rows is checked again.
-        .onChange(of: warningKey) { _, _ in checked = false }
+    }
+
+    private var initialFocus: Field? {
+        if model.rateIsMissing { return .rate }
+        guard let document = model.document, let first = checkRows(document).first else { return nil }
+        return .check(first.id)
     }
 
     // MARK: Heading and summary
@@ -88,16 +103,6 @@ struct IssueSheet: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title(document)).textRole(.screenTitle)
             Text(L.issueSubtitle).textRole(.rowSecondary)
-            if model.series.count > 1 {
-                Picker(selection: $seriesID) {
-                    ForEach(model.series) { stored in
-                        Text(verbatim: stored.name).tag(Optional(stored.id))
-                    }
-                } label: {
-                    Text(L.seriesLabel)
-                }
-                .frame(maxWidth: 360)
-            }
         }
     }
 
@@ -112,11 +117,16 @@ struct IssueSheet: View {
         }
     }
 
+    /// Type, Client, Language, Dates, Total, Rate (EUR and USD tax documents) and Payment; the PDF row only
+    /// when the PDF won't be written (docs-27). Every printed clause sits in the row it belongs to.
     private func summary(_ document: Document) -> some View {
-        let clauses = DocumentClause.clauses(for: document, totals: model.totals).map { $0.text(language: .english) }
-        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.s) {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.l, verticalSpacing: Spacing.s) {
             row(L.summaryType) {
-                Text(verbatim: document.kind.pickerTitle).textRole(.body)
+                if document.kind == .advanceRequest {
+                    Text(L.typeNotTaxDocument(document.kind.pickerTitle)).textRole(.body)
+                } else {
+                    Text(verbatim: document.kind.pickerTitle).textRole(.body)
+                }
             }
             row(L.summaryClient) {
                 Text(clientLine(document)).textRole(.body)
@@ -125,7 +135,12 @@ struct IssueSheet: View {
                 Text(document.language == .czech ? L.languageCzech : L.languageEnglish).textRole(.body)
             }
             row(L.summaryDates) {
-                Text(datesLine(document)).textRole(.body)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(datesLine(document)).textRole(.body)
+                    if document.kind == .paymentTaxDocument, let day = document.taxPointDate {
+                        Text(receivedLine(day, advance: document.relatedDocumentNumber)).textRole(.rowSecondary)
+                    }
+                }
             }
             row(L.summaryTotal) {
                 totalsGrid(document)
@@ -135,22 +150,13 @@ struct IssueSheet: View {
                     rateLine(document)
                 }
             }
-            if showsPayment(document) {
-                row(L.summaryPayment) {
-                    paymentLine(document)
-                }
+            row(L.summaryPayment) {
+                paymentLine(document)
             }
-            if !clauses.isEmpty {
-                row(L.summaryLegal) {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        ForEach(clauses, id: \.self) { clause in
-                            Text(verbatim: clause).textRole(.legalNote).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+            if let notice = pdfNotice {
+                row(L.pdfRow) {
+                    Text(notice).textRole(.body).fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            row(L.pdfRow) {
-                Text(verbatim: pdfLine(document)).textRole(.body).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -164,14 +170,12 @@ struct IssueSheet: View {
         }
     }
 
-    /// Where Issue writes the PDF (screens-flows.md §2c), named with the predicted number, or that it stays
-    /// in the app until Save PDF….
-    private func pdfLine(_ document: Document) -> String {
-        guard PDFSettings.autoSaveOnIssue else { return String(localized: L.pdfAutoSaveOff) }
-        guard let folder = PDFSettings.folderURL() else { return String(localized: L.pdfNoFolder) }
-        var predicted = document
-        predicted.number = seriesID.flatMap { model.predictedNumber(seriesID: $0) }
-        return String(localized: L.pdfWillBeSavedTo(PDFSettings.displayPath(PDFSettings.plannedURL(for: predicted, in: folder))))
+    /// Why Issue won't write the PDF file (automatic saving off, or no folder), as pdfLine decided before;
+    /// nil when it will be written, and the result line names the file after Issue.
+    private var pdfNotice: LocalizedStringResource? {
+        if !PDFSettings.autoSaveOnIssue { return L.pdfAutoSaveOff }
+        if PDFSettings.folderURL() == nil { return L.pdfNoFolder }
+        return nil
     }
 
     private func clientLine(_ document: Document) -> LocalizedStringResource {
@@ -183,17 +187,28 @@ struct IssueSheet: View {
         return L.clientSummary(name, treatment)
     }
 
+    /// "Issued today · DUZP 31. 10. 2026 · Due 14. 11. 2026"; no DUZP on an advance, no due date on a
+    /// payment tax document, which asks for no payment.
     private func datesLine(_ document: Document) -> LocalizedStringResource {
-        let issued = document.issueDate.formatted(locale)
+        let issued = document.issueDate == CalendarDay(Date(), in: .current)
+            ? String(localized: L.todayWord) : document.issueDate.formatted(locale)
         let due = document.dueDate.formatted(locale)
-        if document.kind == .advanceRequest {
-            return L.datesSummaryNoTaxPoint(issued, due)
+        switch document.kind {
+        case .advanceRequest: return L.datesSummaryNoTaxPoint(issued, due)
+        case .paymentTaxDocument: return L.datesSummaryNoDue(issued, document.taxPoint.formatted(locale))
+        case .invoice, .finalInvoice: return L.datesSummary(issued, document.taxPoint.formatted(locale), due)
         }
-        return L.datesSummary(issued, document.taxPoint.formatted(locale), due)
     }
 
-    /// The same figures as the editor's totals bar, one per line: Total, the VAT (or why there is none),
-    /// the VAT in CZK, and on a final invoice the advances deducted, the advances paid and the amount due.
+    /// "Payment received 12. 11. 2026 against ZF 2026-0003": the payment clause of a payment tax document.
+    private func receivedLine(_ day: CalendarDay, advance: String?) -> LocalizedStringResource {
+        if let advance { return L.paymentReceivedAgainst(day.formatted(locale), advance) }
+        return L.paymentReceivedOn(day.formatted(locale))
+    }
+
+    /// Total, then one VAT row per rate under Czech VAT, or the VAT row with the printed clause under the
+    /// other treatments (docs-27); the VAT in CZK on EUR and USD; on a final invoice the advances deducted
+    /// with their tax documents (and rates), the advances paid and the amount due.
     @ViewBuilder private func totalsGrid(_ document: Document) -> some View {
         if let totals = model.totals {
             let code = document.currency.code
@@ -202,10 +217,15 @@ struct IssueSheet: View {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xxs) {
                 moneyRow(L.total, totals.totalGross, code, role: isFinal ? .amount : .amountStrong)
                 if chargesVAT {
-                    if isFinal {
-                        moneyRow(L.vatAfterAdvances, totals.taxableVAT, code)
-                    } else {
-                        moneyRow(L.vat, totals.totalVAT, code)
+                    ForEach(Array(totals.rows.enumerated()), id: \.offset) { _, vatRow in
+                        if vatRow.treatment.chargesVAT {
+                            moneyRow(vatLabel(vatRow, afterAdvances: isFinal), isFinal ? vatRow.taxableVAT : vatRow.vat, code)
+                        }
+                    }
+                    // Lines without Czech VAT beside a Czech-VAT deduction (a final invoice deducting an advance
+                    // taxed under another treatment): the PDF still prints their clause.
+                    ForEach(Array(document.treatments.filter { !$0.chargesVAT }.enumerated()), id: \.offset) { _, treatment in
+                        dashRow(L.vat, clause: clause(for: treatment, language: document.language))
                     }
                     if document.currency != .czk, model.needsExchangeRate {
                         if let czk = totals.taxableVATCZK {
@@ -214,17 +234,20 @@ struct IssueSheet: View {
                             dashRow(L.vatInCZK, clause: nil)
                         }
                     }
-                } else if document.hasIntraCommunityGoods && !document.hasReverseCharge {
-                    // § 64 goods: the same notice as the editor's totals bar.
-                    dashRow(L.exemptSection64Item, clause: nil)
                 } else {
-                    // Reverse charge: the dash carries the notice the PDF prints (§ 29 odst. 2 písm. c) ZDPH).
-                    dashRow(L.vat, clause: document.hasReverseCharge ? DocumentClause.reverseChargeNotice : nil)
+                    dashRow(L.vat, clause: untaxedClause(document))
                 }
                 if isFinal {
                     let deducted = totals.totalGross - totals.dueBeforePaidInAdvance
                     if deducted != 0 {
-                        moneyRow(L.advancesDeducted, -deducted, code)
+                        GridRow {
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                Text(L.advancesDeducted).textRole(.body)
+                                Text(verbatim: deductedNumbers(document)).textRole(.rowSecondary)
+                            }
+                            MoneyText(amount: -deducted, currency: code, locale: locale, role: .amount)
+                                .gridColumnAlignment(.trailing)
+                        }
                     }
                     // Advances paid on § 64 goods reduce only what is left to pay (ADR 0012).
                     if totals.paidInAdvance != 0 {
@@ -236,6 +259,50 @@ struct IssueSheet: View {
         } else {
             InlineMessage(model.totalsError ?? String(localized: L.totalsUnavailable), kind: .problem)
         }
+    }
+
+    /// "VAT 21 %", or "VAT after advances 21 %" on a final invoice.
+    private func vatLabel(_ vatRow: VATSummaryRow, afterAdvances: Bool) -> LocalizedStringResource {
+        guard let percent = vatRow.appliedRatePercent else { return afterAdvances ? L.vatAfterAdvances : L.vat }
+        let text = VATRateField<EditorFocus>.percentText(percent, locale: locale)
+        return afterAdvances ? L.vatAfterAdvancesAtRate(text) : L.vatAtRate(text)
+    }
+
+    /// The clause the PDF prints in the VAT's place: the reverse-charge words, or the treatment's clause in
+    /// the document's language (DocumentClause).
+    private func untaxedClause(_ document: Document) -> String? {
+        switch model.treatmentChoice {
+        case .czechVAT: return nil
+        case .reverseChargeEU: return DocumentClause.reverseChargeNotice
+        case .intraCommunityGoods: return DocumentClause.intraCommunitySupply.text(language: document.language)
+        case .outsideEU: return DocumentClause.outsideScope.text(language: document.language)
+        case .exempt: return DocumentClause.exempt(reference: model.exemptReference).text(language: document.language)
+        }
+    }
+
+    /// The clause one line treatment prints (DocumentClause.clauses), nil under Czech VAT.
+    private func clause(for treatment: VATTreatment, language: DocumentLanguage) -> String? {
+        switch treatment {
+        case .taxable: return nil
+        case .reverseChargeEU: return DocumentClause.reverseChargeNotice
+        case .intraCommunityGoods: return DocumentClause.intraCommunitySupply.text(language: language)
+        case .outsideEU: return DocumentClause.outsideScope.text(language: language)
+        case .exempt(let reference): return DocumentClause.exempt(reference: reference).text(language: language)
+        }
+    }
+
+    /// "DD 2026-0001, DD 2026-0002", each with the advance's rate on a EUR or USD document.
+    private func deductedNumbers(_ document: Document) -> String {
+        var seen: Set<String> = []
+        var items: [String] = []
+        for deduction in document.advanceDeductions where seen.insert(deduction.documentNumber).inserted {
+            if document.currency != .czk, let rate = deduction.exchangeRate {
+                items.append(String(localized: L.deductionAtRate(deduction.documentNumber, DraftEditorView.rateText(rate, locale: locale))))
+            } else {
+                items.append(deduction.documentNumber)
+            }
+        }
+        return items.joined(separator: ", ")
     }
 
     private func moneyRow(_ label: LocalizedStringResource, _ amount: Decimal, _ code: String, role: TextRole = .amount) -> some View {
@@ -250,31 +317,36 @@ struct IssueSheet: View {
         GridRow {
             Text(label).textRole(.body)
             if let clause {
-                Text(L.vatDashWithClause(clause)).textRole(.amount).gridColumnAlignment(.trailing)
+                Text(L.vatDashWithClause(clause)).textRole(.amount).fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(verbatim: "—").textRole(.amount).gridColumnAlignment(.trailing)
             }
         }
     }
 
+    /// "24,315 · for 30. 10. 2026 · Typed", or "… · last published" for a rule-6 fallback; the inline form
+    /// shows here while the rate is missing (docs-27 row 6), and "Fix before issuing" names the missing rate.
     @ViewBuilder private func rateLine(_ document: Document) -> some View {
         if let rate = document.exchangeRate {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(L.rateEquals(document.currency.code, DraftEditorView.rateText(rate, locale: locale))).textRole(.amount)
-                Text(L.rateDetails(rate.validFor.formatted(locale), RateSourceName.text(rate.source))).textRole(.rowSecondary)
+                let value = DraftEditorView.rateText(rate, locale: locale)
+                let day = rate.validFor.formatted(locale)
+                let source = RateSourceName.text(rate.source)
+                Text(model.rateFallbackFrom == nil ? L.rateSummary(value, day, source) : L.rateSummaryFallback(value, day, source))
+                    .textRole(.amount)
                 // A refresh that failed (the rates could not be read again) shows here as in the editor.
                 if let rateError = model.rateError {
                     InlineMessage(rateError)
                 }
             }
         } else {
-            // The day whose rate is needed (the last working day on a weekend or holiday), as the form prefills it.
-            Text(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale))).textRole(.body)
+            // The form names the day whose rate is needed (the last working day on a weekend or holiday).
+            RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)
         }
     }
 
     /// A payment tax document asks for nothing (its payment has been received), nor does a final invoice
-    /// whose advances cover the supply.
+    /// whose advances cover the supply: the Payment row says there is no payment request.
     private func showsPayment(_ document: Document) -> Bool {
         if document.kind == .paymentTaxDocument { return false }
         if document.kind == .finalInvoice, let totals = model.totals, totals.amountDue <= 0 { return false }
@@ -286,20 +358,17 @@ struct IssueSheet: View {
     /// symbol the number gives.
     @ViewBuilder private func paymentLine(_ document: Document) -> some View {
         let account = document.payment?.bankConnection ?? model.profile?.bankConnection(for: document.currency)
-        if let account {
+        if !showsPayment(document) {
+            Text(L.noPaymentRequest).textRole(.body)
+        } else if let account {
             let accountText = String(localized: DraftEditorView.accountLabel(account))
             let qrKind = document.payment?.qrCode
                 ?? PaymentInstructions.standard(for: "", bankConnection: account, currency: document.currency).qrCode
             let qrText = String(localized: Self.qrKindTitle(qrKind))
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                if let symbol = predictedVariableSymbol() {
-                    Text(L.paymentSummaryWithVS(accountText, qrText, symbol)).textRole(.body)
-                } else {
-                    Text(L.paymentSummary(accountText, qrText)).textRole(.body)
-                }
-                if document.payment == nil {
-                    Text(L.paymentFromProfile).textRole(.rowSecondary)
-                }
+            if let symbol = predictedVariableSymbol() {
+                Text(L.paymentSummaryWithVS(accountText, qrText, symbol)).textRole(.body)
+            } else {
+                Text(L.paymentSummary(accountText, qrText)).textRole(.body)
             }
         } else {
             Text(L.noPayment).textRole(.body)
@@ -326,13 +395,10 @@ struct IssueSheet: View {
 
     @ViewBuilder private func problems(_ document: Document) -> some View {
         let today = CalendarDay(Date(), in: .current)
-        // The missing rate shows as the inline form, not as a second row.
+        // The missing rate is typed in the Rate row's inline form; this section only names it.
         let errors = model.blockingErrors
         let numberingProblem = model.numberingProblem(seriesID: seriesID)
-        let warnings = model.warnings
-        let extraWarnings = model.extraWarnings
-        let dateNotToday = document.issueDate != today
-        let infos = infoLines(document)
+        let rows = checkRows(document)
         if model.blockingCount(seriesID: seriesID) > 0 {
             section(L.blockingTitle) {
                 ForEach(errors) { issue in
@@ -354,7 +420,7 @@ struct IssueSheet: View {
                     InlineMessage(L.receiptTotalMismatch(MoneyText.format(payment.amount.amount, currency: payment.amount.currency.code, locale: locale)))
                 }
                 if model.rateIsMissing {
-                    RateEntryForm(model: model, stores: model.stores, focus: $focus, focusValue: .rate)
+                    InlineMessage(L.rateMissing(document.currency.code, model.neededRateDay.formatted(locale)))
                 }
                 if model.series.isEmpty {
                     HStack(spacing: Spacing.m) {
@@ -364,61 +430,46 @@ struct IssueSheet: View {
                 }
             }
         }
-        if !warnings.isEmpty || !extraWarnings.isEmpty || dateNotToday {
+        if !rows.isEmpty {
             section(L.checkTitle) {
-                ForEach(warnings) { issue in
-                    InlineMessage(issue.message(language: .english), kind: .problem)
-                }
-                ForEach(extraWarnings, id: \.self) { warning in
-                    InlineMessage(warning, kind: .problem)
-                }
-                if dateNotToday {
-                    HStack(spacing: Spacing.m) {
-                        InlineMessage(L.issueDateNotToday(document.issueDate.formatted(locale)), kind: .problem)
-                        Button { model.setIssueDate(today) } label: { Text(L.setToToday) }
+                ForEach(rows) { checkRow in
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
+                        InlineMessage(checkRow.text, kind: .problem)
+                        if checkRow.setsToday {
+                            Button { model.setIssueDate(today) } label: { Text(L.setToToday) }
+                        }
+                        Spacer(minLength: Spacing.s)
+                        Toggle(isOn: checkedBinding(checkRow.id)) { Text(L.checkedLabel) }
+                            .toggleStyle(.checkbox)
+                            .focused($focus, equals: .check(checkRow.id))
                     }
                 }
-                Toggle(isOn: $checked) { Text(L.checkedLabel) }
-                    .toggleStyle(.checkbox)
-                    .focused($focus, equals: .checkbox)
-            }
-        }
-        if !infos.isEmpty {
-            section(L.infoTitle) {
-                ForEach(infos, id: \.self) { line in
-                    InlineMessage(line, kind: .info)
-                }
             }
         }
     }
 
-    private func infoLines(_ document: Document) -> [String] {
-        var lines: [String] = []
-        if let from = model.rateFallbackFrom {
-            let used = from.formatted(locale)
-            let resource: LocalizedStringResource
-            if let resolution = model.rateResolution, resolution.rule == .noPublicationThatDay {
-                resource = L.rateNotPublished(resolution.publicationDay.formatted(locale), used)
-            } else {
-                resource = L.rateFallback(document.exchangeRateDay.formatted(locale), used)
-            }
-            lines.append(String(localized: resource))
+    /// The validator's warnings, the editor's own checks (one defaults row, the 50 % total change, an
+    /// advance under another treatment, a receipt in another draft), then the issue date that is not today.
+    private func checkRows(_ document: Document) -> [CheckRow] {
+        var rows: [CheckRow] = []
+        for issue in model.warnings {
+            let text = issue.message(language: .english)
+            rows.append(CheckRow(id: "validator|\(issue.code)|\(text)", text: text))
         }
-        if document.kind != .advanceRequest,
-           (document.taxPoint.year, document.taxPoint.month) != (document.issueDate.year, document.issueDate.month) {
-            lines.append(String(localized: L.taxPointOtherMonth))
+        for warning in model.extraWarnings {
+            rows.append(CheckRow(id: "editor|\(warning)", text: warning))
         }
-        return lines
+        if document.issueDate != CalendarDay(Date(), in: .current) {
+            rows.append(CheckRow(id: "issueDate|\(document.issueDate)",
+                                 text: String(localized: L.issueDateNotToday(document.issueDate.formatted(locale))), setsToday: true))
+        }
+        return rows
     }
 
-    /// What the Checked box vouches for; when it changes, the box is cleared.
-    private var warningKey: [String] {
-        var key = model.warnings.map { String(describing: $0.code) }
-        key.append(contentsOf: model.extraWarnings)
-        if let document = model.document, document.issueDate != CalendarDay(Date(), in: .current) {
-            key.append(document.issueDate.formatted(locale))
-        }
-        return key
+    private func checkedBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { checkedIDs.contains(id) }, set: { on in
+            if on { checkedIDs.insert(id) } else { checkedIDs.remove(id) }
+        })
     }
 
     private func section<Content: View>(_ title: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
@@ -433,9 +484,7 @@ struct IssueSheet: View {
     private func canIssue(_ document: Document) -> Bool {
         // The same count as the ⛔ section and the editor's readiness chip.
         guard seriesID != nil, model.blockingCount(seriesID: seriesID) == 0 else { return false }
-        let needsCheck = !model.warnings.isEmpty || !model.extraWarnings.isEmpty
-            || document.issueDate != CalendarDay(Date(), in: .current)
-        return !needsCheck || checked
+        return checkRows(document).allSatisfy { checkedIDs.contains($0.id) }
     }
 
     private func issue() {

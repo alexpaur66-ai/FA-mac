@@ -589,12 +589,14 @@ struct MainSplitView: View {
         previewShown = false
         if sidebar == .filter(.drafts) { sidebar = .filter(.all) }
         if sidebar.section == .documents { documentSelection = [document.id] }
-        let issuedLine = String(localized: L.issuedResult(document.number ?? ""))
+        let number = document.number ?? ""
+        let issuedLine = String(localized: L.issuedResult(number))
         pdfSaveFailure = nil
         // The PDF is rendered and stored now, and written to the PDF folder when one is chosen (ADR 0010).
+        // One sentence, no buttons (docs-29): Record Payment… is in the toolbar, Show in Finder in the PDF row.
         do {
             if let url = try DocumentPDFService.storeAndSave(stores, document: document) {
-                report(issuedLine + " · " + String(localized: L.pdfSavedTo(PDFSettings.displayPath(url))))
+                report(String(localized: L.issuedResultWithPDF(number, PDFSettings.displayPath(url))))
             } else {
                 report(issuedLine)
             }
@@ -647,7 +649,7 @@ struct MainSplitView: View {
                 customerID: source.customerID, language: source.language, currency: source.currency, pricing: source.pricing,
                 issueDate: today, taxPointDate: source.kind.isTaxDocument ? today : nil, dueDate: today.adding(days: term),
                 lines: Self.copiedLines(source.lines),
-                orderReference: source.orderReference, note: source.note, footer: source.footer)
+                orderReference: source.orderReference, note: source.note, footer: profile?.footer)
             try stores.documents.saveDraft(copy)
             openDraft(copy.id, focus: .firstLineQuantity)
         } catch {
@@ -713,7 +715,7 @@ struct MainSplitView: View {
                 customerID: advance.customerID, language: advance.language, currency: advance.currency, pricing: advance.pricing,
                 issueDate: today, taxPointDate: today, dueDate: today.adding(days: term), lines: Self.copiedLines(advance.lines),
                 advanceDeductions: deductions, paidAdvances: paidAdvances.isEmpty ? nil : paidAdvances, relatedDocumentNumber: advance.number,
-                orderReference: advance.orderReference, note: advance.note, footer: advance.footer)
+                orderReference: advance.orderReference, note: advance.note, footer: profile?.footer)
             try stores.documents.saveDraft(final)
             openDraft(final.id, focus: .firstLineQuantity)
         } catch {
@@ -840,11 +842,12 @@ struct MainSplitView: View {
         case .recordPayment(let id):
             if let state = documents.state(id: id) {
                 RecordPaymentSheet(stores: stores, state: state, mode: .payment, lastDate: $lastPaymentDate, openDraft: openDraft,
-                                   createFinalInvoice: { createFinalInvoice(from: $0) })
+                                   createFinalInvoice: { createFinalInvoice(from: $0) }, reportRecorded: { report($0) })
             }
         case .recordRefund(let id):
             if let state = documents.state(id: id) {
-                RecordPaymentSheet(stores: stores, state: state, mode: .refund, lastDate: $lastPaymentDate, openDraft: openDraft)
+                RecordPaymentSheet(stores: stores, state: state, mode: .refund, lastDate: $lastPaymentDate, openDraft: openDraft,
+                                   reportRecorded: { report($0) })
             }
         case .closure(let id, let kind):
             if let state = documents.state(id: id) {
