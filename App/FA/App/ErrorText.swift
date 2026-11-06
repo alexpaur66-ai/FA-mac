@@ -25,6 +25,17 @@ enum ErrorText {
         if let patternError = error as? DocumentNumberPattern.PatternError {
             return String(localized: resource(patternError))
         }
+        if let stockError = error as? StockError {
+            switch stockError {
+            case .itemNotFound: return String(localized: L.stockItemMissing)
+            case .nameRequired: return String(localized: L.nameRequired)
+            case .nameTaken(let name): return String(localized: L.stockNameTaken(name))
+            case .itemHasMovements: return String(localized: L.stockItemHasMovements)
+            case .quantityNotPositive: return String(localized: L.stockQuantityMoreThanZero)
+            case .quantityNegative: return String(localized: L.stockQuantityZeroOrMore)
+            case .dayInFuture: return String(localized: L.stockDayInFuture)
+            }
+        }
         if let backupError = error as? BackupError {
             switch backupError {
             case .unreadable: return String(localized: L.backupUnreadable)

@@ -14,6 +14,9 @@ struct MainSplitView: View {
     @SceneStorage("sidebar") private var sidebar: SidebarItem = .section(.overview)
     @State private var documents: DocumentListModel
     @State private var clients: ClientsModel
+    @State private var stock: StockModel
+    @SceneStorage("stock.selection") private var stockSelection: String?
+    @State private var stockSearch = ""
     /// The selections are kept per window (screens-flows.md §1.1, Restore); Documents as joined ids.
     @SceneStorage("documents.selection") private var documentSelectionStored = ""
     @SceneStorage("overview.selection") private var overviewSelection: String?
@@ -73,6 +76,7 @@ struct MainSplitView: View {
         self.takeNotice = takeNotice
         _documents = State(initialValue: DocumentListModel(stores: stores))
         _clients = State(initialValue: ClientsModel(stores: stores))
+        _stock = State(initialValue: StockModel(stores: stores))
     }
 
     private var sidebarSelection: Binding<SidebarItem?> {
@@ -109,7 +113,7 @@ struct MainSplitView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: sidebarSelection, badges: documents.badges)
+            SidebarView(selection: sidebarSelection, badges: documents.badges, stockLow: stock.lowCount)
                 .navigationSplitViewColumnWidth(
                     min: LayoutMetrics.sidebar.min, ideal: LayoutMetrics.sidebar.ideal, max: LayoutMetrics.sidebar.max)
         } content: {
@@ -213,6 +217,9 @@ struct MainSplitView: View {
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
                          deletePayment: deletePayment)
+        case .stock:
+            StockView(stock: stock, selection: $stockSelection, search: $stockSearch,
+                      report: { report($0, kind: .problem) })
         }
     }
 
@@ -248,6 +255,12 @@ struct MainSplitView: View {
                 documentDetail(id)
             } else {
                 placeholder(L.noSelection)
+            }
+        case .stock:
+            if let id = stockSelection {
+                StockItemDetailView(stock: stock, itemID: id, openDocument: { openDocument(id: $0) })
+            } else {
+                placeholder(L.stockSelectItem)
             }
         }
     }
@@ -318,7 +331,7 @@ struct MainSplitView: View {
         case .overview: overviewSelection
         case .documents: documentSelection.count == 1 ? documentSelection.first : nil
         case .payments: paymentDocumentSelection
-        case .clients: nil
+        case .clients, .stock: nil
         }
     }
 
@@ -359,6 +372,18 @@ struct MainSplitView: View {
         if let url = stores.databaseURL {
             actions.showDataFolder = { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             actions.backUpNow = backUpNow
+        }
+        actions.newStockItem = newStockItem
+        if sidebar.section == .stock, let id = stockSelection, let state = stock.state(id: id) {
+            let model = stock
+            var archive: (@MainActor () -> Void)?
+            if state.movementCount > 0 { archive = archiveStockItem }
+            actions.stockItem = StockMenuActions(
+                name: state.item.name,
+                count: { model.sheet = .count(id) },
+                receive: { model.sheet = .receive(id) },
+                takeOut: { model.sheet = .takeOut(id) },
+                archive: archive)
         }
         actions.currentFilter = sidebar.section == .documents ? sidebar.documentFilter : nil
         if sidebar.section == .documents {
@@ -492,6 +517,7 @@ struct MainSplitView: View {
         if kept != documentSelection { documentSelection = kept }
         if let id = overviewSelection, !known.contains(id) { overviewSelection = nil }
         if let id = clientSelection, clients.customer(id: id) == nil { clientSelection = nil }
+        if let id = stockSelection, stock.state(id: id) == nil { stockSelection = nil }
     }
 
     /// Document ▸ Show Related Documents ▸: the chain's other documents; empty outside a chain.
@@ -563,6 +589,22 @@ struct MainSplitView: View {
     }
 
     /// Shows an issued document in Documents (the chain, a locked payment's tax document).
+    /// File ▸ New Stock Item…: the sheet opens over the Stock section.
+    private func newStockItem() {
+        show(.section(.stock))
+        stock.sheet = .newItem
+    }
+
+    /// Stock ▸ Archive “…”: the item leaves the list; Undo brings it back.
+    private func archiveStockItem() {
+        guard let id = stockSelection else { return }
+        if let problem = stock.archive(itemID: id, undoManager: undoManager) {
+            report(problem, kind: .problem)
+        } else {
+            stockSelection = nil
+        }
+    }
+
     private func openDocument(id: String) {
         show(.filter(.all))
         documentsSearch = ""

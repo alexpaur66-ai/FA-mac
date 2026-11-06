@@ -26,7 +26,7 @@ struct StatusBadge: View {
         self.init(style: state.style, detail: detail, compact: compact)
     }
 
-    private init(style: StatusStyle, detail: String?, compact: Bool) {
+    init(style: StatusStyle, detail: String? = nil, compact: Bool = false) {
         self.style = style
         self.detail = detail
         self.compact = compact

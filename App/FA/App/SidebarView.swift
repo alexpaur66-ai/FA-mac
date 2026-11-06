@@ -7,6 +7,8 @@ import SwiftUI
 struct SidebarView: View {
     @Binding var selection: SidebarItem?
     let badges: SidebarBadges
+    /// Stock's badge: the items running low; nothing at 0, no tint (§2n).
+    var stockLow = 0
 
     /// The Documents row starts expanded; whether it is kept per window.
     @SceneStorage("sidebar.documentsExpanded") private var documentsExpanded = true
@@ -27,6 +29,10 @@ struct SidebarView: View {
             }
             row(.clients)
             row(.payments)
+            Label { Text(AppSection.stock.title) } icon: { Image(systemName: AppSection.stock.symbol) }
+                .badge(stockLow)
+                .accessibilityValue(stockLow > 0 ? Text(L.stockRunningLow(stockLow)) : Text(verbatim: ""))
+                .tag(SidebarItem.section(.stock))
         }
         .listStyle(.sidebar)
     }
