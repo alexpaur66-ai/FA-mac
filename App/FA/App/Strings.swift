@@ -44,6 +44,7 @@ enum L {
     static let closeAdvanceUnpaid = r("menu.closeAdvanceUnpaid", "Close Advance as Unpaid…")
     static let markForCreditNote = r("menu.markForCreditNote", "Mark for Credit Note…")
     static let deleteDraft = r("menu.deleteDraft", "Delete Draft")
+    static func deleteDraftsCount(_ count: Int) -> LocalizedStringResource { r("menu.deleteDraftsCount", "Delete \(count) Drafts") }
     static let mainWindow = r("menu.mainWindow", "Main Window")
     static let biggerText = r("menu.biggerText", "Bigger Text")
     static let smallerText = r("menu.smallerText", "Smaller Text")
@@ -157,6 +158,10 @@ enum L {
     static func lockLine(_ issued: String) -> LocalizedStringResource {
         r("document.lockLine", "Issued \(issued) · locked. Corrections via credit note (Phase 2).")
     }
+    /// The lock line with the stored issue time (screens-flows.md §2b): "Issued 5. 11. 2026 at 19:02 · locked. …".
+    static func lockLineAt(_ issued: String, _ time: String) -> LocalizedStringResource {
+        r("document.lockLineAt", "Issued \(issued) at \(time) · locked. Corrections via credit note (Phase 2).")
+    }
     static let paymentsSection = r("document.payments", "Payments")
     static let paid = r("document.paid", "Paid")
     static let outstanding = r("document.outstanding", "Outstanding")
@@ -221,6 +226,10 @@ enum L {
     static let languageEnglish = r("language.english", "Czech + English")
     static let clientOpenBalance = r("client.openBalance", "Open balance")
     static let clientInvoicedThisYear = r("client.invoicedThisYear", "Invoiced this year")
+    /// The Open balance tile's second line while part of it is overdue: "1 200,00 € overdue" (lean pass shell-21).
+    static func clientOverdueAmount(_ amount: String) -> LocalizedStringResource {
+        r("client.overdueAmount", "\(amount) overdue")
+    }
     static let clientDocuments = r("client.documents", "Documents")
     static let invalidICO = r("validation.ico", "IČO is not valid (8 digits with a check digit).")
     static let invalidVATID = r("validation.vatID", "VAT ID is not valid (country code and number, for example CZ12345678).")

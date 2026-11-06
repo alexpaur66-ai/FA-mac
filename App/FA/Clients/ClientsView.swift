@@ -197,8 +197,8 @@ struct ClientDetailView: View {
             VStack(alignment: .leading, spacing: Spacing.l) {
                 header(customer)
                 HStack(spacing: Spacing.l) {
-                    figure(L.clientOpenBalance, row.open)
-                    figure(L.colOverdue, row.overdue)
+                    // Two figures, no Overdue tile: the open balance says in words what of it is overdue.
+                    figure(L.clientOpenBalance, row.open, overdue: row.overdue)
                     figure(L.clientInvoicedThisYear, invoicedThisYear(own))
                 }
                 Text(L.clientDocuments).textRole(.sectionTitle)
@@ -293,10 +293,17 @@ struct ClientDetailView: View {
         }
     }
 
-    private func figure(_ title: LocalizedStringResource, _ monies: [Money]) -> some View {
+    private func figure(_ title: LocalizedStringResource, _ monies: [Money], overdue: [Money] = []) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title).textRole(.label)
             MoneyListText(monies: monies, locale: locale, role: .amountStrong)
+            let overdueSums = MoneyList.sums(overdue)
+            if !overdueSums.isEmpty {
+                let amounts = overdueSums
+                    .map { MoneyText.format($0.amount, currency: $0.currency.code, locale: locale) }
+                    .joined(separator: " + ")
+                Text(L.clientOverdueAmount(amounts)).textRole(.rowSecondary)
+            }
         }
         .padding(Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)

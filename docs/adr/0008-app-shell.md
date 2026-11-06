@@ -98,7 +98,8 @@ existing data to import.
   and the client page), and so is the Client menu: its items are File ▸ New Invoice / New Advance Invoice
   (which name the client in client context), Duplicate (the client's last invoice) and Edit Client “…”….
   Help ▸ Getting Started and Window ▸ Main Window stay.
-- Payments keeps its selection per window and lists Date · Client · Document · Amount · Note, with search.
+- Payments keeps its selection per window and lists Date · Client · Document · Amount · Note, with search;
+  as in Documents, a selection the search hides is dropped, so ⌫ and the menus act only on visible rows.
 - The client form has a country pop-up and a VAT treatment pop-up; new clients default to EUR, 14 days
   and EU reverse charge (decision of 5 Nov 2026). The company's term and footer live in Documents & PDF.
 - The Numbering pane and the series sheet compare the variable symbols and the document numbers of a

@@ -159,17 +159,15 @@ struct DocumentsView: View {
             if let paymentAction = actions.paymentAction {
                 Button { paymentAction() } label: { Text(actions.paymentTitle) }
             }
-            if let createFinalInvoice = actions.createFinalInvoice {
-                Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
-            }
+            // At most one create item, the chain's next step (screens-flows.md §2b): a payment waiting for
+            // its tax document comes before the final invoice. The Document menu may show both.
             if let createTaxDocument = actions.createTaxDocument {
                 Button { createTaxDocument() } label: { Text(L.createTaxDocumentForPayment) }
+            } else if let createFinalInvoice = actions.createFinalInvoice {
+                Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
             }
             if let duplicate = actions.duplicate {
                 Button { duplicate() } label: { Text(actions.duplicateSourceNumber.map { L.duplicateNumbered($0) } ?? L.duplicate) }
-            }
-            if let showClient = actions.showClient {
-                Button { showClient() } label: { Text(L.showClient) }
             }
             if actions.closeAdvanceAction != nil || actions.creditNoteAction != nil {
                 Divider()
@@ -187,7 +185,7 @@ struct DocumentsView: View {
         } else if ids.count > 1 {
             let drafts = ids.filter { documents.state(id: $0)?.summary.status == .draft }
             if !drafts.isEmpty {
-                Button(role: .destructive) { deleteDrafts(Array(drafts)) } label: { Text(L.deleteDraft) }
+                Button(role: .destructive) { deleteDrafts(Array(drafts)) } label: { Text(Count.deleteDrafts(drafts.count)) }
             }
         }
     }

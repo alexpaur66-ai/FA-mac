@@ -106,6 +106,8 @@ struct MainSplitView: View {
         }
         .fileImporter(isPresented: $ratesImporting, allowedContentTypes: RateFileTypes.allowed, allowsMultipleSelection: false) { result in
             guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
+            // An open draft takes the imported rate at once, as the editor's own rate form does.
+            if outcome.count != nil { editor?.refreshRate() }
             report(outcome.line, kind: outcome.count == nil ? .error : .success)
         }
         .onChange(of: documents.restoreOutcome) { _, outcome in
@@ -122,8 +124,12 @@ struct MainSplitView: View {
                 documentSelection = [id]
             }
         }
-        // A client created or edited from the sheet must reach the open editor's Client picker.
-        .sheet(item: $sheet, onDismiss: { editor?.refreshReferenceData() }) { sheet in
+        // A client created or edited from the sheet must reach the open editor's Client picker, and a rate
+        // imported in the Exchange Rates sheet its rate form.
+        .sheet(item: $sheet, onDismiss: {
+            editor?.refreshReferenceData()
+            editor?.refreshRate()
+        }) { sheet in
             sheetView(sheet)
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in

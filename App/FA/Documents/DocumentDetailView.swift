@@ -68,6 +68,10 @@ struct DocumentDetailView: View {
         .task(id: LoadKey(id: documentID, states: documents.states, pdfVersion: pdfVersion.wrappedValue)) {
             load()
         }
+        // The view keeps its identity across issued documents: each one opens with Activity collapsed.
+        .onChange(of: documentID) {
+            activityExpanded = false
+        }
         .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
@@ -159,7 +163,7 @@ struct DocumentDetailView: View {
             figures(state)
             if summary.status == .issued {
                 Label {
-                    Text(L.lockLine(summary.issueDate.formatted(locale)))
+                    Text(lockLine(summary))
                 } icon: {
                     Image(systemName: "lock.fill")
                 }
@@ -186,6 +190,16 @@ struct DocumentDetailView: View {
                 pdfSection
             }
         }
+    }
+
+    /// "Issued 5. 11. 2026 at 19:02 · locked. …" with the stored issue time; the date alone when the
+    /// summary has no issue stamp or it cannot be parsed.
+    private func lockLine(_ summary: DocumentSummary) -> LocalizedStringResource {
+        let day = summary.issueDate.formatted(locale)
+        guard let stamp = summary.issuedAt, let issued = try? Date(stamp, strategy: .iso8601) else {
+            return L.lockLine(day)
+        }
+        return L.lockLineAt(day, issued.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale)))
     }
 
     /// What a final invoice deducts: its gross before deductions minus its amount due, without what it lists
@@ -549,8 +563,8 @@ enum DocumentLinks {
     }
 }
 
-/// The issued view's Activity (design-system.md §8.15): one sentence per event, newest first, with its
-/// time; shown in a collapsed disclosure between the payments and the PDF.
+/// The issued view's Activity (design-system.md §8.15, screens-flows.md §2b): one sentence per event,
+/// newest first, with its time, text only; shown in a collapsed disclosure between the payments and the PDF.
 struct DocumentActivityList: View {
     let events: [AuditEvent]
     let currency: Currency
@@ -559,16 +573,9 @@ struct DocumentActivityList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             ForEach(events.reversed()) { event in
-                let line = activity(event, currency: currency)
-                Label {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text(verbatim: line.text).textRole(.body).textSelection(.enabled)
-                        Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
-                    }
-                } icon: {
-                    Image(systemName: line.symbol)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(verbatim: activity(event, currency: currency)).textRole(.body).textSelection(.enabled)
+                    Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
                 }
                 .help(Text(verbatim: Self.timestamp(event.at, locale: locale, full: true)))
                 .accessibilityElement(children: .combine)
@@ -577,9 +584,9 @@ struct DocumentActivityList: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// One audit event as a sentence with its kind symbol (design-system.md §8.15). An action the shell
+    /// One audit event as a sentence, with no kind symbol (design-system.md §8.15). An action the shell
     /// does not know shows its key.
-    private func activity(_ event: AuditEvent, currency: Currency) -> (symbol: String, text: String) {
+    private func activity(_ event: AuditEvent, currency: Currency) -> String {
         let details = event.details ?? [:]
         func paymentKind() -> String {
             let raw = details["kind"] ?? ""
@@ -587,34 +594,34 @@ struct DocumentActivityList: View {
         }
         switch event.action {
         case "issue":
-            return ("lock.fill", String(localized: L.activityIssued(details["number"] ?? "")))
+            return String(localized: L.activityIssued(details["number"] ?? ""))
         case "payment":
             let raw = details["amount"] ?? ""
             let amount = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX"))
                 .map { MoneyText.format($0, currency: currency.code, locale: locale) } ?? raw
-            return ("banknote", String(localized: L.activityPayment(paymentKind(), amount)))
+            return String(localized: L.activityPayment(paymentKind(), amount))
         case "paymentDeleted":
-            return ("banknote", String(localized: L.activityPaymentDeleted(paymentKind())))
+            return String(localized: L.activityPaymentDeleted(paymentKind()))
         case "receiptAttached":
-            return (Symbols.receipt, String(localized: L.activityReceiptAttached))
+            return String(localized: L.activityReceiptAttached)
         case "close":
             let reason = details["reason"] ?? ""
             if details["kind"] == DocumentClosureKind.markedForCreditNote.rawValue {
-                return ("flag", String(localized: L.activityMarked(reason)))
+                return String(localized: L.activityMarked(reason))
             }
-            return ("xmark.circle", String(localized: L.activityClosed(reason)))
+            return String(localized: L.activityClosed(reason))
         case "reopen":
-            return ("arrow.uturn.backward", String(localized: L.activityReopened))
+            return String(localized: L.activityReopened)
         case "pdf":
-            return ("doc.richtext", String(localized: L.activityPDF))
+            return String(localized: L.activityPDF)
         case "pdfSaved":
-            return ("square.and.arrow.up", String(localized: L.activityPDFSaved(details["path"] ?? "")))
+            return String(localized: L.activityPDFSaved(details["path"] ?? ""))
         case "delete":
-            return ("trash", String(localized: L.activityDeleted))
+            return String(localized: L.activityDeleted)
         case "create":
-            return ("square.and.pencil", String(localized: L.activityDraftCreated))
+            return String(localized: L.activityDraftCreated)
         default:
-            return ("circle", event.action)
+            return event.action
         }
     }
 

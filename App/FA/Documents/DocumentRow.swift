@@ -259,6 +259,11 @@ enum Count {
         String(localized: L.overdueCount(count))
     }
 
+    /// The several-rows context menu: "Delete 3 Drafts" (screens-flows.md §2b).
+    static func deleteDrafts(_ count: Int) -> String {
+        count == 1 ? String(localized: L.deleteDraft) : String(localized: L.deleteDraftsCount(count))
+    }
+
     static func clientDocuments(_ count: Int) -> String {
         count == 1 ? String(localized: L.clientDocumentsCountOne) : String(localized: L.clientDocumentsCount(count))
     }
