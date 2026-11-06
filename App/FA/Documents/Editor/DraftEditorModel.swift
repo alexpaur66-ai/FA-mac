@@ -148,7 +148,10 @@ struct NumberCell: Hashable {
     /// True once the user picked an explicit tax point; otherwise the tax point follows the issue date.
     private(set) var taxPointExplicit = false
     private(set) var customers: [Customer] = []
+    /// The series that numbers the draft's kind (its Settings ▸ Numbering section, set-09): one or none.
     private(set) var series: [StoredNumberSeries] = []
+    /// Saša confirmed the number series in Settings ▸ Numbering; until then Issue is blocked (set-09).
+    private(set) var numberingConfirmed = true
     private(set) var profile: CompanyProfile?
     private(set) var treatmentChoice: TreatmentChoice = .czechVAT
     /// The exemption reference typed in the header, kept while another treatment is selected.
@@ -214,7 +217,7 @@ struct NumberCell: Hashable {
             startedOn = dating?.createdAt.map { CalendarDay($0, in: .current) }
             customers = try stores.customers.all()
             profile = try stores.profile.load()
-            series = try stores.series.series(for: document.kind)
+            loadSeries(for: document.kind)
             refreshRecentCustomers()
             if let first = document.lines.first?.treatment {
                 treatmentChoice = TreatmentChoice(first)
@@ -472,7 +475,7 @@ struct NumberCell: Hashable {
         guard !discarded, let document else { return }
         if let fresh = try? stores.customers.all() { customers = fresh }
         if let fresh = try? stores.profile.load() { profile = fresh }
-        series = (try? stores.series.series(for: document.kind)) ?? []
+        loadSeries(for: document.kind)
         refreshRecentCustomers()
         refreshSnapshots()
         refreshReceiptPayment()
@@ -543,7 +546,7 @@ struct NumberCell: Hashable {
                 doc.paidAdvances = nil
             }
         }
-        series = (try? stores.series.series(for: kind)) ?? []
+        loadSeries(for: kind)
         refreshDeductionConflicts()
         refreshRate()
     }
@@ -1186,6 +1189,14 @@ struct NumberCell: Hashable {
         errors.filter { !(rateIsMissing && $0.code == .exchangeRateMissing) }
     }
 
+    /// The section's series for `kind` and whether the series are confirmed; a read failure shows as no
+    /// series, which blocks Issue with its own row.
+    private func loadSeries(for kind: DocumentKind) {
+        let stored = try? stores.series.issuingSeries(for: kind)
+        series = stored.map { [$0] } ?? []
+        numberingConfirmed = (try? stores.series.isNumberingConfirmed()) ?? false
+    }
+
     /// Why the series cannot number the draft on its issue date (an issue date before the series year).
     func numberingProblem(seriesID: String?) -> String? {
         guard let document, let seriesID else { return nil }
@@ -1202,10 +1213,14 @@ struct NumberCell: Hashable {
 
     /// Every ⛔ row the review sheet shows for `seriesID`; the readiness chip shows the same count.
     func blockingCount(seriesID: String?) -> Int {
-        blockingErrors.count + (rateIsMissing ? 1 : 0) + (series.isEmpty ? 1 : 0) + deductionConflicts.count
+        blockingErrors.count + (rateIsMissing ? 1 : 0) + (series.isEmpty ? 1 : 0) + (numberingUnconfirmed ? 1 : 0)
+            + deductionConflicts.count
             + (numberingProblem(seriesID: seriesID) == nil ? 0 : 1) + invalidCellMessages.count + (receiptPaymentMissing ? 1 : 0)
             + (receiptTotalDiffers ? 1 : 0)
     }
+
+    /// The series exist but Saša has not confirmed them yet: "Confirm your number series" blocks Issue.
+    var numberingUnconfirmed: Bool { !series.isEmpty && !numberingConfirmed }
 
     func predictedNumber(seriesID: String) -> String? {
         guard let document else { return nil }

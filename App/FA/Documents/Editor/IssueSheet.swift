@@ -27,6 +27,8 @@ struct IssueSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var seriesID: String?
+    @AppStorage(SettingsPane.storageKey) private var settingsPane: SettingsPane = .general
+    @Environment(\.openSettings) private var openSettings
     /// The ⚠ rows ticked so far; a row whose words change is a new row and needs its own tick.
     @State private var checkedIDs: Set<String> = []
     @State private var issuing = false
@@ -87,9 +89,19 @@ struct IssueSheet: View {
             // A floating issue date is the day of Issue (docs-28): the sheet shows the day it will issue with.
             model.floatIssueDate()
             model.refreshRate()
-            if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
-                seriesID = model.series.first?.id
-            }
+            syncSeriesID()
+        }
+        // Settings ▸ Numbering saved while the sheet stayed open (Open Settings… on the no-series row): the
+        // series read again must also be the one Issue uses.
+        .onChange(of: model.series.map(\.id)) { _, _ in
+            syncSeriesID()
+        }
+    }
+
+    /// Keeps `seriesID` on a series the model still offers.
+    private func syncSeriesID() {
+        if seriesID == nil || !model.series.contains(where: { $0.id == seriesID }) {
+            seriesID = model.series.first?.id
         }
     }
 
@@ -425,7 +437,12 @@ struct IssueSheet: View {
                 if model.series.isEmpty {
                     HStack(spacing: Spacing.m) {
                         InlineMessage(L.noSeriesForKind)
-                        SettingsLink { Text(L.openSettings) }
+                        Button { openNumbering() } label: { Text(L.openSettings) }
+                    }
+                } else if model.numberingUnconfirmed {
+                    HStack(spacing: Spacing.m) {
+                        InlineMessage(L.confirmNumberSeries)
+                        Button { openNumbering() } label: { Text(L.fillIn) }
                     }
                 }
             }
@@ -472,6 +489,13 @@ struct IssueSheet: View {
                                  text: String(localized: L.floatedIntoLaterMonth(started.formatted(locale), document.issueDate.formatted(locale)))))
         }
         return rows
+    }
+
+    /// Fill in… and Open Settings… open Settings on the Numbering pane (set-09); the sheet stays, and its
+    /// rows are read again when it next appears.
+    private func openNumbering() {
+        settingsPane = .numbering
+        openSettings()
     }
 
     private func checkedBinding(_ id: String) -> Binding<Bool> {

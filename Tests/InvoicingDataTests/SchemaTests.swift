@@ -9,12 +9,12 @@ import InvoicingCore
         let database = try AppDatabase()
         let tables = ["companyProfile", "customer", "numberSeries", "document", "documentPayment", "exchangeRate",
                       "bankStatement", "bankTransaction", "advanceDeduction", "documentClosure", "auditEvent", "documentPDF",
-                      "paidAdvance"]
+                      "paidAdvance", "appState"]
         for table in tables {
             let exists = try database.queue.read { db in try db.tableExists(table) }
             #expect(exists, "missing table \(table)")
         }
-        #expect(InvoicingData.schemaVersion == 4)
+        #expect(InvoicingData.schemaVersion == 5)
         let foreignKeys = try database.queue.read { db in try Bool.fetchOne(db, sql: "PRAGMA foreign_keys") }
         #expect(foreignKeys == true)
     }

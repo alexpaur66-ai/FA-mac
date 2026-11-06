@@ -107,6 +107,28 @@ public struct DocumentNumberPattern: Hashable, Sendable, CustomStringConvertible
         return Int(digits)
     }
 
+    /// Reads a number typed as the last one issued in another tool (Settings ▸ Numbering, set-09): "FV
+    /// 2026-0041", or "2026-0041" without the pattern's leading text. A pattern with a year tries
+    /// `latestYear` and the ten years before it; one without a year reads the counter alone. Nil when the
+    /// text does not match the pattern.
+    public func parseIssuedNumber(_ text: String, latestYear: Int) -> (year: Int, counter: Int)? {
+        let typed = text.trimmingWhitespace()
+        guard !typed.isEmpty else { return nil }
+        var candidates = [typed]
+        if case .literal(let lead)? = segments.first, !typed.hasPrefix(lead) {
+            candidates.append(lead + typed)
+        }
+        let years = containsYear ? Array(stride(from: latestYear, through: max(1, latestYear - 10), by: -1)) : [latestYear]
+        for candidate in candidates {
+            for year in years {
+                if let counter = parseCounter(from: candidate, year: year) {
+                    return (year, counter)
+                }
+            }
+        }
+        return nil
+    }
+
     public var description: String { template }
 }
 

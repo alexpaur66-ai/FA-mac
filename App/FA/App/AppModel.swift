@@ -48,7 +48,11 @@ final class AppModel {
             } else {
                 database = try AppDatabase()
             }
-            stores = Stores(database: database, databaseURL: url)
+            let opened = Stores(database: database, databaseURL: url)
+            // A new database gets the three fixed number series; an existing one keeps its own (set-09). A
+            // failure here leaves Settings ▸ Numbering and Issue to say what is missing.
+            _ = try? opened.series.ensureDefaultSeries(year: CalendarDay(Date(), in: .current).year)
+            stores = opened
             openError = nil
         } catch {
             stores = nil

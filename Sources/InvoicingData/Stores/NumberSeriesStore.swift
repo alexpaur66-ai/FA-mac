@@ -62,10 +62,185 @@ public struct NumberSeriesStore: Sendable {
         return try stored.series.peek(on: day)
     }
 
+    // MARK: The three fixed series (set-09)
+
+    /// The series a document of `kind` is numbered from: its section's series, when that numbers the kind.
+    /// When it does not (an older install whose locked invoice series numbers invoices only, next to its
+    /// own final-invoice series), the series that numbered the kind before carries on: preferably one no
+    /// section shows, its counter untouched. A section without a series numbers nothing.
+    public func issuingSeries(for kind: DocumentKind) throws -> StoredNumberSeries? {
+        try database.queue.read { (db: Database) -> StoredNumberSeries? in
+            let sections = try Self.sections(db)
+            guard let stored = sections[NumberingSection(kind)] else { return nil }
+            if stored.numbers(kind) { return stored }
+            let mapped = Set(sections.values.map(\.id))
+            let all = try NumberSeriesRecord.order(Column("name")).fetchAll(db).map { try $0.stored() }
+            let candidates = all.filter { $0.numbers(kind) }
+            return candidates.first(where: { !mapped.contains($0.id) }) ?? candidates.first
+        }
+    }
+
+    /// Each section's series. First a series that has already issued numbers (with the section's default
+    /// id, or numbering the section's first kind): the latest issuing year, then the highest counter, so an
+    /// updated install keeps numbering where it stopped. Else the one with the section's default id, else
+    /// the first series (by name) that numbers the section's first kind. No two sections share a series.
+    public func sections() throws -> [NumberingSection: StoredNumberSeries] {
+        try database.queue.read { db in try Self.sections(db) }
+    }
+
+    static func sections(_ db: Database) throws -> [NumberingSection: StoredNumberSeries] {
+        let all = try NumberSeriesRecord.order(Column("name")).fetchAll(db).map { try $0.stored() }
+        let defaultIDs = Set(NumberingSection.allCases.map(\.rawValue))
+        var result: [NumberingSection: StoredNumberSeries] = [:]
+        var taken: Set<String> = []
+        // A default id belongs to its own section; other series match by the section's first kind.
+        let candidates: (NumberingSection, Set<String>) -> [StoredNumberSeries] = { section, used in
+            all.filter { series in
+                guard !used.contains(series.id) else { return false }
+                if series.id == section.rawValue { return true }
+                return !defaultIDs.contains(series.id) && series.numbers(section.primaryKind)
+            }
+        }
+        for section in NumberingSection.allCases {
+            let issued = candidates(section, taken).filter { $0.series.lastIssuedYear != nil }
+            var best: StoredNumberSeries?
+            for series in issued {
+                guard let current = best else {
+                    best = series
+                    continue
+                }
+                let rank = (series.series.lastIssuedYear ?? 0, series.series.lastCounter)
+                let currentRank = (current.series.lastIssuedYear ?? 0, current.series.lastCounter)
+                if rank > currentRank { best = series }
+            }
+            if let best {
+                result[section] = best
+                taken.insert(best.id)
+            }
+        }
+        for section in NumberingSection.allCases where result[section] == nil {
+            if let byID = all.first(where: { $0.id == section.rawValue && !taken.contains($0.id) }) {
+                result[section] = byID
+                taken.insert(byID.id)
+            }
+        }
+        for section in NumberingSection.allCases where result[section] == nil {
+            if let byKind = candidates(section, taken).first {
+                result[section] = byKind
+                taken.insert(byKind.id)
+            }
+        }
+        return result
+    }
+
+    /// Creates the default series of every section that has none (a new database gets all three; an
+    /// existing one keeps its series and gets no second set), in `year`. Returns the ids created.
+    @discardableResult
+    public func ensureDefaultSeries(year: Int, now: Date = Date()) throws -> [String] {
+        try database.queue.write { db in
+            let mapped = try Self.sections(db)
+            var created: [String] = []
+            for section in NumberingSection.allCases where mapped[section] == nil {
+                guard try NumberSeriesRecord.fetchOne(db, key: section.rawValue) == nil else { continue }
+                let series = try DocumentNumberSeries(id: section.rawValue, pattern: DocumentNumberPattern(template: section.defaultTemplate),
+                                                      year: year, variableSymbolPrefix: section.variableSymbolPrefix)
+                let record = NumberSeriesRecord(StoredNumberSeries(name: section.defaultName, kinds: section.kinds, series: series))
+                try record.insert(db)
+                try AuditLog.append(db, entity: "numberSeries", id: section.rawValue, action: "create",
+                                    details: ["template": record.template, "lastCounter": "0"], at: Timestamps.string(now))
+                created.append(section.rawValue)
+            }
+            return created
+        }
+    }
+
+    /// True once Saša saved Settings ▸ Numbering, or a section's series has already issued a number (an
+    /// install updated after real issuing). Until then Issue shows "Confirm your number series".
+    public func isNumberingConfirmed() throws -> Bool {
+        try database.queue.read { db in
+            if try String.fetchOne(db, sql: "SELECT value FROM appState WHERE key = ?", arguments: [Self.confirmedKey]) != nil {
+                return true
+            }
+            return try Self.sections(db).values.contains { $0.series.lastIssuedYear != nil }
+        }
+    }
+
+    /// Records that Saša confirmed the number series (Save in Settings ▸ Numbering).
+    public func confirmNumbering(now: Date = Date()) throws {
+        try database.queue.write { db in
+            try db.execute(sql: "INSERT OR REPLACE INTO appState (key, value) VALUES (?, ?)",
+                           arguments: [Self.confirmedKey, Timestamps.string(now)])
+            try AuditLog.append(db, entity: "numberSeries", id: "all", action: "confirm", at: Timestamps.string(now))
+        }
+    }
+
+    static let confirmedKey = "numberingConfirmed"
+
     public func delete(id: String, now: Date = Date()) throws {
         try database.queue.write { db in
             guard try NumberSeriesRecord.deleteOne(db, key: id) else { throw DataError.seriesNotFound(id) }
             try AuditLog.append(db, entity: "numberSeries", id: id, action: "delete", at: Timestamps.string(now))
+        }
+    }
+}
+
+/// The three fixed series of Settings ▸ Numbering (set-09), named by their default ids.
+public enum NumberingSection: String, CaseIterable, Hashable, Sendable {
+    /// FV {YYYY}-{NNNN}, VS prefix 1: invoices and final invoices.
+    case invoices = "invoice"
+    /// ZF {YYYY}-{NNNN}, VS prefix 2: advance invoices.
+    case advances = "advance"
+    /// DD {YYYY}-{NNNN}, no prefix: tax documents for received payments, which carry no variable symbol.
+    case paymentReceipts = "paymentReceipt"
+
+    public init(_ kind: DocumentKind) {
+        switch kind {
+        case .invoice, .finalInvoice: self = .invoices
+        case .advanceRequest: self = .advances
+        case .paymentTaxDocument: self = .paymentReceipts
+        }
+    }
+
+    public var kinds: Set<DocumentKind> {
+        switch self {
+        case .invoices: [.invoice, .finalInvoice]
+        case .advances: [.advanceRequest]
+        case .paymentReceipts: [.paymentTaxDocument]
+        }
+    }
+
+    /// The kind an older series must number to be mapped to this section.
+    var primaryKind: DocumentKind {
+        switch self {
+        case .invoices: .invoice
+        case .advances: .advanceRequest
+        case .paymentReceipts: .paymentTaxDocument
+        }
+    }
+
+    public var defaultTemplate: String {
+        switch self {
+        case .invoices: "FV {YYYY}-{NNNN}"
+        case .advances: "ZF {YYYY}-{NNNN}"
+        case .paymentReceipts: "DD {YYYY}-{NNNN}"
+        }
+    }
+
+    /// The fixed variable-symbol prefix (ADR 0003 addendum); nil for DD.
+    public var variableSymbolPrefix: String? {
+        switch self {
+        case .invoices: "1"
+        case .advances: "2"
+        case .paymentReceipts: nil
+        }
+    }
+
+    /// The stored name of a series the database creates (the pane shows its own section headers).
+    public var defaultName: String {
+        switch self {
+        case .invoices: "Invoices"
+        case .advances: "Advance invoices"
+        case .paymentReceipts: "Tax documents for received payments"
         }
     }
 }

@@ -659,6 +659,7 @@ struct SetupStatus: Equatable {
 
     var hasProfile = false
     var hasBankAccount = false
+    /// The number series are confirmed: Settings ▸ Numbering was saved, or a series already issued (set-09).
     var hasSeries = false
 
     /// Company, bank account and series; rates are typed per document and never block (decision of 5 Nov 2026).
@@ -678,7 +679,7 @@ struct SetupStatus: Equatable {
             status.hasProfile = true
             status.hasBankAccount = !profile.bankConnections.isEmpty
         }
-        status.hasSeries = !((try? stores.series.all()) ?? []).isEmpty
+        status.hasSeries = (try? stores.series.isNumberingConfirmed()) ?? false
         return status
     }
 }
