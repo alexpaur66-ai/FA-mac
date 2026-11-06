@@ -81,18 +81,10 @@ struct OverviewView: View {
             if newValue == nil { selectedQueueItem = nil }
         }
         .toolbar {
+            // One plain New Invoice button and no search (design-system.md §8.11); ⇧⌘N makes an advance.
             ToolbarItem {
-                Menu {
-                    Button { newDocument(.invoice) } label: {
-                        Label { Text(L.newInvoice) } icon: { Image(systemName: DocumentKind.invoice.symbol) }
-                    }
-                    Button { newDocument(.advanceRequest) } label: {
-                        Label { Text(L.newAdvance) } icon: { Image(systemName: DocumentKind.advanceRequest.symbol) }
-                    }
-                } label: {
-                    Label { Text(L.new) } icon: { Image(systemName: "plus") }
-                } primaryAction: {
-                    newDocument(.invoice)
+                Button { newDocument(.invoice) } label: {
+                    Label { Text(L.newInvoice) } icon: { Image(systemName: "plus") }
                 }
                 .help(Text(L.newInvoiceHelp))
             }
@@ -209,7 +201,7 @@ struct OverviewView: View {
         // The This month filter is the month of today; for another month the tile has no list to open.
         let isCurrentMonth = month.year == documents.today.year && month.month == documents.today.month
         var issuedAction: (@MainActor () -> Void)?
-        if isCurrentMonth { issuedAction = { show(.filter(.thisMonth)) } }
+        if isCurrentMonth { issuedAction = { show(.filter(.all)) } }
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.xxl, alignment: .top)],
                          alignment: .leading, spacing: Spacing.xxl) {
             Tile(symbol: "clock", title: L.tileUnpaid, action: { show(.filter(.unpaid)) }) {
@@ -221,7 +213,7 @@ struct OverviewView: View {
                     MoneyListText(monies: figures.unpaidAdvances, locale: locale, role: .amountSecondary)
                 }
             }
-            Tile(symbol: "exclamationmark.circle", title: L.tileOverdue, action: { show(.filter(.overdue)) }) {
+            Tile(symbol: "exclamationmark.circle", title: L.tileOverdue, action: { show(.filter(.unpaid)) }) {
                 KPIMoney(monies: figures.overdue, locale: locale)
             } lines: {
                 HStack(spacing: Spacing.xs) {

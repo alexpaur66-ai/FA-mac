@@ -238,13 +238,6 @@ enum MoneyList {
         }
         return codes.compactMap { totals[$0] }
     }
-
-    /// "18 400,00 € + 35 000,00 Kč"; a dash when there is nothing.
-    static func text(_ monies: [Money], locale: Locale) -> String {
-        let sums = sums(monies)
-        guard !sums.isEmpty else { return "—" }
-        return sums.map { MoneyText.format($0.amount, currency: $0.currency.code, locale: locale) }.joined(separator: " + ")
-    }
 }
 
 /// Counts in English, with the singular handled in code: the app has no string catalog with plural rules.
@@ -259,6 +252,11 @@ enum Count {
 
     static func ratesImported(_ count: Int) -> String {
         count == 1 ? String(localized: L.importedRatesOne) : String(localized: L.importedRates(count))
+    }
+
+    /// "3 overdue": the same word for one and many.
+    static func overdue(_ count: Int) -> String {
+        String(localized: L.overdueCount(count))
     }
 
     static func clientDocuments(_ count: Int) -> String {

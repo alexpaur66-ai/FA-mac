@@ -1,5 +1,5 @@
-// The ČNB file import shared by the Rates section and the editor's rate form (screens-flows.md §2c, §2g),
-// and the one place that names a rate's source.
+// The ČNB file import shared by File ▸ Import ČNB Rates…, the Exchange Rates sheet and the editor's rate
+// form (screens-flows.md §2c, §2g), and the one place that names a rate's source.
 
 import Foundation
 import InvoicingCore
@@ -30,7 +30,7 @@ enum RateSourceName {
                 return (String(localized: L.rateImportFailed), nil)
             }
             let count = try isYearlyFile(text) ? stores.rates.importYearly(text) : stores.rates.importDaily(text)
-            return (String(localized: L.importedRates(count)), count)
+            return (Count.ratesImported(count), count)
         } catch {
             return (ErrorText.message(error, locale: locale), nil)
         }

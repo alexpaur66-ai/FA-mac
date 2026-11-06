@@ -10,7 +10,6 @@ struct DocumentsView: View {
     let documents: DocumentListModel
     let filter: DocumentSmartFilter
     @Binding var selection: Set<String>
-    @Binding var inspectorPresented: Bool
     /// The search text; the window owns it so that opening a draft can clear it.
     @Binding var search: String
     /// The draft open in the editor: its row stays listed whatever the search says.
@@ -28,11 +27,6 @@ struct DocumentsView: View {
         documents.rows(for: filter)
             .filter { $0.matches(search: search) || $0.id == editingID }
             .sorted(using: sortOrder)
-    }
-
-    /// The one selected document, for the toolbar's Record Payment.
-    private var singleSelection: String? {
-        selection.count == 1 ? selection.first : nil
     }
 
     /// The selection without the documents the filter or the search hides, so the detail column, the
@@ -54,14 +48,10 @@ struct DocumentsView: View {
             } else {
                 table(rows)
             }
-            if !selection.isEmpty {
-                Divider()
-                selectionBar(rows.filter { selection.contains($0.id) })
-            }
         }
         .navigationTitle(Text(L.documents))
-        .navigationSubtitle(Text(verbatim: String(localized: filter.title) + " · " + String(rows.count)))
-        .searchable(text: $search, placement: .toolbar)
+        .navigationSubtitle(Text(subtitle(count: rows.count)))
+        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchDocuments))
         .onChange(of: filter, initial: true) { _, newFilter in
             sortOrder = newFilter.defaultSortOrder
         }
@@ -70,6 +60,15 @@ struct DocumentsView: View {
             if kept != selection { selection = kept }
         }
         .toolbar { toolbar }
+    }
+
+    /// "Unpaid · 3", and "Unpaid · 7 · 3 overdue" on Unpaid while something is overdue (screens-flows.md §1.2).
+    private func subtitle(count: Int) -> LocalizedStringResource {
+        let name = String(localized: filter.title)
+        let overdue = documents.overdueCount
+        return filter == .unpaid && overdue > 0
+            ? L.documentsSubtitleOverdue(name, count, overdue)
+            : L.documentsSubtitle(name, count)
     }
 
     private func table(_ rows: [DocumentRow]) -> some View {
@@ -157,11 +156,8 @@ struct DocumentsView: View {
     @ViewBuilder private func contextMenu(_ ids: Set<String>) -> some View {
         if ids.count == 1, let id = ids.first {
             let actions = documentActions(id)
-            if let recordPayment = actions.recordPayment {
-                Button { recordPayment() } label: { Text(L.recordPayment) }
-            }
-            if let recordRefund = actions.recordRefund {
-                Button { recordRefund() } label: { Text(L.recordRefund) }
+            if let paymentAction = actions.paymentAction {
+                Button { paymentAction() } label: { Text(actions.paymentTitle) }
             }
             if let createFinalInvoice = actions.createFinalInvoice {
                 Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
@@ -175,17 +171,14 @@ struct DocumentsView: View {
             if let showClient = actions.showClient {
                 Button { showClient() } label: { Text(L.showClient) }
             }
-            if actions.closeAdvanceUnpaid != nil || actions.markForCreditNote != nil || actions.reopen != nil {
+            if actions.closeAdvanceAction != nil || actions.creditNoteAction != nil {
                 Divider()
             }
-            if let closeAdvanceUnpaid = actions.closeAdvanceUnpaid {
-                Button { closeAdvanceUnpaid() } label: { Text(L.closeAdvanceUnpaid) }
+            if let closeAdvance = actions.closeAdvanceAction {
+                Button { closeAdvance() } label: { Text(actions.closeAdvanceTitle) }
             }
-            if let markForCreditNote = actions.markForCreditNote {
-                Button { markForCreditNote() } label: { Text(L.markForCreditNote) }
-            }
-            if let reopen = actions.reopen {
-                Button { reopen() } label: { Text(actions.reopenTitle) }
+            if let creditNote = actions.creditNoteAction {
+                Button { creditNote() } label: { Text(actions.creditNoteTitle) }
             }
             if actions.deleteDraft != nil {
                 Divider()
@@ -210,16 +203,6 @@ struct DocumentsView: View {
         .padding(.vertical, Spacing.s)
     }
 
-    /// Information only, no buttons (HIG: nothing critical in a bottom bar).
-    private func selectionBar(_ selected: [DocumentRow]) -> some View {
-        let totals = selected.compactMap { $0.summary.totalGross }
-        return Text(verbatim: String(localized: L.selectedCount(selected.count)) + " · " + MoneyList.text(totals, locale: locale))
-            .textRole(.caption)
-            .padding(.horizontal, Spacing.m)
-            .padding(.vertical, Spacing.xs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     @ViewBuilder private var emptyState: some View {
         if !search.isEmpty {
             ContentUnavailableView.search(text: search)
@@ -228,12 +211,6 @@ struct DocumentsView: View {
             Spacer()
         } else {
             switch filter {
-            case .overdue:
-                ContentUnavailableView {
-                    Label { Text(L.nothingOverdue) } icon: { Image(systemName: "checkmark.circle") }
-                } description: {
-                    Text(L.nothingOverdueDescription)
-                }
             case .drafts:
                 ContentUnavailableView {
                     Label { Text(L.noDrafts) } icon: { Image(systemName: "pencil.circle") }
@@ -253,16 +230,11 @@ struct DocumentsView: View {
                         .buttonStyle(.borderedProminent)
                 }
             case .unpaid:
+                // The one calm positive state (design-system.md §8.10).
                 ContentUnavailableView {
-                    Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
+                    Label { Text(L.nothingOverdue) } icon: { Image(systemName: "checkmark.circle") }
                 } description: {
                     Text(L.noUnpaidDescription)
-                }
-            case .thisMonth:
-                ContentUnavailableView {
-                    Label { Text(L.noMatchingDocuments) } icon: { Image(systemName: filter.symbol) }
-                } description: {
-                    Text(L.noThisMonthDescription)
                 }
             case .openAdvances:
                 ContentUnavailableView {
@@ -274,37 +246,13 @@ struct DocumentsView: View {
         }
     }
 
+    /// One plain New Invoice button beside the search (design-system.md §8.11); ⇧⌘N makes an advance.
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            // New ▾: click creates an invoice, the menu offers the other kinds (design-system.md §8.11).
-            Menu {
-                Button { newDocument(.invoice) } label: {
-                    Label { Text(L.newInvoice) } icon: { Image(systemName: DocumentKind.invoice.symbol) }
-                }
-                Button { newDocument(.advanceRequest) } label: {
-                    Label { Text(L.newAdvance) } icon: { Image(systemName: DocumentKind.advanceRequest.symbol) }
-                }
-            } label: {
-                Label { Text(L.new) } icon: { Image(systemName: "plus") }
-            } primaryAction: {
-                newDocument(.invoice)
+        ToolbarItem {
+            Button { newDocument(.invoice) } label: {
+                Label { Text(L.newInvoice) } icon: { Image(systemName: "plus") }
             }
             .help(Text(L.newInvoiceHelp))
-
-            let recordPayment = singleSelection.flatMap { documentActions($0).recordPayment }
-            Button {
-                recordPayment?()
-            } label: {
-                Label { Text(L.recordPayment) } icon: { Image(systemName: "banknote") }
-            }
-            .disabled(recordPayment == nil)
-            .help(Text(L.recordPaymentHelp))
-        }
-        ToolbarItem {
-            Button { inspectorPresented.toggle() } label: {
-                Label { Text(L.inspector) } icon: { Image(systemName: "sidebar.right") }
-            }
-            .help(Text(L.toggleInspector))
         }
     }
 }

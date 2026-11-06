@@ -1,7 +1,7 @@
 // The detail column for one issued document: the header, a closing banner, the figures, the lock line,
-// the payments and the PDF (screens-flows.md §2b). Drafts open in DraftEditorView. The window computes
-// what the document offers (`DocumentActions`) once, for the toolbar here, the Document menu and the
-// context menu, so the three never disagree.
+// the payments, the Activity and the PDF (screens-flows.md §2b); there is no inspector. Drafts open in
+// DraftEditorView. The window computes what the document offers (`DocumentActions`) once, for the toolbar
+// here, the Document menu and the context menu, so the three never disagree.
 
 import InvoicingCore
 import InvoicingData
@@ -33,6 +33,11 @@ struct DocumentDetailView: View {
     @State private var deductions: [AdvanceDeductionLink] = []
     /// A final invoice's paid-in-advance links, or the settled payments of an advance (§ 64 goods, ADR 0012).
     @State private var paidAdvanceLinks: [PaidAdvanceLink] = []
+    /// The bank account the document asks to be paid to (IBAN), shown beside the variable symbol.
+    @State private var account: String?
+    /// The document's Activity, oldest first as stored.
+    @State private var events: [AuditEvent] = []
+    @State private var activityExpanded = false
     @State private var loadError: String?
     /// The issued document's stored PDF, rendered and stored now when it has none yet (ADR 0010).
     @State private var pdf: StoredDocumentPDF?
@@ -66,32 +71,35 @@ struct DocumentDetailView: View {
         .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
-    /// The one prominent action of the issued view, trailing (screens-flows.md §2b): Record Payment while
-    /// something is left to pay, Record Refund on an overpaid document; then the chain's next step.
+    /// Fixed items (design-system.md §8.11): Duplicate, the advance's Create Final Invoice, and the one
+    /// prominent action, text only and declared last so it is trailing: Record Payment… while something is
+    /// left to pay, Record Refund… on an overpaid document. A settled document shows Duplicate only; a tax
+    /// document for a received payment shows nothing.
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            if let recordPayment = actions.recordPayment {
-                Button { recordPayment() } label: {
-                    Label { Text(L.recordPayment) } icon: { Image(systemName: "banknote") }
-                }
-                .buttonStyle(.borderedProminent)
-                .help(Text(L.recordPaymentHelp))
-            } else if let recordRefund = actions.recordRefund {
-                Button { recordRefund() } label: {
-                    Label { Text(L.recordRefund) } icon: { Image(systemName: "arrow.uturn.backward") }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            if let createFinalInvoice = actions.createFinalInvoice {
-                Button { createFinalInvoice() } label: {
-                    Label { Text(L.createFinalInvoice) } icon: { Image(systemName: Symbols.finalInvoice) }
-                }
-            }
-            if let duplicate = actions.duplicate, let source = actions.duplicateSourceNumber {
+        if let duplicate = actions.duplicate, actions.duplicateSourceNumber != nil {
+            ToolbarItem {
                 Button { duplicate() } label: {
                     Label { Text(L.duplicate) } icon: { Image(systemName: "plus.square.on.square") }
                 }
-                .help(Text(L.duplicateNumbered(source)))
+                .help(Text(L.duplicateHelp))
+            }
+        }
+        if let createFinalInvoice = actions.createFinalInvoice {
+            ToolbarItem {
+                Button { createFinalInvoice() } label: { Text(L.createFinalInvoice) }
+            }
+        }
+        if let recordPayment = actions.recordPayment {
+            ToolbarItem {
+                Button { recordPayment() } label: { Text(L.recordPayment) }
+                    .buttonStyle(.borderedProminent)
+                    .help(Text(L.recordPaymentHelp))
+            }
+        } else if let recordRefund = actions.recordRefund {
+            ToolbarItem {
+                Button { recordRefund() } label: { Text(L.recordRefund) }
+                    .buttonStyle(.borderedProminent)
+                    .help(Text(L.recordRefundHelp))
             }
         }
     }
@@ -99,13 +107,17 @@ struct DocumentDetailView: View {
     private func load() {
         do {
             payments = try stores.documents.payments(for: documentID)
-            deductions = try DocumentInspectorView.deductions(stores, state: documents.state(id: documentID))
-            paidAdvanceLinks = try DocumentInspectorView.paidAdvanceLinks(stores, state: documents.state(id: documentID))
+            deductions = try DocumentLinks.deductions(stores, state: documents.state(id: documentID))
+            paidAdvanceLinks = try DocumentLinks.paidAdvanceLinks(stores, state: documents.state(id: documentID))
+            account = try stores.documents.document(id: documentID)?.payment?.bankConnection.iban.formatted
+            events = try DocumentLinks.shownEvents(stores.audit.events(entity: "document", id: documentID))
             loadError = nil
         } catch {
             payments = []
             deductions = []
             paidAdvanceLinks = []
+            account = nil
+            events = []
             loadError = ErrorText.message(error, locale: locale)
         }
         loadPDF()
@@ -163,6 +175,14 @@ struct DocumentDetailView: View {
                 InlineMessage(loadError)
             }
             if summary.status == .issued {
+                if !events.isEmpty {
+                    DisclosureGroup(isExpanded: $activityExpanded) {
+                        DocumentActivityList(events: events, currency: summary.currency)
+                            .padding(.top, Spacing.s)
+                    } label: {
+                        Text(L.activity).textRole(.sectionTitle)
+                    }
+                }
                 pdfSection
             }
         }
@@ -254,7 +274,7 @@ struct DocumentDetailView: View {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         MoneyText(amount: -paid.amount, currency: summary.currency.code, locale: locale)
                         if !paidAdvanceLinks.isEmpty {
-                            chainLinks(DocumentInspectorView.unique(paidAdvanceLinks.map(\.advanceNumber)))
+                            chainLinks(DocumentLinks.unique(paidAdvanceLinks.map(\.advanceNumber)))
                         }
                     }
                 }
@@ -276,6 +296,12 @@ struct DocumentDetailView: View {
             GridRow {
                 Text(L.dueOn).textRole(.label)
                 DayText(summary.dueDate)
+            }
+            if let account {
+                GridRow {
+                    Text(L.account).textRole(.label)
+                    Text(verbatim: account).textRole(.amount).textSelection(.enabled)
+                }
             }
             if let symbol = summary.variableSymbol {
                 GridRow {
@@ -482,134 +508,9 @@ struct DocumentDetailView: View {
     }
 }
 
-/// The inspector: derived information only (design-system.md §8.12): payment details, payments,
-/// the document chain and the activity log, newest first.
-struct DocumentInspectorView: View {
-    let stores: Stores
-    let documents: DocumentListModel
-    let documentID: String
-    /// Shows the document with that number (the chain knows numbers only).
-    var openDocument: (@MainActor (String) -> Void)? = nil
-
-    @State private var document: Document?
-    @State private var payments: [DocumentPayment] = []
-    @State private var deductions: [AdvanceDeductionLink] = []
-    @State private var paidAdvanceLinks: [PaidAdvanceLink] = []
-    @State private var events: [AuditEvent] = []
-    @Environment(\.locale) private var locale
-
-    private struct LoadKey: Equatable {
-        let id: String
-        let states: [DocumentState]
-    }
-
-    var body: some View {
-        let state = documents.state(id: documentID)
-        let isIssued = state?.summary.status == .issued
-        List {
-            if let payment = document?.payment {
-                Section {
-                    LabeledContent {
-                        Text(verbatim: payment.bankConnection.iban.formatted).textRole(.amount).textSelection(.enabled)
-                    } label: {
-                        Text(L.account).textRole(.body)
-                    }
-                    if let symbol = payment.variableSymbol {
-                        LabeledContent {
-                            Text(verbatim: symbol.digits).textRole(.amount).textSelection(.enabled)
-                        } label: {
-                            Text(L.variableSymbol).textRole(.body)
-                        }
-                    }
-                } header: {
-                    Text(L.paymentDetails)
-                }
-            }
-            if isIssued {
-                Section {
-                    if payments.isEmpty {
-                        Text(L.noPayments).textRole(.rowSecondary)
-                    }
-                    ForEach(payments) { payment in
-                        LabeledContent {
-                            MoneyText(amount: payment.amount.amount, currency: payment.amount.currency.code, locale: locale)
-                        } label: {
-                            HStack(spacing: Spacing.xs) {
-                                DayText(payment.paidOn)
-                                Text(payment.kind.title).textRole(.rowSecondary)
-                                if payment.receiptIssued || paidAdvanceLinks.contains(where: { $0.paymentID == payment.id }) {
-                                    Image(systemName: "lock.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                        .accessibilityLabel(Text(payment.receiptIssued ? L.paymentLocked : L.paymentSettledLocked))
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text(L.paymentsSection)
-                }
-            }
-            // The advance of a tax document or a final invoice, the final invoices that deducted an advance,
-            // the payment tax documents a final invoice deducts: each a link to that document.
-            let chain = chainNumbers(state)
-            if !chain.isEmpty {
-                Section {
-                    ForEach(chain, id: \.self) { number in
-                        if let openDocument {
-                            Button { openDocument(number) } label: { Text(verbatim: number).textRole(.amount) }
-                                .buttonStyle(.link)
-                        } else {
-                            Text(verbatim: number).textRole(.amount)
-                        }
-                    }
-                } header: {
-                    Text(L.chain)
-                }
-            }
-            Section {
-                ForEach(events.reversed()) { event in
-                    let line = activity(event, currency: document?.currency ?? state?.summary.currency ?? .czk)
-                    Label {
-                        VStack(alignment: .leading, spacing: Spacing.xxs) {
-                            Text(verbatim: line.text).textRole(.body).textSelection(.enabled)
-                            Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
-                        }
-                    } icon: {
-                        Image(systemName: line.symbol)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                    .help(Text(verbatim: Self.timestamp(event.at, locale: locale, full: true)))
-                    .accessibilityElement(children: .combine)
-                }
-            } header: {
-                Text(L.activity)
-            }
-        }
-        .task(id: LoadKey(id: documentID, states: documents.states)) {
-            document = try? stores.documents.document(id: documentID)
-            payments = (try? stores.documents.payments(for: documentID)) ?? []
-            deductions = (try? Self.deductions(stores, state: documents.state(id: documentID))) ?? []
-            paidAdvanceLinks = (try? Self.paidAdvanceLinks(stores, state: documents.state(id: documentID))) ?? []
-            events = Self.shownEvents((try? stores.audit.events(entity: "document", id: documentID)) ?? [])
-        }
-    }
-
-    /// The related document, the deducting or settling final invoices, the receipts and the advances paid
-    /// (§ 64 goods), each number once.
-    private func chainNumbers(_ state: DocumentState?) -> [String] {
-        var numbers: [String] = []
-        if let related = state?.summary.relatedDocumentNumber { numbers.append(related) }
-        numbers += state?.deductedBy ?? []
-        numbers += deductions.map(\.receiptNumber)
-        if state?.summary.kind == .finalInvoice {
-            numbers += paidAdvanceLinks.map(\.advanceNumber)
-        }
-        return Self.unique(numbers)
-    }
-
-    /// The numbers in their order, without repeats (they are the ids of the chain's ForEach).
+/// The links of the advance chain and the Activity events of a document, loaded for the issued view.
+enum DocumentLinks {
+    /// The numbers in their order, without repeats (they are the ids of a ForEach).
     static func unique(_ numbers: [String]) -> [String] {
         var seen: Set<String> = []
         return numbers.filter { seen.insert($0).inserted }
@@ -646,6 +547,35 @@ struct DocumentInspectorView: View {
         default: return []
         }
     }
+}
+
+/// The issued view's Activity (design-system.md §8.15): one sentence per event, newest first, with its
+/// time; shown in a collapsed disclosure between the payments and the PDF.
+struct DocumentActivityList: View {
+    let events: [AuditEvent]
+    let currency: Currency
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            ForEach(events.reversed()) { event in
+                let line = activity(event, currency: currency)
+                Label {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(verbatim: line.text).textRole(.body).textSelection(.enabled)
+                        Text(verbatim: Self.timestamp(event.at, locale: locale)).textRole(.caption)
+                    }
+                } icon: {
+                    Image(systemName: line.symbol)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .help(Text(verbatim: Self.timestamp(event.at, locale: locale, full: true)))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     /// One audit event as a sentence with its kind symbol (design-system.md §8.15). An action the shell
     /// does not know shows its key.
@@ -678,7 +608,7 @@ struct DocumentInspectorView: View {
         case "pdf":
             return ("doc.richtext", String(localized: L.activityPDF))
         case "pdfSaved":
-            return ("folder", String(localized: L.activityPDFSaved(details["path"] ?? "")))
+            return ("square.and.arrow.up", String(localized: L.activityPDFSaved(details["path"] ?? "")))
         case "delete":
             return ("trash", String(localized: L.activityDeleted))
         case "create":

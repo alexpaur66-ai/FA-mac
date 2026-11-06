@@ -6,8 +6,8 @@ Date: 2026-11-05 · Status: accepted, open to the adversarial review
 
 The core (ADR 0002–0004, 0006), the data layer (ADR 0005, 0007) and the design system (docs/design,
 PR 7) exist, but nothing opens the database and shows a window. docs/design/screens-flows.md specifies
-one window with a sidebar, a documents table with an inspector, an overview, clients, payments, rates,
-exports and settings. Saša answered on 5 Nov 2026: English-only interface, an M1 Pro on macOS 27.2 with
+one window with a sidebar, a documents table, an overview, clients, payments and settings (the lean
+design pass of 6 Nov 2026 removed the inspector and moved rates, export and backup into the File menu). Saša answered on 5 Nov 2026: English-only interface, an M1 Pro on macOS 27.2 with
 an English system language, EUR and CZK with USD in the list, the ČNB rate typed per document, no
 existing data to import.
 
@@ -26,10 +26,12 @@ existing data to import.
   are computed for moves at midnight (the open question of ADR 0007). Every list, badge count and smart
   filter derives from that one array; a view loads on its own only detail data (payments, deductions,
   audit) with `.task(id:)`.
-- **Navigation**: one three-column `NavigationSplitView`. The sidebar holds the sections and the
-  document smart filters as `SidebarItem`, a raw-representable value restored with `@SceneStorage`; the
-  inspector is the design's right column. `DocumentSmartFilter.matches` is the single definition of each
-  filter, shared by the list, the sidebar badges and the menu. The document selection is cut down to
+- **Navigation**: one three-column `NavigationSplitView` with no inspector column. The sidebar holds
+  Overview, Documents (a selectable row showing all documents, with Drafts, Unpaid and Open advances under
+  it), Clients and Payments as `SidebarItem`, a raw-representable value restored with `@SceneStorage`;
+  rows of earlier versions restore to the nearest row. `DocumentSmartFilter.matches` is the single
+  definition of each filter, shared by the list, the sidebar badges, the window subtitle and
+  View ▸ Filter ▸. The document selection is cut down to
   the rows the filter and the search show, so the detail column, the menu bar and ⌫ act only on
   visible rows.
 - **Errors are sentences.** A failed action shows one line from `ErrorText` (what happened, how to fix
@@ -38,8 +40,10 @@ existing data to import.
   inline with a Try again button that restarts it.
 - **Menu bar through focused scene values.** `MainActions` carries closures; `AppCommands` reads
   `@FocusedValue(\.mainActions)`, so menu items enable per window. Shortcuts follow
-  screens-flows.md: ⌘N / ⇧⌘N / ⌥⌘N new documents, ⌘1–⌘6 sections, ⌥⌘I inspector, ⌘R record payment,
-  ⌘+ / ⌘− / ⌘0 text scale.
+  screens-flows.md: ⌘N / ⇧⌘N new documents, ⌘1–⌘4 sections (⌘5 Stock when it ships), ⌘R record
+  payment (or refund), ⌘+ / ⌘− / ⌘0 text scale. ⌥⌘N, ⌘5 and ⌘6 are unassigned in v0.1; ⌥⌘I is never
+  bound. Toolbars are fixed sets per screen (design-system.md §8.11), the prominent item text only and
+  last.
 - **Strings**: `enum L` wraps `LocalizedStringResource(key, defaultValue:, table: "App")` with English
   defaults in code and no catalog shipped, because Saša wants an English interface only; Czech stays on
   the documents for Czech customers (InvoicingCore). Adding a language later is an App.xcstrings file, no
@@ -71,8 +75,8 @@ existing data to import.
 - The shell lists, filters, inspects and settles documents and creates drafts, but does not yet edit
   draft lines or issue documents; the editor and the Issue sheet are the next PR (the Issue… menu item
   exists and is disabled).
-- Exports and backups show their cards and commands with the controls disabled until the export step;
-  PDF rendering arrived with ADR 0010.
+- Export and backup are File commands; the export opens a sheet. Both stay disabled until the export
+  and backup steps; PDF rendering arrived with ADR 0010.
 - The Payments section loads payments per issued document; the data layer should gain
   `payments(filter:)` across documents.
 - Carried from the ADR 0007 review: a prefix collision between series is warned about in the Numbering
@@ -86,20 +90,34 @@ existing data to import.
   now: recorded again by an earlier Undo, or left alone when it has another tax document by then). Undo of
   Delete Payment Only relinks the draft tax document that was kept. The line's Undo carries out its own
   registration, not the top of the window's stack, and takes it off the stack; after ⌘Z it is cleared.
-  Delete Payment and Draft in Payments & Bank deletes the draft too, as in the detail.
-- Record Payment… applies only to an issued document with an open balance; an overpaid document offers
-  Record Refund… as its own command. The Document menu, the context menu and the detail's toolbar share
+  Delete Payment and Draft in Payments deletes the draft too, as in the detail.
+- Record Payment… applies only to an issued document with an open balance; on an overpaid document the
+  same ⌘R row reads Record Refund… (lean pass). The Document menu, the context menu and the detail's toolbar share
   one `DocumentActions` value, so they never disagree.
-- The inspector exists in Overview, Documents, Clients and Payments & Bank; Exchange rates and Exports &
-  Backup disable View ▸ Show Inspector. Clients has its own inspector with the client's defaults.
-- A Client menu (New Invoice for ‹client›, New Advance Invoice for ‹client›, Edit Client Details…),
-  Help ▸ Getting Started, and Window ▸ Main Window that brings the existing window to the front.
-- Payments & Bank keeps its selection per window and lists Date · Client · Document · Amount · Source · Note.
+- Superseded by the lean pass: the inspector is gone everywhere (its values moved into the issued view
+  and the client page), and so is the Client menu: its items are File ▸ New Invoice / New Advance Invoice
+  (which name the client in client context), Duplicate (the client's last invoice) and Edit Client “…”….
+  Help ▸ Getting Started and Window ▸ Main Window stay.
+- Payments keeps its selection per window and lists Date · Client · Document · Amount · Note, with search.
 - The client form has a country pop-up and a VAT treatment pop-up; new clients default to EUR, 14 days
   and EU reverse charge (decision of 5 Nov 2026). The company's term and footer live in Documents & PDF.
 - The Numbering pane and the series sheet compare the variable symbols and the document numbers of a
   sample number across series (two series issuing the same numbers get a warning),
   preview the next number as the store assigns it today, and lock year and counter once the app issued a
   number from the series.
-- The inspector's Activity maps the audit actions to sentences. The store also records `create` and
+- The issued view's Activity maps the audit actions to sentences. The store also records `create` and
   `update` for every draft save: the first `create` shows as "Draft created", autosaves are not listed.
+
+## Amendments (lean design pass, 6 Nov 2026)
+
+- Four sidebar rows; Exchange rates and Exports & Backup are no longer sections. File ▸ Exchange Rates
+  opens a read-only sheet (Date · Currency · Rate · Source, Import ČNB Rates…, Close); File ▸ Import ČNB
+  Rates… opens the file importer from any section without switching, and reports in the result line.
+- Drafts shows its count; Unpaid shows the overdue count in red with `exclamationmark.circle` while
+  something is overdue. The Overdue and This month filters are gone; Unpaid sorts by due date, so overdue
+  rows come first. The Documents subtitle reads "Unpaid · 7 · 3 overdue".
+- The Documents, Overview and Clients selections are kept per window (`@SceneStorage`); restored ids
+  that no longer exist are dropped once the documents have loaded.
+- With several documents selected, the detail column alone shows the summary under the §2a rules:
+  revenue (tax documents), open balance (the Unpaid set) and unpaid advances. The selection bar is gone.
+- The closing rows of the Document menu read their reopening on a closed or marked document.

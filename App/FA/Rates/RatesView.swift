@@ -1,6 +1,7 @@
-// Exchange rates (screens-flows.md §2g): the stored ČNB rates per currency and the file import.
-// The app has no network access, so the rates come from the ČNB text files Saša downloads, or are
-// typed on the document (decision of 5 Nov 2026).
+// File ▸ Exchange Rates (screens-flows.md §2g): a read-only sheet with the stored rates of the v0.1
+// currencies. Typing the rate on each document is the primary path; the ČNB file import is secondary.
+// The app has no network access, so rates come from the ČNB text files Saša downloads, or are typed on the
+// document (decision of 5 Nov 2026). A stored rate is corrected where it is used (the draft's Change…).
 
 import InvoicingCore
 import InvoicingData
@@ -12,6 +13,7 @@ struct RateRow: Identifiable, Hashable {
 
     var id: String { rate.currency.code + "|" + rate.validFor.isoString + "|" + sourceName }
     var day: CalendarDay { rate.validFor }
+    var currencyCode: String { rate.currency.code }
     var value: Decimal { rate.czkPerAmount }
     var amount: Int { rate.amount }
 
@@ -26,121 +28,127 @@ struct RateRow: Identifiable, Hashable {
     }
 }
 
-struct RatesView: View {
-    let stores: Stores
-    /// Bumped after each import; the window holds it so the coverage column reloads too.
-    @Binding var version: Int
-    /// The file importer; File ▸ Import ČNB Rates… opens it from anywhere.
-    @Binding var importing: Bool
-    /// The result line of an import, shown by the window at the top of the content pane; true marks an error.
-    let report: @MainActor (String, Bool) -> Void
+/// The file types the ČNB import accepts: the daily and yearly files are plain text.
+enum RateFileTypes {
+    static let allowed: [UTType] = [.plainText, .text, .data]
+}
 
-    /// The currencies Saša invoices in (decision of 5 Nov 2026).
+struct ExchangeRatesSheet: View {
+    let stores: Stores
+
+    /// The currencies Saša invoices in (decision of 5 Nov 2026); other currencies of an imported file are
+    /// stored for later.
     static let currencies: [Currency] = [.eur, .usd]
 
-    @State private var currencyCode = "EUR"
     @State private var rows: [RateRow] = []
+    @State private var latest: [(Currency, CalendarDay?)] = []
     @State private var sortOrder = [KeyPathComparator(\RateRow.day, order: .reverse)]
+    @State private var importing = false
+    /// The last import's line: the count, or why the file was not read.
+    @State private var importLine: (text: String, isError: Bool)?
+    @State private var loadError: String?
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
 
-    private struct LoadKey: Equatable {
-        let currency: String
-        let version: Int
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Picker(selection: $currencyCode) {
-                    ForEach(Self.currencies, id: \.code) { currency in
-                        Text(verbatim: currency.code).tag(currency.code)
-                    }
-                } label: {
-                    Text(L.colCurrency)
-                }
-                .fixedSize()
-                Spacer()
-            }
-            .padding(Spacing.m)
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(L.menuRates).textRole(.screenTitle)
+            Text(latestLine).textRole(.body)
             if rows.isEmpty {
                 ContentUnavailableView {
                     Label { Text(L.noRates) } icon: { Image(systemName: "arrow.left.arrow.right") }
                 } description: {
                     Text(L.noRatesDescription)
-                } actions: {
-                    Button { importing = true } label: { Text(L.importRates) }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Table(rows.sorted(using: sortOrder), sortOrder: $sortOrder) {
-                    TableColumn(Text(L.colDate), value: \.day) { row in DayText(row.day) }
-                        .width(min: 90, ideal: 110)
-                    TableColumn(Text(L.colRate), value: \.value) { row in
-                        Text(verbatim: row.rateText(locale: locale)).textRole(.amount)
-                    }
-                    .width(min: 150, ideal: 190)
-                    .alignment(.trailing)
-                    TableColumn(Text(L.colSource), value: \.sourceName) { row in
-                        Text(verbatim: row.sourceName).textRole(.body)
-                    }
+                table
+            }
+            if let loadError {
+                InlineMessage(loadError)
+            }
+            if let importLine {
+                if importLine.isError {
+                    InlineMessage(importLine.text)
+                } else {
+                    Text(verbatim: importLine.text).textRole(.caption)
                 }
             }
-        }
-        .navigationTitle(Text(L.rates))
-        .toolbar {
-            ToolbarItem {
-                Button { importing = true } label: {
-                    Label { Text(L.importRates) } icon: { Image(systemName: "tray.and.arrow.down") }
-                }
-                .help(Text(L.importRatesHelp))
+            HStack {
+                Button { importing = true } label: { Text(L.importRates) }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button { dismiss() } label: { Text(L.close) }
+                    .keyboardShortcut(.defaultAction)
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .data], allowsMultipleSelection: false) { result in
+        .padding(Spacing.xl)
+        .exchangeRatesSheetSized()
+        .onExitCommand { dismiss() }
+        .fileImporter(isPresented: $importing, allowedContentTypes: RateFileTypes.allowed, allowsMultipleSelection: false) { result in
             handleImport(result)
         }
-        .task(id: LoadKey(currency: currencyCode, version: version)) {
-            load()
+        .task { load() }
+    }
+
+    private var table: some View {
+        Table(rows.sorted(using: sortOrder), sortOrder: $sortOrder) {
+            TableColumn(Text(L.colDate), value: \.day) { row in DayText(row.day) }
+                .width(min: 90, ideal: 110)
+            TableColumn(Text(L.colCurrency), value: \.currencyCode) { row in
+                Text(verbatim: row.currencyCode).textRole(.body)
+            }
+            .width(min: 60, ideal: 70)
+            TableColumn(Text(L.colRate), value: \.value) { row in
+                Text(verbatim: row.rateText(locale: locale)).textRole(.amount)
+            }
+            .width(min: 150, ideal: 190)
+            .alignment(.trailing)
+            TableColumn(Text(L.colSource), value: \.sourceName) { row in
+                Text(verbatim: row.sourceName).textRole(.body)
+            }
         }
     }
 
+    /// "Latest: EUR 30. 10. 2026 · USD —".
+    private var latestLine: LocalizedStringResource {
+        func text(_ currency: Currency) -> String {
+            latest.first { $0.0 == currency }?.1.map { $0.formatted(locale) } ?? "—"
+        }
+        return L.ratesLatest(text(.eur), text(.usd))
+    }
+
     private func load() {
-        rows = ((try? stores.rates.rates(for: Currency.known(currencyCode))) ?? []).map { RateRow(rate: $0) }
+        do {
+            rows = try Self.currencies.flatMap { try stores.rates.rates(for: $0) }.map { RateRow(rate: $0) }
+            latest = try Self.currencies.map { ($0, try stores.rates.latestDay(for: $0)) }
+            loadError = nil
+        } catch {
+            loadError = ErrorText.message(error, locale: locale)
+        }
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard let outcome = RateImport.perform(result, stores: stores, locale: locale) else { return }
         if let count = outcome.count {
-            report(Count.ratesImported(count), false)
-            version += 1
+            importLine = (Count.ratesImported(count), false)
+            load()
         } else {
-            report(outcome.line, true)
+            importLine = (outcome.line, true)
         }
     }
 }
 
-/// The detail column of the rates section: the latest stored day per currency.
-struct RatesCoverageView: View {
-    let stores: Stores
-    /// The window's import counter; a change reloads the latest days.
-    let version: Int
-    @State private var latest: [(Currency, CalendarDay?)] = []
-    @Environment(\.locale) private var locale
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
-            Text(L.ratesCoverage).textRole(.sectionTitle)
-            ForEach(latest, id: \.0.code) { currency, day in
-                LabeledContent {
-                    Text(verbatim: day.map { $0.formatted(locale) } ?? "—").textRole(.body)
-                } label: {
-                    Text(verbatim: currency.code).textRole(.body)
-                }
-            }
-            Text(L.ratesNote).textRole(.caption)
-        }
-        .padding(Spacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: version) {
-            latest = RatesView.currencies.map { ($0, try? stores.rates.latestDay(for: $0)) }
+private extension View {
+    /// Resizable, as design-system.md §5.3 sizes it: fitted to the content on macOS 15, the frame alone on 14.
+    @ViewBuilder func exchangeRatesSheetSized() -> some View {
+        let framed = frame(
+            minWidth: LayoutMetrics.importReviewMinSize.width, idealWidth: LayoutMetrics.importReviewIdealSize.width,
+            minHeight: LayoutMetrics.importReviewMinSize.height, idealHeight: LayoutMetrics.importReviewIdealSize.height)
+        if #available(macOS 15, *) {
+            framed.presentationSizing(.fitted)
+        } else {
+            framed
         }
     }
 }

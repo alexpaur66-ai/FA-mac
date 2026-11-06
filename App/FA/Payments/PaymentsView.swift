@@ -1,5 +1,5 @@
-// Payments & Bank (screens-flows.md §2f): every recorded payment, newest first. The bank import and the
-// matching queue arrive with v0.2.
+// Payments (screens-flows.md §2f): every recorded payment, newest first, with search. The bank import
+// and the matching queue arrive with v0.2.
 
 import InvoicingCore
 import InvoicingData
@@ -13,17 +13,22 @@ struct PaymentRow: Identifiable, Hashable {
     var date: CalendarDay { payment.paidOn }
     var amount: Decimal { payment.amount.amount }
     var currencyCode: String { payment.amount.currency.code }
-    /// Typed, Statement or Credit (screens-flows.md §2f).
-    var sourceName: String { String(localized: payment.sourceTitle) }
     var documentNumber: String { state.summary.number ?? "" }
     var customerName: String { state.summary.customerName }
     var note: String { payment.note ?? "" }
+
+    /// Plain search: client, document number, note and amount (screens-flows.md §2f).
+    func matches(search: String) -> Bool {
+        let needle = search.folded
+        guard !needle.isEmpty else { return true }
+        return [customerName, documentNumber, note, amount.description].contains { $0.folded.contains(needle) }
+    }
 }
 
 struct PaymentsView: View {
     let stores: Stores
     let documents: DocumentListModel
-    /// The document of the selected payment, for the detail column and the inspector.
+    /// The document of the selected payment, for the detail column.
     @Binding var selectedDocumentID: String?
     /// Deletes a payment, and with it its draft tax document when the dialog says so; the window
     /// registers the undo.
@@ -36,6 +41,7 @@ struct PaymentsView: View {
     @SceneStorage("payments.selection") private var selection: String?
     @State private var paymentPendingDeletion: DocumentPayment?
     @State private var sortOrder = [KeyPathComparator(\PaymentRow.date, order: .reverse)]
+    @State private var search = ""
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -62,6 +68,7 @@ struct PaymentsView: View {
         }
         .navigationTitle(Text(L.payments))
         .navigationSubtitle(Text(verbatim: String(rows.count)))
+        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchPayments))
         .task(id: documents.states) {
             load()
         }
@@ -71,10 +78,10 @@ struct PaymentsView: View {
         .paymentDeletionDialog(pending: $paymentPendingDeletion, delete: deletePayment)
     }
 
-    // Date · Client · Document · Amount · Source · Note (screens-flows.md §2f); Account and the CZK
-    // difference arrive with the bank import.
+    // Date · Client · Document · Amount · Note (screens-flows.md §2f); Account, the CZK difference and the
+    // Source arrive with the bank import, when statements make them differ from row to row.
     private var table: some View {
-        Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+        Table(rows.filter { $0.matches(search: search) }.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
             TableColumn(Text(L.colDate), value: \.date) { row in DayText(row.date) }
                 .width(min: 90, ideal: 100)
             TableColumn(Text(L.colClient), value: \.customerName) { row in
@@ -98,10 +105,6 @@ struct PaymentsView: View {
             }
             .width(min: 110, ideal: 140)
             .alignment(.trailing)
-            TableColumn(Text(L.colSource), value: \.sourceName) { row in
-                Text(verbatim: row.sourceName).textRole(.body)
-            }
-            .width(min: 70, ideal: 90)
             TableColumn(Text(L.colNote), value: \.note) { row in
                 Text(verbatim: row.note).textRole(.body)
             }

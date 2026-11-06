@@ -1,6 +1,6 @@
 // Delete Payment with a draft tax document (ADR 0009 amendments): the draft documents nothing without
 // its payment, so the dialog asks whether the draft goes too. Shared by the document detail and
-// Payments & Bank; the window deletes and registers the undo.
+// Payments; the window deletes and registers the undo.
 
 import InvoicingData
 import SwiftUI
