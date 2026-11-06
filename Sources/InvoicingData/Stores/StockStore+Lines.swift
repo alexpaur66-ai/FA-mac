@@ -147,3 +147,69 @@ extension StockStore {
         }
     }
 }
+
+/// One row of a client page's Items tab (screens-flows.md §2n "On the client page"): what the client bought of
+/// one stock item, from the "out" movements of their issued documents.
+public struct ClientStockItem: Hashable, Sendable, Identifiable {
+    public let itemID: String
+    public let name: String
+    public let unit: String
+    public let boughtThisYear: Decimal
+    public let boughtInAll: Decimal
+    /// The DUZP of the last document that took the item out, and that document.
+    public let lastDay: CalendarDay
+    public let lastDocumentID: String
+    public let lastDocumentNumber: String?
+    /// The unit price on that document's line, in its currency; nil when the line can't be found.
+    public let lastPrice: Money?
+
+    public var id: String { itemID }
+}
+
+extension StockStore {
+    /// The Items tab of a client: every item that left stock on one of the client's issued documents, archived
+    /// items too, by name. "This year" is the year of the movement's day (the DUZP).
+    public func clientItems(customerID: String, year: Int) throws -> [ClientStockItem] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT m.sequence, m.itemID, m.day, m.quantity, m.documentID, d.number AS documentNumber
+                FROM stockMovement m JOIN document d ON d.id = m.documentID
+                WHERE m.kind = ? AND d.customerID = ? AND d.status = ?
+                """, arguments: [StockMovementKind.takenOut.rawValue, customerID, DocumentStatus.issued.rawValue])
+            struct Out {
+                let sequence: Int64
+                let itemID: String
+                let day: CalendarDay
+                let quantity: Decimal
+                let documentID: String
+                let documentNumber: String?
+            }
+            let outs = try rows.map { row -> Out in
+                let sequence: Int64 = row["sequence"]
+                let id = String(sequence)
+                return Out(sequence: sequence, itemID: row["itemID"],
+                           day: try CalendarDay.stored(row["day"] as String, table: "stockMovement", id: id),
+                           quantity: try Self.decimal(row["quantity"], table: "stockMovement", id: id),
+                           documentID: row["documentID"], documentNumber: row["documentNumber"])
+            }
+            var result: [ClientStockItem] = []
+            for (itemID, group) in Dictionary(grouping: outs, by: \.itemID) {
+                guard let stockItem = try Self.item(db, id: itemID),
+                      let last = group.max(by: { ($0.day, $0.sequence) < ($1.day, $1.sequence) }) else { continue }
+                let thisYear = group.filter { $0.day.year == year }.reduce(Decimal(0)) { $0 + $1.quantity }
+                let all = group.reduce(Decimal(0)) { $0 + $1.quantity }
+                var price: Money?
+                if let document = try DocumentRecord.fetchOne(db, key: last.documentID)?.decode() {
+                    let lineIDs = Set(try Self.linkRows(db, documentID: last.documentID).filter { $0.itemID == itemID }.map(\.lineID))
+                    if let line = document.lines.first(where: { lineIDs.contains($0.id) }) {
+                        price = Money(line.unitPrice, document.currency)
+                    }
+                }
+                result.append(ClientStockItem(itemID: itemID, name: stockItem.name, unit: stockItem.unit, boughtThisYear: thisYear,
+                                              boughtInAll: all, lastDay: last.day, lastDocumentID: last.documentID,
+                                              lastDocumentNumber: last.documentNumber, lastPrice: price))
+            }
+            return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+    }
+}
