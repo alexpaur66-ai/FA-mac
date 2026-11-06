@@ -68,7 +68,6 @@ enum L {
     static let colName = r("column.name", "Name")
     static let colCountry = r("column.country", "Country")
     static let colVATID = r("column.vatID", "VAT ID")
-    static let colOverdue = r("column.overdue", "Overdue")
     static let colLastDocument = r("column.lastDocument", "Last document")
     static let colRate = r("column.rate", "Rate")
     static let colSource = r("column.source", "Source")
@@ -228,7 +227,7 @@ enum L {
         r("client.overdueAmount", "\(amount) overdue")
     }
     static let clientDocuments = r("client.documents", "Documents")
-    static let invalidICO = r("validation.ico", "IČO is not valid (8 digits with a check digit).")
+    static let invalidICO = r("validation.ico", "Company ID is not valid (8 digits with a check digit).")
     static let invalidVATID = r("validation.vatID", "VAT ID is not valid (country code and number, for example CZ12345678).")
     static let nameRequired = r("validation.nameRequired", "A name is required.")
     static let invalidIBAN = r("validation.iban", "IBAN is not valid.")
@@ -635,7 +634,6 @@ enum L {
     static let activityDeleted = r("activity.deleted", "Deleted")
 
     // Clients
-    static let fieldVATTreatment = r("field.vatTreatment", "VAT treatment")
     static let vatCzechPayer = r("vat.czechPayer", "Czech VAT payer")
     static let vatCzechNonPayer = r("vat.czechNonPayer", "Czech business, not a VAT payer")
     static let vatEUBusinessGoods = r("vat.euBusinessGoods", "EU business, goods")
@@ -643,7 +641,7 @@ enum L {
     static let vatEUConsumer = r("vat.euConsumer", "EU consumer")
     static let vatNonEUBusiness = r("vat.nonEUBusiness", "Business outside the EU, services")
     static let vatNonEUConsumer = r("vat.nonEUConsumer", "Consumer outside the EU")
-    static let reverseChargeNeedsVATID = r("client.reverseChargeNeedsVATID", "EU reverse charge needs the client's VAT ID; the validator will block issuing without it.")
+    static let reverseChargeNeedsVATID = r("client.reverseChargeNeedsVATID", "Reverse charge needs the client's VAT ID. Add it to issue documents for this client.")
     static let goodsExemptionNeedsVATID = r("client.goodsNeedsVATID", "The § 64 exemption needs the client's VAT ID. Add it to issue documents for this client.")
     static func clientDocumentsCount(_ count: Int) -> LocalizedStringResource { r("client.documentsCount", "\(count) documents") }
     static let clientDocumentsCountOne = r("client.documentsCountOne", "1 document")
@@ -685,6 +683,19 @@ enum L {
     static let menuKindPaymentTaxDocument = r("menu.kind.paymentTaxDocument", "Tax Document for Received Payment")
     static let fieldCompanyVATID = r("field.companyVATID", "VAT ID")
     static func companyIDChip(_ value: String) -> LocalizedStringResource { r("client.companyIDChip", "IČO \(value)") }
+    /// The Clients list's second line under the name (other-05): "Praha · IČO 12345678".
+    static func clientCityAndCompanyID(_ city: String, _ value: String) -> LocalizedStringResource {
+        r("client.cityAndCompanyID", "\(city) · IČO \(value)")
+    }
+    static let editClientDetails = r("menu.editClientDetails", "Edit Client Details…")
+    /// The client form's type pop-up (other-08).
+    static let fieldClientType = r("field.clientType", "Client type")
+    /// The country pop-up's empty entry for a new client (shell-23).
+    static let chooseCountry = r("field.chooseCountry", "Choose…")
+    static func possibleDuplicate(_ name: String) -> LocalizedStringResource {
+        r("client.possibleDuplicate", "Possible duplicate: \(name) – open it?")
+    }
+    static let openButton = r("action.open", "Open")
     static func vatIDChip(_ value: String) -> LocalizedStringResource { r("client.vatIDChip", "VAT ID \(value)") }
     static let countryRequired = r("validation.countryRequired", "A country is required.")
     static func seriesCollisionWith(_ name: String) -> LocalizedStringResource {
@@ -766,9 +777,6 @@ enum L {
     static let recordRefundHelp = r("help.recordRefund", "Record money returned to the client")
     static func newInvoiceForHelp(_ client: String) -> LocalizedStringResource {
         r("help.newInvoiceFor", "Create an invoice for \(client)")
-    }
-    static func duplicateNumberedHelp(_ number: String) -> LocalizedStringResource {
-        r("help.duplicateNumbered", "Duplicate \(number) as a new draft")
     }
     static let editThisClientHelp = r("help.editThisClient", "Edit this client's details")
     static let previewHelp = r("help.preview", "Show or hide the PDF preview")
