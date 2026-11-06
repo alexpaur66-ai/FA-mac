@@ -177,3 +177,8 @@ What the pass did:
 Not re-checked in this pass: the shell's build-status notes against PRs 20–22, except where a note names them. The
 two questions on cards to Sasa (an EU client without a VAT ID; restarting the numbering each year) are written as
 the recommended answer and marked in the specs.
+
+Follow-up, 6 Nov 2026: Sasa answered both cards with the recommended option. They sell to businesses only for now
+("i dont do b2C CURRENTLY"), so an EU client without a VAT ID is "EU business, goods" and Issue waits for the ID; and
+the number series restart every year ("YES WHY NOT, JUST HAVE THE NEW YEAR IN THE NUMBER"). sf §0, §2e, §2i and Q2 now
+say so.

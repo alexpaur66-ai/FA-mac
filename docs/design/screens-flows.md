@@ -22,7 +22,7 @@ Date: 2026-11-05 · Role: Mac UX (speed first) · Status: draft for Sasa's revie
   - A chord such as ⌘N counts as **1 keystroke**. Each typed character counts as 1.
 - Example data:
   - Client "Acme GmbH", the services example: EUR, document language "Czech + English", client type "EU business, services" (picked by hand; its documents get "EU services, reverse charge"), 30 days (set by hand; a new client starts at 14 days, §2e). Its monthly invoices carry a Period, so their DUZP is the period's last day (§2c).
-  - Most of what Sasa sells is goods (Sasa in the project chat, 5 Nov 2026: "90% goods"). A new German client with a VAT ID gets "EU business, goods" by the country rule, so its documents get "EU goods, exempt (§ 64)" (§2e). For an EU client without a VAT ID the recommendation is the same: "EU business, goods; Issue waits for the VAT ID" (RECOMMENDATION, pending Sasa's answer; ACCT).
+  - Most of what Sasa sells is goods (Sasa in the project chat, 5 Nov 2026: "90% goods"). A new German client with a VAT ID gets "EU business, goods" by the country rule, so its documents get "EU goods, exempt (§ 64)" (§2e). An EU client without a VAT ID gets the same: "EU business, goods; Issue waits for the VAT ID". Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026), so a missing VAT ID means it isn't typed in yet (ACCT).
   - Stock item "Bolt M8", unit "ks" (§2n).
   - Numbers are shown as "FV 2026-0042", the default invoice pattern FV {YYYY}-{NNNN} (§2i). Sasa's own format and last numbers are an open question (Q2).
   - Amounts and dates in UI examples are written in Czech formats. The UI formats them with the UI locale; the PDF uses Czech formats (RECOMMENDATION; confirm with Sasa and the accountant, design-system §9).
@@ -561,7 +561,7 @@ Every value ZDPH § 29 requires stays visible in this view (in the figures or on
 - document language ("Czech" or "Czech + English": InvoicingCore `DocumentLanguage.czech` / `.english`, design-system §9)
 - VAT treatment, from the client type (§2e): "EU business, goods" gives "EU goods, exempt (§ 64)", "EU business, services" gives "EU services, reverse charge", "Business outside the EU, services" gives "Outside EU, services", and the Czech and consumer types give "Czech VAT (rate per line)". The printed Czech wording is ACCT.
   - A new client's type follows the country rule (§2e): an EU country other than CZ with a VAT ID gives "EU business, goods", so its documents start on "EU goods, exempt (§ 64)".
-  - An EU country without a VAT ID: RECOMMENDATION "EU business, goods; Issue waits for the VAT ID" (pending Sasa's answer). Until the VAT ID is added, the Issue sheet blocks (below).
+  - An EU country without a VAT ID: "EU business, goods; Issue waits for the VAT ID" (Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026)). Until the VAT ID is added, the Issue sheet blocks (below).
 - due days (14 for a new client, §2e)
 - the company's bank account for that currency (Settings ▸ Bank Accounts)
 
@@ -943,7 +943,7 @@ The default sort is Name A–Z.
 - **Client type with a VAT ID:** the VAT ID's prefix decides, as InvoicingCore `CustomerVATStatus.inferred` does. A CZ VAT ID → Czech VAT payer; another EU VAT ID → **EU business, goods**, so documents start on "EU goods, exempt (§ 64)"; any other → Business outside the EU, services. Sasa: "99% EU-EU" and "90% goods". "EU business, services" is only picked by hand.
 - **Client type without a VAT ID:**
   - CZ → Czech business, not a VAT payer.
-  - Another EU country → **EU business, goods; Issue waits for the VAT ID** (RECOMMENDATION, pending Sasa's answer; ACCT: a business without a VAT ID versus a consumer). This needs `CustomerVATStatus.inferred` changed, because today it gives EU consumer; the change goes to the build as an amendment to the goods answers. If Sasa answers "consumer", this client becomes EU consumer (Czech VAT) and is re-inferred once a VAT ID is typed.
+  - Another EU country → **EU business, goods; Issue waits for the VAT ID** (Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026); ACCT). This needs `CustomerVATStatus.inferred` changed, because main still gives EU consumer (Party.swift:77). EU consumer stays in the Client type pop-up for a consumer sale picked by hand.
   - Outside the EU → Consumer outside the EU (§ 10h is ACCT; the § 66 export of goods comes later, with the accountant).
 - **With no country yet:** Client type "EU business, goods", currency EUR, and no hint.
 - **Currency:** CZ → CZK, any other → EUR; USD is picked by hand. Sasa: "for start its enough, you can add dollar". The app sets the currency explicitly, because the core's own default is CZK.
@@ -1278,7 +1278,7 @@ Rules:
 - **One prominent Save** for the pane. Edits that aren't saved are dropped when the window closes. A counter never goes backwards: the store's check runs at Save. Save is disabled while a field doesn't parse or two series collide, and the message names both series:
   - "‹Invoices› and ‹Advance invoices› would give documents the same variable symbol. Change one of the patterns."
   - "‹series› and ‹series› would issue the same numbers. Change one of the patterns."
-- **The yearly restart follows the pattern** (RECOMMENDATION, pending Sasa's answer; ACCT): {YYYY} or {YY} restarts the counter each year, and a pattern without a year token counts on. There is no switch. The core already refuses a yearly restart without a year token (as built).
+- **The yearly restart follows the pattern** (Sasa's answer, 6 Nov 2026: "YES WHY NOT, JUST HAVE THE NEW YEAR IN THE NUMBER"; ACCT): {YYYY} or {YY} restarts the counter each year, and a pattern without a year token counts on. There is no switch. The core already refuses a yearly restart without a year token (as built).
 - **VS rule.** The VS is the series prefix followed by the digits of the number, at most 10 digits in all (Fakturoid's derivation [S106]). The core keeps the prefix and takes as many trailing digits as still fit (as built, ADR 0003 addendum).
   - Example: without prefixes, FV 2026-0042 and ZF 2026-0042 would both become 20260042. With them, FV 2026-0042 → 120260042 and ZF 2026-0042 → 220260042. The prefixes are fixed.
   - The pane blocks patterns whose VS could collide. VS is compared for FV and ZF; numbers across all three.
@@ -1962,7 +1962,7 @@ Answered questions keep their numbers, because other files refer to them by numb
 1. **Which macOS is on your Mac today? Answered.** "27.2, english" and "m1 pro 32gb ram 200gb bandwith 256gb disk - using mainly 8tb cloud / macOS 27.2 (the newest one, im just updating it right now)" (Sasa's answer in the proposal doc, 5 Nov 2026). Decision (build thread): the app keeps targeting macOS 14.0, with `#if compiler(>=6.2)` and `if #available` gates, while CI builds on the `macos-15` runner with Xcode 26.3 (macOS 26 SDK, since PR 20). When to raise the target is the build's call; the design recommends macOS 27.0 for that raise (§0.1). The macOS 27.0 APIs need the macOS 27 SDK, which ships with Xcode 27 (design-system §2), so a raise made on Xcode 26 can reach at most Fallback A (macOS 26.1).
 2. **Your current numbering.**
    - What format, and what are the last issued numbers, for invoices, advances and tax documents?
-   - Does each series restart every year? Asked on a card (5 Nov 2026), pending. The RECOMMENDATION is a yearly restart that follows `{YYYY}` in the pattern, with no switch (§2i).
+   - Does each series restart every year? **Answered:** yes, with the year in the number (Sasa's answer, 6 Nov 2026: "YES WHY NOT, JUST HAVE THE NEW YEAR IN THE NUMBER"). The restart follows `{YYYY}` in the pattern, with no switch (§2i).
    - Final invoices share the FV series (three fixed series, §2i). A fourth fixed series only if the accountant asks. (ACCT for the rules; we need your format to continue it.)
 3. **DUZP on monthly invoices.** The design gives an invoice with a Period (a month) that month's last day as its DUZP, and any other invoice its issue date; you can change it on each draft. Is that how you date them? (ACCT.)
 4. **Languages. Partly answered.**
@@ -1973,9 +1973,9 @@ Answered questions keep their numbers, because other files refer to them by numb
 7. **ČNB rates. Partly answered.** Sasa types the rate by hand: "for start everything that nmeeds to be online i willů do manualy, s ill type current cnb rate for each invoice" (proposal doc, 5 Nov 2026). Typing the rate on the document is the v0.1 path (§2c, §2g). Still open: would a link that opens the ČNB rates page in your own browser be acceptable (the app itself still makes no network call)? §2g sketches it as a RECOMMENDATION. The data layer already reads both the daily and the yearly ČNB file, so the secondary import takes either.
 8. **Raiffeisenbank statements.** Are statements as data (ABO, RB XML or Gemini) a paid service in RB internet banking, with PDF free? UNVERIFIED. Is the service active, or worth its price? With ABO or XML, v0.2 can match payments automatically; with PDF only, matching stays manual (§2f). Also: do you record payments as they arrive, or in one go from the monthly statement? That decides whether the "Payments recorded up to" caption under the Overview tiles ships before v0.2 (§2a).
 
-**Asked on cards in the design thread (5 Nov 2026), pending:**
-- A new EU client without a VAT ID: "EU business, goods" (RECOMMENDATION; Issue waits for the VAT ID) or an EU consumer with Czech VAT (§2e).
-- The yearly restart of the number series (Q2).
+**Asked on cards in the design thread (5 Nov 2026), answered 6 Nov 2026:**
+- A new EU client without a VAT ID: "EU business, goods"; Issue waits for the VAT ID (Sasa sells to businesses only for now ("i dont do b2C CURRENTLY", 6 Nov 2026); §2e).
+- The yearly restart of the number series: yes (Q2, §2i).
 
 **For the accountant (ACCT), added by the lean pass:** whether the Stock list CSV helps (for example at the year-end count), whether it needs values, and its column names (§2n); the month in which a § 64 document counts in the export (the § 22 odst. 1 day, §2h).
 
