@@ -743,8 +743,9 @@ struct MainSplitView: View {
             do {
                 guard let document = try stores.documents.document(id: id), document.status == .draft else { continue }
                 let receiptOf = try stores.documents.payment(ofReceipt: id)
+                let dating = try stores.documents.draftDating(id: id)
                 try stores.documents.deleteDraft(id: id)
-                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOf: receiptOf))
+                deleted.append(DocumentListModel.DeletedDraft(document: document, receiptOf: receiptOf, dating: dating))
                 forgetDeletedDraft(id)
             } catch {
                 failure = error

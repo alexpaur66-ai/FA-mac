@@ -35,9 +35,17 @@ the list, and uses an English interface.
   issue date" stores the issue date in `taxPointDate` and follows issue-date changes, because the
   validator requires a stored tax point on a tax document (§ 29 odst. 1 písm. h) ZDPH,
   `taxPointDateMissing`). A payment tax document's tax point is the day the payment was received: the
-  editor shows it read-only and `DocumentStore.checkReceipt` refuses any other day. There is no floating
-  "on issue" date: an issue date other than today is a ⚠ row in the sheet with "Set to today". The
-  per-client DUZP rule (end of the billed period) waits for the accountant's answer.
+  editor shows it read-only and `DocumentStore.checkReceipt` refuses any other day. *Amended by the
+  lean pass (docs-18, docs-28):* until it is set by hand, the issue date floats. The header's "On issue"
+  toggle is on, and the date becomes today when the draft opens, when the Issue sheet opens and at
+  Issue. Turning the toggle off keeps the date in a date picker, set by hand. The flag is the draft
+  row's `issueDateSetByHand` column (schema v4), outside the snapshot; drafts saved before v4 count as
+  set by hand. A tax point picked with "Same as the issue date" off is kept the same way
+  (`taxPointSetByHand`), so one on the issue date's day stays put while the issue date floats; Undo of
+  Delete Draft writes both flags back. A floating date that moves while the Issue sheet is open (past
+  midnight) stops Issue once, so the sheet shows the new date and checks first. The sheet's ⚠
+  issue-date row ("Set to today") shows only for a date set by hand that is not today, or for a floating date that moves a "Same as the issue date" DUZP out of the month the
+  draft was started in. The per-client DUZP rule is dropped (lean pass: a Period sets the month's last day).
 - **Exchange rate.** A foreign-currency tax document takes `RateStore.rate(for:on:)` for its tax point;
   the rule-6 fallback (last published rate) is shown as ℹ. Without any rate the inline form saves a
   typed rate for that day (`ExchangeRateSource.manual`) and the document takes it at once; a rate stored for
@@ -57,7 +65,7 @@ the list, and uses an English interface.
 - **The review-and-issue sheet** has the spec's three severities. ⛔: validator errors, a missing rate
   (shown as the inline form), no numbering series (with a Settings link), an issue date before the series
   year and a receipt deducted elsewhere disable Issue; the readiness chip counts the same rows. ⚠: validator
-  warnings and an issue date other than today need the "Checked" box, which has the default focus. ℹ:
+  warnings and the issue-date row above need the "Checked" box, which has the default focus. ℹ:
   the rate fallback and a tax point in another month. Issue is `saveNow` then
   `DocumentStore.issue(id:seriesID:)`; afterwards the list switches from Drafts to All, keeps the document
   selected and shows "Issued FV …". The sheet predicts the number with `peekNextNumber`; the number
