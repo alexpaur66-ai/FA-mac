@@ -37,6 +37,36 @@ import InvoicingCore
         #expect(stamps == 0)
     }
 
+    @Test func theBackupBeforeARestoreKeepsTheOldestBackup() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let database = try Fixtures.prepared()
+        for second in 0..<Backups.keepCount {
+            try Backups.make(of: database, in: folder, now: Fixtures.now.addingTimeInterval(Double(second)))
+        }
+        let oldest = try #require(try Backups.list(in: folder).first)
+        try CustomerStore(database).save(Fixtures.czechCustomer(id: "cust-3"), now: Fixtures.now)
+        try Backups.make(of: database, in: folder, now: Fixtures.now.addingTimeInterval(3_600), pruning: false)
+        #expect(FileManager.default.fileExists(atPath: oldest.path))
+        #expect(try Backups.list(in: folder).count == Backups.keepCount + 1)
+        try Backups.restore(from: oldest, into: database)
+        #expect(try customerCount(database) == 2)
+    }
+
+    @Test func aRestoreThatFailsAfterCopyingLeavesTheDataAsItWas() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let database = try Fixtures.prepared()
+        let url = try Backups.make(of: database, in: folder, now: Fixtures.now)
+        // A backup without appState passes inspect, but removing its stamp fails after it was copied.
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in try db.execute(sql: "DROP TABLE appState") }
+        try queue.close()
+        try CustomerStore(database).save(Fixtures.czechCustomer(id: "cust-3"), now: Fixtures.now)
+        #expect(throws: (any Error).self) { try Backups.restore(from: url, into: database) }
+        #expect(try customerCount(database) == 3)
+    }
+
     @Test func aFileThatIsNotABackupIsRefused() throws {
         let folder = temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

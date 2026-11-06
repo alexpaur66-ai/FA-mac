@@ -156,9 +156,10 @@ struct AppCommands: Commands {
             // Data Folder is the one place the data file is reachable from.
             Button { actions?.backUpNow?() } label: { Text(L.backUpNow) }
                 .disabled(actions?.backUpNow == nil)
-            // The preview and the alert show in the main window, so it is brought up first.
+            // The preview and the alert show in the main window, so it is brought up first (a new one only
+            // when none is open).
             Button {
-                openWindow(id: "main")
+                showMainWindow()
                 model.chooseBackupToRestore()
             } label: { Text(L.restoreFromBackup) }
                 .disabled(!model.canRestore)

@@ -78,14 +78,16 @@ enum BackupSettings {
 @MainActor
 enum BackupService {
     /// Makes a backup now and records the outcome for the caption and the Overview row. Nil for the
-    /// in-memory database, which has nothing to back up.
+    /// in-memory database, which has nothing to back up. `pruning` false keeps the older backups (the
+    /// backup before a restore must not delete the one being restored).
     @discardableResult
-    static func backUp(_ stores: Stores, now: Date = Date()) -> Result<URL, Error>? {
+    static func backUp(_ stores: Stores, now: Date = Date(), pruning: Bool = true) -> Result<URL, Error>? {
         guard let folder = BackupSettings.folderURL(databaseURL: stores.databaseURL) else { return nil }
         let scoped = folder.startAccessingSecurityScopedResource()
         defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
         do {
-            let url = try Backups.make(of: stores.database, in: folder, now: now, appVersion: BackupSettings.appVersion)
+            let url = try Backups.make(of: stores.database, in: folder, now: now, appVersion: BackupSettings.appVersion,
+                                         pruning: pruning)
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: BackupSettings.lastSuccessKey)
             UserDefaults.standard.removeObject(forKey: BackupSettings.lastFailureKey)
             return .success(url)

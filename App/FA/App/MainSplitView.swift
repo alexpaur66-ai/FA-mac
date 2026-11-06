@@ -174,12 +174,17 @@ struct MainSplitView: View {
             _ = editor?.saveNow()
         }
         // A restore is about to replace the data: the open draft is written into the data that is backed
-        // up first, then the editor writes nothing more (its onDisappear runs after the restore).
+        // up first, then the editor writes nothing more (its onDisappear runs after the restore). The undo
+        // of a deletion made before the restore would write the replaced data into the restored data, so
+        // every one is spent and the window's stack emptied.
         .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
             if let editor {
                 editor.saveNow()
                 editor.discard()
             }
+            documents.invalidateUndo()
+            undoManager?.removeAllActions()
+            result = nil
         }
         .onAppear {
             if let notice = takeNotice?() { report(notice) }

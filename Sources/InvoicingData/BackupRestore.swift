@@ -68,18 +68,34 @@ extension Backups {
         }
     }
 
-    /// Replaces all data in the open `database` with the backup at `url`, then brings it to this version's
-    /// schema. SQLite's online backup writes into the open database in one step, so the app keeps its
-    /// connection and a failure leaves the data as it was. The caller backs up the current data first.
+    /// Replaces all data in the open `database` with the backup at `url`, brought to this version's schema.
+    /// The backup is first copied into a temporary file, migrated there and stripped of its stamp; only
+    /// then does SQLite's online backup write that prepared copy into the open database in one step, so
+    /// the app keeps its connection and a failure leaves the data as it was. The caller backs up the
+    /// current data first.
     public static func restore(from url: URL, into database: AppDatabase) throws {
         _ = try inspect(url)
-        let source = try openReadOnly(url)
-        defer { try? source.close() }
-        try source.backup(to: database.queue)
-        try Schema.migrator.migrate(database.queue)
-        try database.queue.write { db in
+        let files = FileManager.default
+        let prepared = files.temporaryDirectory
+            .appendingPathComponent("FA restore " + UUID().uuidString + "." + nameExtension, isDirectory: false)
+        defer {
+            try? files.removeItem(atPath: prepared.path)
+            try? files.removeItem(atPath: prepared.path + "-journal")
+        }
+        let copy = try DatabaseQueue(path: prepared.path, configuration: AppDatabase.configuration())
+        // Closed before the file is deleted (defers run last first).
+        defer { try? copy.close() }
+        do {
+            let source = try openReadOnly(url)
+            defer { try? source.close() }
+            try source.backup(to: copy)
+        }
+        try Schema.migrator.migrate(copy)
+        try copy.write { db in
             try db.execute(sql: "DELETE FROM appState WHERE key IN (?, ?)", arguments: [madeAtKey, appVersionKey])
         }
+        // The one step that changes the open database.
+        try copy.backup(to: database.queue)
     }
 
     /// For a data file that cannot be opened (screens-flows.md §2a, Error): keeps it beside itself as

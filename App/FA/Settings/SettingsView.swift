@@ -38,6 +38,7 @@ struct SettingsRoot: View {
 struct SettingsView: View {
     let stores: Stores
     @AppStorage(SettingsPane.storageKey) private var pane: SettingsPane = .general
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         TabView(selection: $pane) {
@@ -55,6 +56,12 @@ struct SettingsView: View {
                 .tag(SettingsPane.numbering)
         }
         .frame(minWidth: 640, minHeight: 480)
+        // A restore is about to replace the data: Remove Bank Account undos made before it do nothing
+        // (AppModel spends them) and leave the window's Edit ▸ Undo.
+        .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
+            BankAccountUndo.invalidateAll()
+            undoManager?.removeAllActions()
+        }
     }
 }
 
@@ -400,6 +407,15 @@ struct CompanyPane: View {
         let action = BankAccountUndo()
         registered.append(action)
         return action
+    }
+
+    /// Before a restore replaces the data: every removal made so far can no longer be undone, so no Undo
+    /// puts an account of the replaced data into the restored profile. The actions stay in `registered`,
+    /// as a closed Settings window's stack may still point at them.
+    static func invalidateAll() {
+        for action in registered {
+            action.run = nil
+        }
     }
 }
 

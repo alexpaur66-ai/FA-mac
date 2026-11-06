@@ -44,10 +44,13 @@ public enum Backups {
     /// `keepCount`. The copy is written under a hidden name and renamed when complete, so a failed backup
     /// never leaves a half-written file among the backups; hidden copies left by a backup that was cut off
     /// (a crash or power loss) are deleted first. Pruning is best effort: an old backup that cannot be
-    /// deleted does not fail the backup just made. Returns the backup file.
+    /// deleted does not fail the backup just made. `pruning` false keeps every older backup: the one made
+    /// before a restore must not delete the backup being restored; the next backup prunes. Returns the
+    /// backup file.
     @discardableResult
     public static func make(of database: AppDatabase, in folder: URL, now: Date = Date(),
-                            timeZone: TimeZone = .current, appVersion: String? = nil) throws -> URL {
+                            timeZone: TimeZone = .current, appVersion: String? = nil,
+                            pruning: Bool = true) throws -> URL {
         let files = FileManager.default
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
         // Backups run one at a time, so any hidden copy (and its -journal, -wal or -shm) is a leftover.
@@ -76,7 +79,9 @@ public enum Backups {
             throw error
         }
         // The backup is made; a folder that cannot be listed or pruned does not undo that.
-        try? prune(in: folder, keeping: keepCount)
+        if pruning {
+            try? prune(in: folder, keeping: keepCount)
+        }
         return target
     }
 

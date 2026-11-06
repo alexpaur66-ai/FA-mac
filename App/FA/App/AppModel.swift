@@ -137,10 +137,13 @@ final class AppModel {
         restoreCandidate = nil
         if let stores {
             // Open editors write what they hold and then stop; the windows are rebuilt afterwards whether
-            // or not the restore succeeds, so none keeps an editor that no longer saves.
+            // or not the restore succeeds, so none keeps an editor that no longer saves. A Remove Bank Account
+            // made before it can no longer be undone, even from a Settings window that is closed now.
+            BankAccountUndo.invalidateAll()
             NotificationCenter.default.post(name: .dataWillBeReplaced, object: nil)
             defer { generation += 1 }
-            if case .failure(let error)? = BackupService.backUp(stores) {
+            // Not pruned: the oldest backup may be the one being restored. The next backup prunes.
+            if case .failure(let error)? = BackupService.backUp(stores, pruning: false) {
                 restoreProblem = String(localized: L.restoreNotBackedUp(ErrorText.message(error)))
                 return
             }
