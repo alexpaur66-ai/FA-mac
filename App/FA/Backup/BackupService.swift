@@ -61,6 +61,14 @@ enum BackupSettings {
         return url
     }
 
+    /// "1.0 (7)", written into each backup for the restore preview.
+    static var appVersion: String? {
+        let info = Bundle.main.infoDictionary
+        guard let short = info?["CFBundleShortVersionString"] as? String else { return nil }
+        guard let build = info?["CFBundleVersion"] as? String, build != short else { return short }
+        return short + " (" + build + ")"
+    }
+
     static var lastSuccess: Date? {
         let seconds = UserDefaults.standard.double(forKey: lastSuccessKey)
         return seconds > 0 ? Date(timeIntervalSince1970: seconds) : nil
@@ -77,7 +85,7 @@ enum BackupService {
         let scoped = folder.startAccessingSecurityScopedResource()
         defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
         do {
-            let url = try Backups.make(of: stores.database, in: folder, now: now)
+            let url = try Backups.make(of: stores.database, in: folder, now: now, appVersion: BackupSettings.appVersion)
             UserDefaults.standard.set(now.timeIntervalSince1970, forKey: BackupSettings.lastSuccessKey)
             UserDefaults.standard.removeObject(forKey: BackupSettings.lastFailureKey)
             return .success(url)

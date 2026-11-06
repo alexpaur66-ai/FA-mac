@@ -47,7 +47,7 @@ public enum Backups {
     /// deleted does not fail the backup just made. Returns the backup file.
     @discardableResult
     public static func make(of database: AppDatabase, in folder: URL, now: Date = Date(),
-                            timeZone: TimeZone = .current) throws -> URL {
+                            timeZone: TimeZone = .current, appVersion: String? = nil) throws -> URL {
         let files = FileManager.default
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
         // Backups run one at a time, so any hidden copy (and its -journal, -wal or -shm) is a leftover.
@@ -68,6 +68,7 @@ public enum Backups {
         do {
             let destination = try DatabaseQueue(path: partial.path)
             try database.queue.backup(to: destination)
+            try stamp(destination, now: now, appVersion: appVersion)
             try destination.close()
             try files.moveItem(at: partial, to: target)
         } catch {

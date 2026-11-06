@@ -26,7 +26,9 @@ struct SettingsRoot: View {
 
     var body: some View {
         if let stores = model.stores {
+            // A restore bumps the generation: the panes reload from the restored data.
             SettingsView(stores: stores)
+                .id(model.generation)
         } else {
             DatabaseErrorView(detail: model.openError ?? "", databaseURL: model.databaseURL)
         }
@@ -259,6 +261,12 @@ struct CompanyPane: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             commit()
+        }
+        // Commit once into the data about to be backed up, then never again: the pane is rebuilt on the
+        // restored data, and its onDisappear must not write the old fields over it.
+        .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
+            commit()
+            isLoaded = false
         }
     }
 
@@ -821,4 +829,8 @@ extension Notification.Name {
     /// Posted after Settings wrote the company profile, a bank account, a number series or the document
     /// defaults, so an open draft editor re-reads them at once (design check E024).
     static let settingsDidSave = Notification.Name("FA.settingsDidSave")
+    /// Posted just before a restore replaces the data (before the backup of the current data): open
+    /// editors write what they hold, then write nothing more, so the restored data is never overwritten
+    /// by a view that is about to be rebuilt.
+    static let dataWillBeReplaced = Notification.Name("FA.dataWillBeReplaced")
 }

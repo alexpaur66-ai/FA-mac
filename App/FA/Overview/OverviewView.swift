@@ -23,6 +23,9 @@ struct OverviewView: View {
     let runQueueAction: @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool
     /// The backup row's Back Up Now (§2a, §2h); nil for the in-memory database, which shows no backup row.
     let backUpNow: (@MainActor () -> Void)?
+    /// The Getting started card's "Moving from another Mac? Restore from Backup…" (§2j); nil for the
+    /// in-memory database.
+    let restoreFromBackup: (@MainActor () -> Void)?
 
     @State private var month: CalendarDay
     /// Nil until the first load, so a set-up database never shows the card for a moment.
@@ -44,7 +47,7 @@ struct OverviewView: View {
          show: @escaping @MainActor (SidebarItem) -> Void, showOverdue: @escaping @MainActor () -> Void,
          newDocument: @escaping @MainActor (DocumentKind) -> Void,
          runQueueAction: @escaping @MainActor (OverviewFigures.QueueItem.Kind, String) -> Bool,
-         backUpNow: (@MainActor () -> Void)? = nil) {
+         backUpNow: (@MainActor () -> Void)? = nil, restoreFromBackup: (@MainActor () -> Void)? = nil) {
         self.stores = stores
         self.documents = documents
         self._selection = selection
@@ -54,6 +57,7 @@ struct OverviewView: View {
         self.newDocument = newDocument
         self.runQueueAction = runQueueAction
         self.backUpNow = backUpNow
+        self.restoreFromBackup = restoreFromBackup
         _month = State(initialValue: CalendarDay(Date(), in: .current).startOfMonth)
     }
 
@@ -146,6 +150,11 @@ struct OverviewView: View {
     /// Started once everything is done: all ✓, with a close button and without Open Settings….
     private func gettingStarted(_ setup: SetupStatus) -> some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
+            // First run only: a card Help ▸ Getting Started brings back with every step done has no link.
+            if !setup.isComplete, let restoreFromBackup {
+                Button { restoreFromBackup() } label: { Text(L.restoreMovingFromAnotherMac) }
+                    .buttonStyle(.link)
+            }
             HStack(alignment: .firstTextBaseline) {
                 Text(L.gettingStarted).textRole(.sectionTitle)
                 Spacer()

@@ -62,8 +62,15 @@ struct MainSplitView: View {
         let focus: EditorFocusRequest
     }
 
-    init(stores: Stores) {
+    /// Restore from Backup…, for the Getting started card's link; nil for the in-memory database.
+    let restoreFromBackup: (@MainActor () -> Void)?
+    /// The result line left by a restore, shown once when the rebuilt window appears.
+    let takeNotice: (@MainActor () -> String?)?
+
+    init(stores: Stores, restoreFromBackup: (@MainActor () -> Void)? = nil, takeNotice: (@MainActor () -> String?)? = nil) {
         self.stores = stores
+        self.restoreFromBackup = restoreFromBackup
+        self.takeNotice = takeNotice
         _documents = State(initialValue: DocumentListModel(stores: stores))
         _clients = State(initialValue: ClientsModel(stores: stores))
     }
@@ -166,6 +173,17 @@ struct MainSplitView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             _ = editor?.saveNow()
         }
+        // A restore is about to replace the data: the open draft is written into the data that is backed
+        // up first, then the editor writes nothing more (its onDisappear runs after the restore).
+        .onReceive(NotificationCenter.default.publisher(for: .dataWillBeReplaced)) { _ in
+            if let editor {
+                editor.saveNow()
+                editor.discard()
+            }
+        }
+        .onAppear {
+            if let notice = takeNotice?() { report(notice) }
+        }
     }
 
     // MARK: Columns
@@ -176,7 +194,7 @@ struct MainSplitView: View {
             OverviewView(
                 stores: stores, documents: documents, selection: $overviewSelection, forced: $gettingStartedForced,
                 show: show, showOverdue: showOverdue, newDocument: newDraft, runQueueAction: { runQueueAction($0, documentID: $1) },
-                backUpNow: stores.databaseURL == nil ? nil : backUpNow)
+                backUpNow: stores.databaseURL == nil ? nil : backUpNow, restoreFromBackup: restoreFromBackup)
         case .documents:
             DocumentsView(
                 stores: stores, documents: documents, filter: sidebar.documentFilter, selection: documentSelectionBinding,

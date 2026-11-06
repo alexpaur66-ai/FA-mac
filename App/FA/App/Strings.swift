@@ -678,6 +678,32 @@ enum L {
     static func backupFailed(_ reason: String) -> LocalizedStringResource { r("backup.failed", "Backup failed: \(reason)") }
     static let backupNone = r("backup.none", "No backup yet")
     static func backupDaysAgo(_ days: Int) -> LocalizedStringResource { r("backup.daysAgo", "Last backup \(days) days ago") }
+    static let backupUnreadable = r("backup.unreadable", "This file isn't a backup from this app, or it is damaged.")
+    static let backupFromNewerVersion = r("backup.newerVersion", "A newer version of the app made this backup. Update the app to restore it.")
+
+    // Restore from Backup… (screens-flows.md §2h)
+    static let restorePanelMessage = r("restore.panelMessage", "Choose the backup to restore.")
+    static let restoreTitle = r("restore.title", "Restore from Backup")
+    static let restoreFile = r("restore.file", "File")
+    static let restoreMadeOn = r("restore.madeOn", "Backup from")
+    static let restoreAppVersion = r("restore.appVersion", "App version")
+    static let restoreNotRecorded = r("restore.notRecorded", "Not recorded")
+    static let restoreButton = r("restore.button", "Restore")
+    static let restoreEllipsis = r("restore.buttonEllipsis", "Restore…")
+    static func restoreAlertTitle(_ day: String) -> LocalizedStringResource {
+        r("restore.alertTitle", "Replace current data with the backup from \(day)?")
+    }
+    static let restoreAlertTitleNoDate = r("restore.alertTitleNoDate", "Replace current data with this backup?")
+    static let restoreAlertMessage = r("restore.alertMessage", "Current data will be saved as a backup first.")
+    static let restoreAlertMessageUnopenable = r("restore.alertMessageUnopenable", "The data file that can't be opened will be kept next to it.")
+    static let restoreProblemTitle = r("restore.problemTitle", "Backup not restored")
+    static func restoreNotBackedUp(_ reason: String) -> LocalizedStringResource {
+        r("restore.notBackedUp", "The current data couldn't be backed up first, so nothing was restored. \(reason)")
+    }
+    static func restoredFrom(_ day: String) -> LocalizedStringResource { r("restore.restoredFrom", "Restored the backup from \(day)") }
+    static let restoredNoDate = r("restore.restoredNoDate", "Backup restored")
+    static let okButton = r("action.ok", "OK")
+    static let restoreMovingFromAnotherMac = r("restore.movingFromAnotherMac", "Moving from another Mac? Restore from Backup…")
     static let menuExportAccountant = r("menu.exportAccountant", "Export for Accountant…")
 
     // Follow-ups (PR 18): the setup card, the tiles, the detail banners, the client header, the series sheet
