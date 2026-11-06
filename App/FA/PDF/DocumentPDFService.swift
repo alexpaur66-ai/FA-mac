@@ -20,13 +20,13 @@ enum DocumentPDFService {
     }
 
     /// Renders and stores the PDF of a document that was just issued, then writes it to the PDF folder when
-    /// one is chosen and automatic saving is on. Returns the file written, or nil when nothing was to be
+    /// one is chosen. Returns the file written, or nil when nothing was to be
     /// written. A failed write is thrown after the bytes are stored: the document is issued either way
     /// (screens-flows.md §2c, "the database is the source of truth").
     @discardableResult
     static func storeAndSave(_ stores: Stores, document: Document) throws -> URL? {
         let stored = try stores.documents.storePDF(documentID: document.id, data: try DocumentPDF.render(document))
-        guard PDFSettings.autoSaveOnIssue, let folder = PDFSettings.folderURL() else { return nil }
+        guard let folder = PDFSettings.folderURL() else { return nil }
         let url = try PDFSettings.save(stored.data, for: document, in: folder)
         try stores.documents.recordSavedPDF(documentID: document.id, path: url.path)
         return url

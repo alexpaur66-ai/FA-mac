@@ -231,40 +231,31 @@ enum L {
     static let invalidICO = r("validation.ico", "IČO is not valid (8 digits with a check digit).")
     static let invalidVATID = r("validation.vatID", "VAT ID is not valid (country code and number, for example CZ12345678).")
     static let nameRequired = r("validation.nameRequired", "A name is required.")
-    static let invalidIBAN = r("validation.iban", "IBAN is not valid.")
     static let invalidBIC = r("validation.bic", "BIC is not valid.")
-    static let invalidCzechAccount = r("validation.czechAccount", "Czech account number is not valid (prefix-number/bank code).")
-    static let invalidRegistry = r("validation.registry", "Commercial register entry needs a court, section and insert.")
 
     // MARK: Settings (screens-flows.md §2i)
 
     static let settingsGeneral = r("settings.general", "General")
     static let settingsCompany = r("settings.company", "Company")
-    static let settingsBank = r("settings.bank", "Bank accounts")
+    static let settingsBank = r("settings.bank", "Bank Accounts")
     static let settingsNumbering = r("settings.numbering", "Numbering")
-    static let settingsDocuments = r("settings.documents", "Documents & PDF")
-    static let settingsVAT = r("settings.vat", "VAT defaults")
-    static let settingsBackup = r("settings.backup", "Backup")
-    static let generalLanguageNote = r("settings.languageNote", "The app is in English. Documents print in Czech, or in Czech and English for foreign clients.")
-    static let generalTextSizeNote = r("settings.textSizeNote", "Text size: View ▸ Bigger Text and Smaller Text scale every screen from 100 to 200 %.")
-    static let dataFolder = r("settings.dataFolder", "Data file")
-    static let showInFinder = r("settings.showInFinder", "Show in Finder")
     static let companyNote = r("settings.companyNote", "Changes apply to future documents only. Issued documents keep their own copy of these details.")
     static let fieldLegalName = r("field.legalName", "Legal name")
     static let fieldRegistryCourt = r("field.registryCourt", "Register court")
-    static let fieldRegistrySection = r("field.registrySection", "Section")
-    static let fieldRegistryInsert = r("field.registryInsert", "Insert")
     static let noCourt = r("field.noCourt", "Not registered")
-    static let fieldVATPayer = r("field.vatPayer", "VAT payer")
-    static let fieldDefaultCurrency = r("field.defaultCurrency", "Default currency")
-    static let fieldDefaultTerm = r("field.defaultTerm", "Default payment term (days)")
     static let fieldFooter = r("field.footer", "Footer text")
-    static let bankIBAN = r("bank.iban", "IBAN")
+    static let footerSection = r("settings.footerSection", "Footer")
+    static let fieldFileNumber = r("field.fileNumber", "File number")
+    static let fileNumberPrompt = r("field.fileNumberPrompt", "C 12345")
+    static let invalidFileNumber = r("validation.fileNumber", "Enter the file number as section and number, such as C 12345.")
     static let bankBIC = r("bank.bic", "BIC")
     static let bankName = r("bank.name", "Bank name")
     static let bankCurrency = r("bank.currency", "Currency")
     static let bankCurrencyAny = r("bank.currencyAny", "Any")
-    static let bankCzechAccount = r("bank.czechAccount", "Czech account number (prefix-number/bank code), instead of the IBAN")
+    static let bankAccountNumber = r("bank.accountNumber", "Account number")
+    static let accountNumberPrompt = r("bank.accountNumberPrompt", "IBAN or 123456789/0800")
+    static let invalidAccountNumber = r("validation.accountNumber", "Enter an IBAN or a Czech account number such as 123456789/0800.")
+    static let removeBankAccount = r("action.removeBankAccount", "Remove Bank Account")
     static let bankNote = r("bank.note", "The first account in a currency is printed on documents in that currency; an account without a currency serves the rest.")
     static let companyFirst = r("bank.companyFirst", "Fill in the company profile first.")
     static let noAccounts = r("bank.noAccounts", "No bank accounts yet")
@@ -284,9 +275,6 @@ enum L {
     static let defaultSeriesCaption = r("series.defaultsCaption", "FV for invoices and final invoices (VS prefix 1), ZF for advance invoices (prefix 2), DD for tax documents for payments (no prefix).")
     static let noSeries = r("series.none", "No number series yet")
     static let seriesPrefixCollision = r("series.collision", "Two series with the same pattern and the same prefix would give two documents the same variable symbol.")
-    static let documentsPaneNote = r("settings.documentsNote", "The QR code default per client and the payment tolerance arrive with later steps.")
-    static let vatPaneNote = r("settings.vatNote", "Rates 21 / 12 / 0 %, the treatments (Czech VAT, EU goods exempt under § 64, EU services with reverse charge, services outside the EU, other exemptions) and the default treatment by client status live in InvoicingCore. A pane to edit them is not built yet.")
-    static let backupPaneNote = r("settings.backupNote", "Backup folder, automatic backups and Restore arrive with the export step. Until then: quit the app and copy the data file shown under General.")
 
     // MARK: Rates (screens-flows.md §2g)
 
@@ -316,8 +304,11 @@ enum L {
     static let pdfFileMoved = r("pdf.fileMoved", "File moved – use Save PDF…")
     static func pdfSavedTo(_ path: String) -> LocalizedStringResource { r("pdf.savedTo", "PDF saved to \(path)") }
     static func pdfSaveFailed(_ folder: String) -> LocalizedStringResource { r("pdf.saveFailed", "PDF couldn't be saved to \(folder).") }
-    static let pdfNoFolder = r("pdf.noFolder", "No PDF folder chosen: the PDF stays in the app until you use Save PDF….")
-    static let pdfAutoSaveOff = r("pdf.autoSaveOff", "Automatic saving is off: the PDF stays in the app until you use Save PDF….")
+    static let pdfNoFolder = r("pdf.noFolderIssue", "No PDF folder: the PDF stays in the app until you use Save PDF…. Choose a folder in Settings ▸ General.")
+    static func pdfFolderCaption(_ year: String) -> LocalizedStringResource {
+        r("pdf.folderCaption", "Issued documents are saved as \(year)/FV \(year)-0042 Acme GmbH.pdf.")
+    }
+    static let pdfFolderCaptionNone = r("pdf.folderCaptionNone", "No folder: the PDF stays in the app until you use Save PDF….")
     static let pdfSection = r("pdf.section", "PDF")
     static let pdfFolder = r("pdf.folder", "PDF folder")
     static let pdfFolderPrompt = r("pdf.folderPrompt", "Choose the folder where issued documents are saved as PDF files.")
@@ -325,10 +316,6 @@ enum L {
     static let choose = r("action.choose", "Choose")
     static let chooseFolder = r("pdf.chooseFolder", "Choose Folder…")
     static let clearFolder = r("pdf.clearFolder", "Forget Folder")
-    static let pdfAutoSave = r("pdf.autoSave", "Save PDF automatically when issuing")
-    static let pdfYearSubfolder = r("pdf.yearSubfolder", "Subfolder per year")
-    static let pdfFileName = r("pdf.fileName", "File name")
-    static let pdfFileNamePattern = r("pdf.fileNamePattern", "{number} {client}.pdf")
 
     // MARK: Exports (screens-flows.md §2h)
 
@@ -693,7 +680,6 @@ enum L {
     static func rateEqualsAmount(_ amount: Int, _ code: String, _ rate: String) -> LocalizedStringResource {
         r("rates.rateEqualsAmount", "\(amount) \(code) = \(rate) CZK")
     }
-    static let documentDefaultsTitle = r("settings.documentDefaults", "Document defaults")
     static let activityDraftCreated = r("activity.draftCreated", "Draft created")
     static let draftRestoredUnlinked = r(
         "result.draftRestoredUnlinked",

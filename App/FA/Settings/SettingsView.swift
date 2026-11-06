@@ -1,7 +1,8 @@
-// Settings (screens-flows.md §1.3, §2i): seven panes. Company, Bank accounts and Numbering edit the
-// data layer's CompanyProfile and number series; Documents & PDF holds the document defaults, the PDF
-// folder and its switches (ADR 0010); VAT defaults and Backup name what arrives with later steps. The
-// window reopens on the pane viewed last, and the Overview's setup card opens the pane of its step.
+// Settings (screens-flows.md §1.3, §2i; lean pass set-01): four panes. General holds the PDF folder;
+// Company, Bank Accounts and Numbering edit the data layer's CompanyProfile and number series. The VAT
+// rules, the document defaults and the PDF switches are fixed rules (set-02, set-04, set-07). Every pane
+// but Numbering applies a field as soon as it is committed (settlement 9). The window reopens on the pane
+// viewed last, and the Overview's setup card opens the pane of its step.
 
 import AppKit
 import InvoicingCore
@@ -9,9 +10,10 @@ import InvoicingData
 import SwiftUI
 
 /// The panes, stored by name so the window reopens on the last one (screens-flows.md §1.3) and the
-/// Getting started card can open a step's pane (§2j).
+/// Getting started card can open a step's pane (§2j). A stored name of a removed pane ("documents", "vat",
+/// "backup") is no case, so @AppStorage falls back to General.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, company, bank, numbering, documents, vat, backup
+    case general, company, bank, numbering
 
     static let storageKey = "settings.pane"
 
@@ -36,7 +38,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $pane) {
-            GeneralPane(stores: stores)
+            GeneralPane()
                 .tabItem { Label(String(localized: L.settingsGeneral), systemImage: "gearshape") }
                 .tag(SettingsPane.general)
             CompanyPane(stores: stores)
@@ -48,63 +50,92 @@ struct SettingsView: View {
             NumberingPane(stores: stores)
                 .tabItem { Label(String(localized: L.settingsNumbering), systemImage: "number") }
                 .tag(SettingsPane.numbering)
-            DocumentsPane(stores: stores)
-                .tabItem { Label(String(localized: L.settingsDocuments), systemImage: Symbols.document) }
-                .tag(SettingsPane.documents)
-            PlaceholderPane(note: L.vatPaneNote)
-                .tabItem { Label(String(localized: L.settingsVAT), systemImage: "percent") }
-                .tag(SettingsPane.vat)
-            PlaceholderPane(note: L.backupPaneNote)
-                .tabItem { Label(String(localized: L.settingsBackup), systemImage: "externaldrive") }
-                .tag(SettingsPane.backup)
         }
         .frame(minWidth: 640, minHeight: 480)
     }
 }
 
-struct PlaceholderPane: View {
-    let note: LocalizedStringResource
+// MARK: - General
 
-    var body: some View {
-        Form {
-            Text(note).textRole(.body)
-        }
-        .formStyle(.grouped)
-    }
-}
-
+/// The PDF folder (set-03, set-04): a chosen folder means each issued document's PDF is saved there at
+/// Issue, as ‹folder›/‹year›/‹number› ‹client›.pdf; without one the PDF stays in the app until Save PDF….
+/// The folder is a security-scoped bookmark the user grants through the open panel (ADR 0010). The backup
+/// folder joins this pane with the backup step.
 struct GeneralPane: View {
-    let stores: Stores
+    @State private var folderURL: URL?
+    @State private var message: String?
+    @Environment(\.locale) private var locale
 
     var body: some View {
         Form {
-            Section {
-                Text(L.generalLanguageNote).textRole(.body)
-                Text(L.generalTextSizeNote).textRole(.body)
-            }
             Section {
                 LabeledContent {
                     VStack(alignment: .trailing, spacing: Spacing.xs) {
-                        Text(verbatim: stores.databaseURL?.path ?? "—").textRole(.caption).textSelection(.enabled)
-                        if let url = stores.databaseURL {
-                            Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Text(L.showInFinder) }
+                        if let folderURL {
+                            Text(verbatim: PDFSettings.displayPath(folderURL)).textRole(.caption).textSelection(.enabled)
+                        }
+                        HStack(spacing: Spacing.s) {
+                            if folderURL != nil {
+                                Button { forgetFolder() } label: { Text(L.clearFolder) }
+                            }
+                            Button { chooseFolder() } label: { Text(L.chooseFolder) }
                         }
                     }
                 } label: {
-                    Text(L.dataFolder)
+                    Text(L.pdfFolder)
+                }
+                Text(caption).textRole(.caption)
+                if let message {
+                    InlineMessage(message)
                 }
             }
         }
         .formStyle(.grouped)
+        .onAppear { folderURL = PDFSettings.folderURL() }
+    }
+
+    /// "Issued documents are saved as 2026/FV 2026-0042 Acme GmbH.pdf." with the current year, or the line
+    /// that says where the PDF stays without a folder.
+    private var caption: LocalizedStringResource {
+        guard folderURL != nil else { return L.pdfFolderCaptionNone }
+        return L.pdfFolderCaption(String(CalendarDay(Date(), in: .current).year))
+    }
+
+    private func chooseFolder() {
+        do {
+            if let url = try PDFFiles.chooseFolder() {
+                folderURL = url
+                message = nil
+            }
+        } catch {
+            message = ErrorText.message(error, locale: locale)
+        }
+    }
+
+    private func forgetFolder() {
+        do {
+            try PDFSettings.setFolder(nil)
+            folderURL = nil
+            message = nil
+        } catch {
+            message = ErrorText.message(error, locale: locale)
+        }
     }
 }
 
 // MARK: - Company
 
-/// The supplier's details and the VAT status. The payment term and the footer live in Documents & PDF
-/// (screens-flows.md §1.3); the bank accounts in their own pane. Save keeps what this pane does not show.
+/// The supplier's details and the footer, as one form without a Save button (set-06, settlement 9): each
+/// field is stored when it is committed (↩, focus moving on, a pop-up choice, the pane closing). A value
+/// that is not valid shows its message under the field and stays in the field; the stored profile keeps
+/// its previous value for that field. The VAT payer status is fixed (always a payer) and a draft without a
+/// client starts in EUR (set-07); the bank accounts live in their own pane.
 struct CompanyPane: View {
     let stores: Stores
+
+    private enum Field: Hashable {
+        case name, street, city, postalCode, ico, dic, fileNumber, email, phone, footer
+    }
 
     @State private var name = ""
     @State private var street = ""
@@ -114,18 +145,20 @@ struct CompanyPane: View {
     @State private var ico = ""
     @State private var dic = ""
     @State private var court: RegistryCourt?
-    @State private var registrySection = ""
-    @State private var registryInsert = ""
+    @State private var fileNumber = ""
     @State private var email = ""
     @State private var phone = ""
-    @State private var isVATPayer = true
-    @State private var currencyCode = "EUR"
-    /// The stored profile, so Save keeps the bank accounts, the term and the footer.
+    @State private var footer = ""
+    /// The profile as last read or stored; a commit that changes nothing writes nothing.
     @State private var loaded: CompanyProfile?
-    /// The profile exists but could not be read: Save would overwrite it with an empty one, so it is off.
+    /// The pane has read the profile; commits before that would store the empty fields.
+    @State private var isLoaded = false
+    /// The profile exists but could not be read: storing would overwrite it, so nothing is stored.
     @State private var loadFailed = false
-    @State private var message: LocalizedStringResource?
-    @State private var isError = false
+    @State private var problems: [Field: LocalizedStringResource] = [:]
+    @State private var failure: String?
+    @FocusState private var focus: Field?
+    @Environment(\.locale) private var locale
 
     var body: some View {
         Form {
@@ -133,13 +166,13 @@ struct CompanyPane: View {
                 Text(L.companyNote).textRole(.caption)
             }
             Section {
-                TextField(text: $name) { Text(L.fieldLegalName) }
-                TextField(text: $street) { Text(L.fieldStreet) }
-                TextField(text: $city) { Text(L.fieldCity) }
-                TextField(text: $postalCode) { Text(L.fieldPostalCode) }
+                field(.name, $name, L.fieldLegalName)
+                field(.street, $street, L.fieldStreet)
+                field(.city, $city, L.fieldCity)
+                field(.postalCode, $postalCode, L.fieldPostalCode)
                 CountryPicker(code: $countryCode)
-                TextField(text: $ico) { Text(L.fieldCompanyID) }
-                TextField(text: $dic) { Text(L.fieldCompanyVATID) }
+                field(.ico, $ico, L.fieldCompanyID)
+                field(.dic, $dic, L.fieldCompanyVATID)
                 Picker(selection: $court) {
                     Text(L.noCourt).tag(RegistryCourt?.none)
                     ForEach(RegistryCourt.allCases, id: \.self) { court in
@@ -149,135 +182,188 @@ struct CompanyPane: View {
                     Text(L.fieldRegistryCourt)
                 }
                 if court != nil {
-                    TextField(text: $registrySection) { Text(L.fieldRegistrySection) }
-                    TextField(text: $registryInsert) { Text(L.fieldRegistryInsert) }
+                    field(.fileNumber, $fileNumber, L.fieldFileNumber, prompt: L.fileNumberPrompt)
                 }
-                TextField(text: $email) { Text(L.fieldEmail) }
-                TextField(text: $phone) { Text(L.fieldPhone) }
+                field(.email, $email, L.fieldEmail)
+                field(.phone, $phone, L.fieldPhone)
             }
             Section {
-                Toggle(isOn: $isVATPayer) { Text(L.fieldVATPayer) }
-                Picker(selection: $currencyCode) {
-                    ForEach(ClientFormSheet.currencies, id: \.code) { currency in
-                        Text(verbatim: currency.code).tag(currency.code)
-                    }
-                } label: {
-                    Text(L.fieldDefaultCurrency)
-                }
+                TextField(text: $footer, axis: .vertical) { Text(L.fieldFooter) }
+                    .lineLimit(2...5)
+                    .focused($focus, equals: .footer)
+            } header: {
+                Text(L.footerSection)
             }
-            Section {
-                HStack {
-                    if let message {
-                        if isError {
-                            InlineMessage(message)
-                        } else {
-                            Text(message).textRole(.caption)
-                        }
-                    }
-                    Spacer()
-                    Button { save() } label: { Text(L.save) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(loadFailed)
+            if let failure {
+                Section {
+                    InlineMessage(failure)
                 }
             }
         }
         .formStyle(.grouped)
+        .disabled(loadFailed)
         .onAppear(perform: load)
+        .onDisappear(perform: commit)
+        .onSubmit(commit)
+        .onChange(of: focus) { old, _ in
+            if old != nil { commit() }
+        }
+        .onChange(of: countryCode) { commit() }
+        .onChange(of: court) { commit() }
+    }
+
+    @ViewBuilder
+    private func field(_ field: Field, _ text: Binding<String>, _ label: LocalizedStringResource,
+                       prompt: LocalizedStringResource? = nil) -> some View {
+        TextField(text: text, prompt: prompt.map { Text($0) }) { Text(label) }
+            .focused($focus, equals: field)
+        if let problem = problems[field] {
+            InlineMessage(problem)
+        }
     }
 
     private func load() {
+        isLoaded = false
         do {
             loaded = try stores.profile.load()
             loadFailed = false
         } catch {
             loadFailed = true
-            isError = true
-            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            failure = ErrorText.message(error, locale: locale)
             return
         }
-        guard let profile = loaded else { return }
-        let supplier = profile.supplier
-        name = supplier.name
-        street = supplier.address.street
-        city = supplier.address.city
-        postalCode = supplier.address.postalCode
-        countryCode = supplier.address.countryCode
-        ico = supplier.identificationNumber?.digits ?? ""
-        dic = supplier.vatIdentifier?.value ?? ""
-        court = supplier.registryEntry?.court
-        registrySection = supplier.registryEntry?.section ?? ""
-        registryInsert = supplier.registryEntry?.insert ?? ""
-        email = supplier.email ?? ""
-        phone = supplier.phone ?? ""
-        isVATPayer = profile.isVATPayer
-        currencyCode = profile.defaultCurrency.code
+        problems = [:]
+        failure = nil
+        if let profile = loaded {
+            let supplier = profile.supplier
+            name = supplier.name
+            street = supplier.address.street
+            city = supplier.address.city
+            postalCode = supplier.address.postalCode
+            countryCode = supplier.address.countryCode
+            ico = supplier.identificationNumber?.digits ?? ""
+            dic = supplier.vatIdentifier?.value ?? ""
+            court = supplier.registryEntry?.court
+            fileNumber = supplier.registryEntry?.fileNumber ?? ""
+            email = supplier.email ?? ""
+            phone = supplier.phone ?? ""
+            footer = profile.footer ?? ""
+        }
+        isLoaded = true
     }
 
-    private func save() {
-        isError = true
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { message = L.nameRequired; return }
-        let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
-        guard !country.isEmpty else { message = L.countryRequired; return }
-        var identification: IdentificationNumber?
-        let icoText = ico.trimmingCharacters(in: .whitespaces)
-        if !icoText.isEmpty {
-            guard let parsed = IdentificationNumber(icoText) else { message = L.invalidICO; return }
+    /// Stores what the fields hold. A field that is not valid keeps the stored value and shows why; a
+    /// company without a name is not stored yet, because every document needs the supplier's name.
+    private func commit() {
+        guard isLoaded, !loadFailed else { return }
+        var problems: [Field: LocalizedStringResource] = [:]
+        let previous = loaded?.supplier
+        func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var legalName = trimmed(name)
+        if legalName.isEmpty {
+            problems[.name] = L.nameRequired
+            legalName = previous?.name ?? ""
+        }
+        var identification = previous?.identificationNumber
+        if trimmed(ico).isEmpty {
+            identification = nil
+        } else if let parsed = IdentificationNumber(trimmed(ico)) {
             identification = parsed
+        } else {
+            problems[.ico] = L.invalidICO
         }
-        var vat: VATIdentifier?
-        let dicText = dic.trimmingCharacters(in: .whitespaces)
-        if !dicText.isEmpty {
-            guard let parsed = VATIdentifier(dicText) else { message = L.invalidVATID; return }
+        var vat = previous?.vatIdentifier
+        if trimmed(dic).isEmpty {
+            vat = nil
+        } else if let parsed = VATIdentifier(trimmed(dic)) {
             vat = parsed
+        } else {
+            problems[.dic] = L.invalidVATID
         }
+        // A court without a file number yet stores no entry and asks for nothing until a number is typed.
         var registry: RegistryEntry?
-        if let court {
-            guard let entry = RegistryEntry(court: court, section: registrySection, insert: registryInsert) else {
-                message = L.invalidRegistry
+        if let court, !trimmed(fileNumber).isEmpty {
+            if let parsed = RegistryEntry(court: court, fileNumber: fileNumber) {
+                registry = parsed
+            } else {
+                problems[.fileNumber] = L.invalidFileNumber
+                registry = previous?.registryEntry
+            }
+        }
+        self.problems = problems
+        guard !legalName.isEmpty else { return }
+
+        do {
+            // Read again, so the accounts the Bank Accounts pane changed meanwhile are kept.
+            let current = try stores.profile.load()
+            let country = countryCode.trimmingCharacters(in: .whitespaces).uppercased()
+            let address = PostalAddress(street: trimmed(street), city: trimmed(city), postalCode: trimmed(postalCode),
+                                        countryCode: country.isEmpty ? (previous?.address.countryCode ?? "CZ") : country)
+            let supplier = Party(name: legalName, address: address, identificationNumber: identification, vatIdentifier: vat,
+                                 registryEntry: registry, email: trimmed(email).isEmpty ? nil : trimmed(email),
+                                 phone: trimmed(phone).isEmpty ? nil : trimmed(phone))
+            let footerText = trimmed(footer)
+            let profile = CompanyProfile(supplier: supplier, bankConnections: current?.bankConnections ?? [], isVATPayer: true,
+                                         defaultCurrency: current?.defaultCurrency ?? .eur,
+                                         defaultPaymentTermDays: current?.defaultPaymentTermDays ?? 14,
+                                         footer: footerText.isEmpty ? nil : footerText)
+            guard profile != current else {
+                loaded = current
+                failure = nil
                 return
             }
-            registry = entry
-        }
-        let address = PostalAddress(street: street, city: city, postalCode: postalCode, countryCode: country)
-        let supplier = Party(name: trimmedName, address: address, identificationNumber: identification, vatIdentifier: vat,
-                             registryEntry: registry, email: email.isEmpty ? nil : email, phone: phone.isEmpty ? nil : phone)
-        let profile = CompanyProfile(supplier: supplier, bankConnections: loaded?.bankConnections ?? [], isVATPayer: isVATPayer,
-                                     defaultCurrency: Currency.known(currencyCode),
-                                     defaultPaymentTermDays: loaded?.defaultPaymentTermDays ?? 14, footer: loaded?.footer)
-        do {
             try stores.profile.save(profile)
             loaded = profile
+            failure = nil
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
-            isError = false
-            message = L.saved
         } catch {
-            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            failure = ErrorText.message(error, locale: locale)
         }
     }
 }
 
 // MARK: - Bank accounts
 
+/// One Edit ▸ Undo registration of a removed account; the line under the list runs the same action, and
+/// whichever comes first spends it. The UndoManager does not keep its targets alive, so `registered` does,
+/// for as long as the window's undo stack may still reach them.
+@MainActor final class BankAccountUndo {
+    static var registered: [BankAccountUndo] = []
+
+    var run: (@MainActor () -> Void)?
+
+    static func make() -> BankAccountUndo {
+        let action = BankAccountUndo.make()
+        registered.append(action)
+        return action
+    }
+}
+
+/// The accounts printed on documents (set-08): one row per account, Remove without a question, undoable
+/// from the line under the list and from Edit ▸ Undo; the form takes the account number (an IBAN or a
+/// Czech number), the BIC, the bank name and the currency.
 struct BankAccountsPane: View {
     let stores: Stores
 
-    /// A removed account, kept until the next change so Undo can put it back where it was.
+    /// A removed account and the place it had, so Undo puts it back where it was.
     private struct RemovedAccount {
         let connection: BankConnection
         let index: Int
     }
 
     @State private var profile: CompanyProfile?
-    @State private var iban = ""
-    @State private var czechAccount = ""
+    @State private var accountNumber = ""
     @State private var bic = ""
     @State private var bankName = ""
     /// Empty means any currency (the account serves every currency without its own account).
     @State private var currencyCode = ""
-    @State private var removed: RemovedAccount?
+    /// The undo of the last removal, while the line under the list offers it.
+    @State private var pendingUndo: BankAccountUndo?
     @State private var message: LocalizedStringResource?
     @State private var isError = false
+    @Environment(\.undoManager) private var undoManager
+    @Environment(\.locale) private var locale
 
     /// Any, then the currencies Saša invoices in (decision of 5 Nov 2026).
     private static let currencyCodes = [""] + ClientFormSheet.currencies.map(\.code)
@@ -305,18 +391,17 @@ struct BankAccountsPane: View {
                         }
                     }
                     // Remove has no confirmation: Undo puts the account back (design-system.md §10).
-                    if removed != nil {
+                    if let pendingUndo {
                         HStack(spacing: Spacing.m) {
                             Label { Text(L.accountRemoved) } icon: { Image(systemName: MessageKind.done.symbol).foregroundStyle(MessageKind.done.tint) }
                                 .textRole(.caption)
-                            Button { undoRemove() } label: { Text(L.undo) }
+                            Button { pendingUndo.run?() } label: { Text(L.undo) }
                         }
                     }
                     Text(L.bankNote).textRole(.caption)
                 }
                 Section {
-                    TextField(text: $iban) { Text(L.bankIBAN) }
-                    TextField(text: $czechAccount) { Text(L.bankCzechAccount) }
+                    TextField(text: $accountNumber, prompt: Text(L.accountNumberPrompt)) { Text(L.bankAccountNumber) }
                     TextField(text: $bic) { Text(L.bankBIC) }
                     TextField(text: $bankName) { Text(L.bankName) }
                     Picker(selection: $currencyCode) {
@@ -336,8 +421,7 @@ struct BankAccountsPane: View {
                         }
                         Spacer()
                         Button { add() } label: { Text(L.add) }
-                            .disabled(iban.trimmingCharacters(in: .whitespaces).isEmpty
-                                      && czechAccount.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .disabled(accountNumber.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
             } else {
@@ -363,58 +447,77 @@ struct BankAccountsPane: View {
         }
         let currency: Currency? = currencyCode.isEmpty ? nil : Currency.known(currencyCode)
         let name = bankName.trimmingCharacters(in: .whitespaces)
+        let number = accountNumber.trimmingCharacters(in: .whitespaces)
         let connection: BankConnection
-        let ibanText = iban.trimmingCharacters(in: .whitespaces)
-        if !ibanText.isEmpty {
-            guard let parsedIBAN = IBAN(ibanText) else { message = L.invalidIBAN; return }
-            connection = BankConnection(iban: parsedIBAN, bic: parsedBIC, bankName: name.isEmpty ? nil : name, currency: currency)
-        } else {
-            guard let account = CzechBankAccount(parsing: czechAccount.trimmingCharacters(in: .whitespaces)),
-                  let fromAccount = BankConnection(czech: account, bic: parsedBIC, bankName: name.isEmpty ? nil : name, currency: currency)
-            else { message = L.invalidCzechAccount; return }
+        if let iban = IBAN(number) {
+            connection = BankConnection(iban: iban, bic: parsedBIC, bankName: name.isEmpty ? nil : name, currency: currency)
+        } else if let account = CzechBankAccount(parsing: number),
+                  let fromAccount = BankConnection(czech: account, bic: parsedBIC, bankName: name.isEmpty ? nil : name, currency: currency) {
             connection = fromAccount
+        } else {
+            message = L.invalidAccountNumber
+            return
         }
         updated.bankConnections.append(connection)
-        removed = nil
-        store(updated)
-        if !isError {
-            iban = ""
-            czechAccount = ""
-            bic = ""
-            bankName = ""
-            currencyCode = ""
-        }
+        guard store(updated) else { return }
+        message = nil
+        accountNumber = ""
+        bic = ""
+        bankName = ""
+        currencyCode = ""
     }
 
     private func remove(at index: Int) {
         guard var updated = profile, updated.bankConnections.indices.contains(index) else { return }
-        let connection = updated.bankConnections.remove(at: index)
-        store(updated)
-        if !isError {
-            removed = RemovedAccount(connection: connection, index: index)
-            message = nil
+        let removed = RemovedAccount(connection: updated.bankConnections.remove(at: index), index: index)
+        guard store(updated) else { return }
+        message = nil
+        // A new removal replaces the line's offer; the older one stays on the Edit ▸ Undo stack.
+        let action = BankAccountUndo.make()
+        action.run = { [weak action] in
+            guard let action else { return }
+            restore(removed, action: action)
+        }
+        if let undoManager {
+            undoManager.registerUndo(withTarget: action) { registered in
+                MainActor.assumeIsolated { registered.run?() }
+            }
+            undoManager.setActionName(String(localized: L.removeBankAccount))
+        }
+        pendingUndo = action
+    }
+
+    /// Puts the account back at its old place in the stored list, read again so later changes are kept.
+    /// Runs once: the line's Undo also takes the registration off the window's stack.
+    private func restore(_ removed: RemovedAccount, action: BankAccountUndo) {
+        action.run = nil
+        if pendingUndo === action { pendingUndo = nil }
+        do {
+            guard var updated = try stores.profile.load() else { return }
+            updated.bankConnections.insert(removed.connection, at: min(removed.index, updated.bankConnections.count))
+            _ = store(updated)
+        } catch {
+            isError = true
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error, locale: locale))
+        }
+        if undoManager?.isUndoing == false {
+            undoManager?.removeAllActions(withTarget: action)
+            BankAccountUndo.registered.removeAll { $0 === action }
         }
     }
 
-    private func undoRemove() {
-        guard var updated = profile, let removed else { return }
-        updated.bankConnections.insert(removed.connection, at: min(removed.index, updated.bankConnections.count))
-        store(updated)
-        if !isError {
-            self.removed = nil
-        }
-    }
-
-    private func store(_ updated: CompanyProfile) {
+    @discardableResult
+    private func store(_ updated: CompanyProfile) -> Bool {
         do {
             try stores.profile.save(updated)
             profile = updated
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
             isError = false
-            message = L.saved
+            return true
         } catch {
             isError = true
-            message = LocalizedStringResource(stringLiteral: ErrorText.message(error))
+            message = LocalizedStringResource(stringLiteral: ErrorText.message(error, locale: locale))
+            return false
         }
     }
 }

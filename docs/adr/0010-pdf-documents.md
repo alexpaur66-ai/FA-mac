@@ -8,7 +8,7 @@ Every document must leave the app as a PDF: the customer gets it, the accountant
 keeps it for ten years. docs/design/screens-flows.md §2b specifies the preview of an issued document in
 the detail column, §2c the live preview of a draft with three draft markers and the issue step that
 renders the PDF, stores its bytes and writes the file into a chosen folder, §1.4 Save PDF…, Show PDF in
-Finder and Print… (⌘P), §2i the Documents & PDF pane. design-system.md fixes the PDF locale (Czech number
+Finder and Print… (⌘P), §2i the General pane (PDF folder). design-system.md fixes the PDF locale (Czech number
 and date formats in both document languages, §9), the QR code size (about 30 mm, error correction M,
 §5.3), the watermark colour (§4.1) and the rule that every printed legal string comes from InvoicingCore.
 ADR 0001 chose Core Graphics for PDFs and Core Image for QR codes; ADR 0003 keeps the payloads in the core
@@ -68,10 +68,11 @@ and leaves the image to the app.
   last wrote the file. A document issued before this step is rendered from its frozen snapshot the first
   time its PDF is needed. The database stays the source of truth: when the file write fails the document
   is issued and the PDF is stored, and the detail offers Save PDF….
-- **The PDF folder** is a security-scoped bookmark in UserDefaults, chosen in Settings ▸ Documents & PDF
+- **The PDF folder** is a security-scoped bookmark in UserDefaults, chosen in Settings ▸ General
   through the open panel (the entitlement `com.apple.security.files.bookmarks.app-scope` is already in
-  FA.entitlements). "Save PDF automatically when issuing" (on) and "Subfolder per year" (on) are the two
-  switches; the file name is fixed to "{number} {client}.pdf" with `/`, `\` and `:` replaced. Save PDF…
+  FA.entitlements). There are no switches: a chosen folder saves each PDF at issue into a subfolder per
+  year; the file name is fixed to "{number} {client}.pdf" with `/`, `\` and `:` replaced (lean pass
+  set-04, 6 Nov 2026). Save PDF…
   opens a save panel in that folder; Show PDF in Finder is disabled with "File moved – use Save PDF…"
   when the remembered file is gone.
 - **Preview as page images.** The detail column shows the pages as Retina bitmaps drawn by PDFKit on
@@ -85,8 +86,8 @@ and leaves the image to the app.
   last change; the toolbar, Issue and the review sheet stay. File ▸ Save PDF…, Show PDF in Finder and
   Print… (⌘P) follow the selected document; a draft prints as its watermarked preview. After Issue the
   result line names the file written; when the write fails the document is issued anyway and the detail
-  shows a banner with Choose Folder… and Save PDF…. The review sheet's PDF row predicts the file from the
-  predicted number. The document window of screens-flows.md §1.1 waits.
+  shows a banner with Choose Folder… and Save PDF…. The review sheet shows a PDF row only when no folder is
+  chosen. The document window of screens-flows.md §1.1 waits.
 
 ## Alternatives rejected
 

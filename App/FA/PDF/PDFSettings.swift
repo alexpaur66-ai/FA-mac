@@ -1,6 +1,7 @@
-// Where PDFs go (screens-flows.md §2c step 6, §2i): the folder Saša chose, kept as a security-scoped
-// bookmark, and the two switches of the Documents & PDF pane. Nonisolated, so views and the issue flow
-// can read the defaults from anywhere.
+// Where PDFs go (screens-flows.md §2c step 6, §2i; set-04): the folder Saša chose in Settings ▸ General,
+// kept as a security-scoped bookmark. The folder is the switch: with one, Issue saves the PDF into its
+// year subfolder under a fixed name; without one, the PDF stays in the app until Save PDF…. Nonisolated, so
+// views and the issue flow can read it from anywhere.
 
 import Foundation
 import InvoicingCore
@@ -8,18 +9,6 @@ import InvoicingPDF
 
 enum PDFSettings {
     static let folderBookmarkKey = "pdfFolderBookmark"
-    static let autoSaveKey = "pdfAutoSaveOnIssue"
-    static let yearSubfolderKey = "pdfYearSubfolder"
-
-    /// "Save PDF automatically when issuing" (on by default, screens-flows.md §2i).
-    static var autoSaveOnIssue: Bool {
-        UserDefaults.standard.object(forKey: autoSaveKey) as? Bool ?? true
-    }
-
-    /// A subfolder per year of issue ("…/Faktury/2026/FV 2026-0042 Acme.pdf"), on by default.
-    static var yearSubfolder: Bool {
-        UserDefaults.standard.object(forKey: yearSubfolderKey) as? Bool ?? true
-    }
 
     /// The chosen folder, resolved from its bookmark; nil when none was chosen, the bookmark no longer
     /// resolves, or the folder sits in the Trash. A stale bookmark is refreshed in place.
@@ -64,14 +53,12 @@ enum PDFSettings {
         UserDefaults.standard.set(data, forKey: folderBookmarkKey)
     }
 
-    /// The file an issued document's PDF takes in `folder`: the year subfolder when switched on, then
-    /// "{number} {client}.pdf" (`DocumentPDF.fileName`).
+    /// The file an issued document's PDF takes in `folder`: the subfolder of the year of issue, then
+    /// "{number} {client}.pdf" (`DocumentPDF.fileName`), for example 2026/FV 2026-0042 Acme GmbH.pdf.
     static func plannedURL(for document: Document, in folder: URL) -> URL {
-        var target = folder
-        if yearSubfolder {
-            target.appendPathComponent(String(document.issueDate.year), isDirectory: true)
-        }
-        return target.appendingPathComponent(DocumentPDF.fileName(for: document), isDirectory: false)
+        folder
+            .appendingPathComponent(String(document.issueDate.year), isDirectory: true)
+            .appendingPathComponent(DocumentPDF.fileName(for: document), isDirectory: false)
     }
 
     /// Writes `data` to its planned file in `folder`, creating the year subfolder, and returns the file URL.

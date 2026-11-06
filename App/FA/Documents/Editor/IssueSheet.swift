@@ -172,12 +172,10 @@ struct IssueSheet: View {
         }
     }
 
-    /// Why Issue won't write the PDF file (automatic saving off, or no folder), as pdfLine decided before;
-    /// nil when it will be written, and the result line names the file after Issue.
+    /// The PDF row appears only when no PDF folder is chosen (set-04): it says where the PDF stays and where
+    /// to choose a folder. With a folder, the result line names the file after Issue.
     private var pdfNotice: LocalizedStringResource? {
-        if !PDFSettings.autoSaveOnIssue { return L.pdfAutoSaveOff }
-        if PDFSettings.folderURL() == nil { return L.pdfNoFolder }
-        return nil
+        PDFSettings.folderURL() == nil ? L.pdfNoFolder : nil
     }
 
     private func clientLine(_ document: Document) -> LocalizedStringResource {
