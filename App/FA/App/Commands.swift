@@ -198,8 +198,11 @@ struct AppCommands: Commands {
                 .disabled(actions?.document.printDocument == nil)
         }
 
-        SidebarCommands()
-        ToolbarCommands()
+        // In a Group: a commands builder takes at most ten children.
+        Group {
+            SidebarCommands()
+            ToolbarCommands()
+        }
 
         // View: the sections ⌘1 … ⌘4, the Documents filters, the draft preview and the text scale. There is
         // no inspector: ⌥⌘I is never bound (§3.1).
