@@ -67,20 +67,21 @@ extension StatementStore {
 
     /// Takes accepted lines back, newest first, in one transaction: a payment recorded from a line is deleted
     /// (refused like any deletion while its tax document is issued or a final invoice settled it), a linked
-    /// payment is unlinked and stays as typed. Each line goes back to Unmatched once no payment is taken from it.
+    /// payment is unlinked and stays as typed. A payment deleted in the meantime is gone already. Each line goes
+    /// back to Unmatched once no payment is taken from it.
     public func undo(_ acceptances: [BankAcceptance], now: Date = Date()) throws {
         try database.queue.write { db in
             let stamp = Timestamps.string(now)
             for acceptance in acceptances.reversed() {
+                let payment = try DocumentPaymentRecord.fetchOne(db, key: acceptance.paymentID)
                 if acceptance.linked {
-                    guard let payment = try DocumentPaymentRecord.fetchOne(db, key: acceptance.paymentID) else {
-                        throw DataError.paymentNotFound(acceptance.paymentID)
+                    if let payment {
+                        guard payment.bankTransactionID == acceptance.transactionID else { continue }
+                        try Self.setLine(db, of: payment.id, to: nil)
+                        try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentUnlinked",
+                                            details: ["payment": payment.id, "bankTransaction": acceptance.transactionID], at: stamp)
                     }
-                    guard payment.bankTransactionID == acceptance.transactionID else { continue }
-                    try Self.setLine(db, of: payment.id, to: nil)
-                    try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentUnlinked",
-                                        details: ["payment": payment.id, "bankTransaction": acceptance.transactionID], at: stamp)
-                } else {
+                } else if payment != nil {
                     try DocumentStore.deletePayment(db, id: acceptance.paymentID, deletingDraftReceipt: true, at: stamp)
                 }
                 try Self.release(db, transactionID: acceptance.transactionID, at: stamp)

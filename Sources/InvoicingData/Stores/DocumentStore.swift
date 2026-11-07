@@ -510,7 +510,8 @@ public struct DocumentStore: Sendable {
     /// (a refund or credit moved away that a payment was settled net of), is refused as well
     /// (`paymentBacksSettlement`, see `checkSettledAfterDeletion`). A bank transaction the payment
     /// was taken from goes back to the unmatched list once no payment is taken from it any more, when it was
-    /// matched by hand to this document (as `insertPayment` does), so the money does not drop out of every list.
+    /// matched to this document (by hand, as `insertPayment` does, or by Accept Exact Matches), so the money does
+    /// not drop out of every list.
     /// With `deletingDraftReceipt`, the draft payment tax document created for the payment is deleted in the
     /// same transaction instead of staying behind as a receipt of nothing; the `paymentDeleted` event names the
     /// draft either way (`receiptDeleted` or `receiptKept`). The other leg of an applied credit keeps its draft
@@ -560,13 +561,14 @@ public struct DocumentStore: Sendable {
     }
 
     /// Returns the bank transaction of a deleted payment to the unmatched list when no other payment is taken
-    /// from it and it is matched by hand to the payment's document; an automatic match, or a match to another
-    /// document, stays.
+    /// from it and it is matched to the payment's document, by hand or by Accept Exact Matches; a match to another
+    /// document stays.
     static func releaseTransaction(_ db: Database, of payment: DocumentPaymentRecord, at stamp: String) throws {
         guard let transactionID = payment.bankTransactionID else { return }
         let remaining = try DocumentPaymentRecord.filter(Column("bankTransactionID") == transactionID).fetchCount(db)
         guard remaining == 0, var transaction = try BankTransactionRecord.fetchOne(db, key: transactionID),
-              transaction.matchState == TransactionMatchState.manual.rawValue, transaction.matchedDocumentID == payment.documentID else { return }
+              transaction.matchState == TransactionMatchState.manual.rawValue || transaction.matchState == TransactionMatchState.automatic.rawValue,
+              transaction.matchedDocumentID == payment.documentID else { return }
         transaction.matchedDocumentID = nil
         transaction.matchState = TransactionMatchState.unmatched.rawValue
         try transaction.update(db)

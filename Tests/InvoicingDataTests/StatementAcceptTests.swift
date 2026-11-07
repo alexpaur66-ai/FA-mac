@@ -91,6 +91,28 @@ import InvoicingCore
         #expect(try store.acceptExactMatches(statementID: "st-1", today: Self.today, now: Fixtures.now).count == 2)
     }
 
+    @Test func undoSkipsAPaymentDeletedInTheMeantime() throws {
+        let database = try prepared([line("a", "12100", vs: "2026001", on: "2026-11-11"), line("b", "12100", vs: "2026002")])
+        let documents = DocumentStore(database)
+        let typed = try documents.recordPayment(documentID: "doc-cz", on: Fixtures.day("2026-11-10"), amount: Money(Fixtures.d("12100"), .czk),
+                                                now: Fixtures.now)
+        let store = StatementStore(database)
+        let accepted = try store.acceptExactMatches(statementID: "st-1", today: Self.today, now: Fixtures.now)
+        #expect(accepted.map(\.transactionID) == ["a", "b"])
+        let recorded = try #require(accepted.last)
+        // Deleting the payment recorded from the automatic match returns its line to Unmatched.
+        try documents.deletePayment(id: recorded.paymentID, now: Fixtures.now)
+        #expect(try lineState(database, "b").0 == .unmatched)
+        #expect(try lineState(database, "b").1 == nil)
+
+        try store.undo(accepted, now: Fixtures.now)
+        #expect(try documents.payments(for: "doc-2").isEmpty)
+        #expect(try documents.payments(for: "doc-cz").map(\.id) == [typed.id])
+        #expect(try documents.payments(for: "doc-cz").first?.bankTransactionID == nil)
+        #expect(try lineState(database, "a").0 == .unmatched)
+        #expect(try lineState(database, "b").0 == .unmatched)
+    }
+
     @Test func aPaymentWithAnIssuedTaxDocumentCanStillBeConfirmed() throws {
         let database = try Fixtures.prepared()
         try Fixtures.addAdvanceSeries(database)
