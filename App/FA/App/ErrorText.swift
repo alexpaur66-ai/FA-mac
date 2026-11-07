@@ -135,6 +135,8 @@ enum ErrorText {
             return L.errorNotPayable
         case .duplicateStatement:
             return L.errorDuplicateStatement
+        case .notAPDF:
+            return L.errorNotAPDF
         case .corruptRecord:
             return L.errorCorruptRecord
         case .advanceAlreadyDeducted:

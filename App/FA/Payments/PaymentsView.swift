@@ -38,6 +38,10 @@ struct PaymentsView: View {
     /// Deletes a payment, and with it its draft tax document when the dialog says so; the window
     /// registers the undo.
     let deletePayment: @MainActor (DocumentPayment, Bool) -> Void
+    /// Record Payment… on a document, from a statement read beside the open documents.
+    let recordPayment: @MainActor (String) -> Void
+    /// The window's result line.
+    let report: @MainActor (String, ResultLineModel.Kind) -> Void
 
     @State private var rows: [PaymentRow] = []
     @State private var loaded = false
@@ -48,6 +52,15 @@ struct PaymentsView: View {
     @State private var sortOrder = [KeyPathComparator(\PaymentRow.date, order: .reverse)]
     @State private var search = ""
     @Environment(\.locale) private var locale
+    /// The statement read beside the open documents (PDF fallback, §2f); kept per window.
+    @SceneStorage("payments.statement") private var openStatementID: String?
+    /// Counts the openings, so opening the statement already shown also gives it a fresh list.
+    @State private var statementOpenings = 0
+    @State private var statements: [BankStatement] = []
+    @State private var importing = false
+    /// A chosen statement file waiting for its account, when the profile has several.
+    @State private var pendingFile: PendingStatementFile?
+    @State private var accounts: [BankConnection] = []
 
     /// The rows the search leaves; the detail column, the menus and ⌫ act only on these, as in Documents.
     private var visibleRows: [PaymentRow] {
@@ -55,6 +68,34 @@ struct PaymentsView: View {
     }
 
     var body: some View {
+        Group {
+            if let statement = statements.first(where: { $0.id == openStatementID }) {
+                StatementReviewView(stores: stores, documents: documents, statement: statement,
+                                    selectedDocumentID: $selectedDocumentID, recordPayment: recordPayment,
+                                    close: { closeStatement() })
+                    // Another statement, or the same one opened again, starts clean: no selected row, no search.
+                    .id([statement.id, String(statementOpenings)])
+            } else {
+                paymentsList
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                StatementsMenu(statements: statements, open: { openStatement($0.id) }, importStatement: { importing = true })
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: StatementFileTypes.allowed, allowsMultipleSelection: false) { result in
+            pick(result)
+        }
+        .confirmationDialog(Text(L.chooseStatementAccount), isPresented: pendingFileShown, presenting: pendingFile) { file in
+            ForEach(accounts, id: \.iban) { account in
+                Button { importFile(file, into: account) } label: { Text(verbatim: Self.accountName(account)) }
+            }
+        }
+        .task { loadStatements() }
+    }
+
+    private var paymentsList: some View {
         VStack(spacing: 0) {
             if let loadError {
                 HStack(spacing: Spacing.m) {
@@ -138,6 +179,69 @@ struct PaymentsView: View {
         }
     }
 
+    // MARK: Statements
+
+    private var pendingFileShown: Binding<Bool> {
+        Binding(get: { pendingFile != nil }, set: { if !$0 { pendingFile = nil } })
+    }
+
+    private static func accountName(_ account: BankConnection) -> String {
+        account.iban.formatted + (account.currency.map { " · " + $0.code } ?? "")
+    }
+
+    /// The payment selection is dropped first, so the detail column and ⌘R follow the statement's list.
+    private func openStatement(_ id: String) {
+        selection = nil
+        selectedDocumentID = nil
+        openStatementID = id
+        statementOpenings += 1
+    }
+
+    private func closeStatement() {
+        selectedDocumentID = nil
+        openStatementID = nil
+    }
+
+    private func loadStatements() {
+        do {
+            statements = try stores.statements.statements()
+            if let id = openStatementID, !statements.contains(where: { $0.id == id }) { openStatementID = nil }
+        } catch {
+            report(ErrorText.message(error, locale: locale), .problem)
+        }
+    }
+
+    /// Reads the chosen PDF; with one bank account it is imported at once, with several the account is asked.
+    private func pick(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            let file = PendingStatementFile(data: try Data(contentsOf: url), name: url.lastPathComponent)
+            accounts = try stores.profile.load()?.bankConnections ?? []
+            switch accounts.count {
+            case 0: report(String(localized: L.statementNeedsAccount), .problem)
+            case 1: importFile(file, into: accounts[0])
+            default: pendingFile = file
+            }
+        } catch {
+            report(ErrorText.message(error, locale: locale), .problem)
+        }
+    }
+
+    private func importFile(_ file: PendingStatementFile, into account: BankConnection) {
+        pendingFile = nil
+        do {
+            let currency = try account.currency ?? stores.profile.load()?.defaultCurrency ?? .czk
+            let statement = try stores.statements.importPDF(file.data, fileName: file.name, iban: account.iban, currency: currency)
+            loadStatements()
+            openStatement(statement.id)
+            report(String(localized: L.statementImported(file.name)), .done)
+        } catch {
+            report(ErrorText.message(error, locale: locale), .problem)
+        }
+    }
+
     private func requestDeletion(_ payment: DocumentPayment) {
         if payment.deletionNeedsConfirmation {
             paymentPendingDeletion = payment
@@ -195,4 +299,11 @@ struct PaymentsView: View {
         sync(selection)
         if loaded { dropHiddenSelection() }
     }
+}
+
+/// A statement file read from disk, waiting for the account it belongs to.
+struct PendingStatementFile: Identifiable {
+    let id = UUID()
+    let data: Data
+    let name: String
 }
