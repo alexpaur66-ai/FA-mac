@@ -99,4 +99,6 @@ public enum DataError: Error, Equatable, Sendable {
     /// The payment cannot be confirmed by the bank line: another direction, another currency, or an amount
     /// outside the payment tolerance.
     case bankLineMismatch(transactionID: String, paymentID: String)
+    /// The file is not a PDF.
+    case notAPDF(String)
 }

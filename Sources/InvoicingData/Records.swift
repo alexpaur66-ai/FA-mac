@@ -481,6 +481,9 @@ public enum BankStatementFormat: String, Sendable, Codable, CaseIterable {
     case csv
     /// Entered by hand (for example from a PDF statement).
     case manual
+    /// A PDF statement stored as it is: its lines are not read; payments are recorded from it by hand
+    /// (screens-flows.md §2f, "match manually").
+    case pdf
 }
 
 public enum TransactionMatchState: String, Sendable, Codable, CaseIterable {

@@ -455,6 +455,14 @@ enum Schema {
                 BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
                 """)
         }
+        // v11 (screens-flows.md §2f, PDF fallback): the file of an imported statement, stored untouched, so a PDF
+        // statement can be read next to the open documents. Deleting the statement deletes its file.
+        migrator.registerMigration("v11") { db in
+            try db.create(table: "bankStatementFile") { t in
+                t.column("statementID", .text).primaryKey().references("bankStatement", onDelete: .cascade)
+                t.column("data", .blob).notNull()
+            }
+        }
         return migrator
     }
 }

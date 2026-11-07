@@ -243,7 +243,8 @@ struct MainSplitView: View {
                         editClient: { sheet = .client($0) })
         case .payments:
             PaymentsView(stores: stores, documents: documents, selectedDocumentID: $paymentDocumentSelection,
-                         deletePayment: deletePayment)
+                         deletePayment: deletePayment, recordPayment: { sheet = .recordPayment($0) },
+                         report: { report($0, kind: $1) })
         case .stock:
             StockView(stock: stock, selection: $stockSelection, search: $stockSearch,
                       report: { report($0, kind: .problem) })

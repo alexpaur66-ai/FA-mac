@@ -1172,4 +1172,27 @@ enum L {
         r("activity.repair", "\(field): \(old) → \(new) · \(reason)")
     }
     static let activityPDFReplaced = r("activity.pdfReplaced", "New PDF after a repair; the old one is kept")
+
+    // Bank statements, PDF fallback (screens-flows.md §2f)
+    static let statement = r("statement.title", "Statement")
+    static let statements = r("statement.menu", "Statements")
+    static let statementsHelp = r("statement.menuHelp", "Open a bank statement next to your open documents, or import one")
+    static let importStatement = r("statement.import", "Import Statement…")
+    static let chooseStatementAccount = r("statement.chooseAccount", "Which account is this statement for?")
+    static let statementNeedsAccount = r("statement.needsAccount", "Add your bank account in Settings ▸ Bank Accounts first.")
+    static func statementImported(_ name: String) -> LocalizedStringResource {
+        r("statement.imported", "Statement \(name) imported. Record the payments it shows on the right.")
+    }
+    static let doneReading = r("statement.done", "Done")
+    static let doneReadingHelp = r("statement.doneHelp", "Back to the payments")
+    static let statementUnreadable = r("statement.unreadable", "The statement can't be shown")
+    static let statementFileMissing = r("statement.fileMissing", "No file is stored for this statement.")
+    static let searchOpenDocuments = r("statement.search", "Find by VS, number, client or amount")
+    static let noOpenDocuments = r("statement.noOpen", "Nothing is waiting for a payment")
+    static let noMatchingOpenDocuments = r("statement.noMatch", "No open document matches")
+    static let statementHint = r("statement.hint", "Copy the date and amount from the statement.")
+    static func variableSymbolShort(_ symbol: String) -> LocalizedStringResource {
+        r("statement.vs", "VS \(symbol)")
+    }
+    static let errorNotAPDF = r("error.notAPDF", "This file is not a PDF. Import the statement as the bank's PDF.")
 }
