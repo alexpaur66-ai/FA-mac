@@ -77,7 +77,7 @@ extension StatementStore {
                         throw DataError.paymentNotFound(acceptance.paymentID)
                     }
                     guard payment.bankTransactionID == acceptance.transactionID else { continue }
-                    try setLine(db, of: payment.id, to: nil)
+                    try Self.setLine(db, of: payment.id, to: nil)
                     try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentUnlinked",
                                         details: ["payment": payment.id, "bankTransaction": acceptance.transactionID], at: stamp)
                 } else {
