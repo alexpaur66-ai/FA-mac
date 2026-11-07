@@ -44,6 +44,10 @@ struct StatementReviewView: View {
                     .help(Text(L.doneReadingHelp))
             }
         }
+        // ⌘F reaches the toolbar search, as in the payments list; ↩ selects the first match, so ⌘R records on it
+        // (screens-flows.md §5: ⌘F · VS · ↩ · ⌘R).
+        .searchable(text: $search, placement: .toolbar, prompt: Text(L.searchOpenDocuments))
+        .onSubmit(of: .search) { selection = openDocuments.first?.id }
         .task(id: statement.id) { load() }
     }
 
@@ -63,13 +67,6 @@ struct StatementReviewView: View {
 
     private var documentsPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: Spacing.s) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(text: $search, prompt: Text(L.searchOpenDocuments)) { Text(L.searchOpenDocuments) }
-                    .textFieldStyle(.plain)
-            }
-            .padding(Spacing.s)
-            Divider()
             let rows = openDocuments
             if rows.isEmpty {
                 ContentUnavailableView {
@@ -133,6 +130,9 @@ struct StatementReviewView: View {
         let fields = [summary.variableSymbol ?? "", summary.number ?? "", summary.customerName,
                       state.outstanding.amount.description, summary.amountDue?.amount.description ?? ""]
         if fields.contains(where: { $0.folded.contains(needle) }) { return true }
+        // "0002026001" as a statement pads it finds VS 2026001, compared as the bank import compares symbols.
+        if let typedSymbol = BankMatcher.canonicalSymbol(search), let symbol = BankMatcher.canonicalSymbol(summary.variableSymbol),
+           typedSymbol == symbol { return true }
         // "12 100,00" as printed on a statement finds 12100.
         let digits = needle.filter { $0.isNumber || $0 == "," || $0 == "." }.replacingOccurrences(of: ",", with: ".")
         guard !digits.isEmpty, let typed = Decimal(string: digits, locale: Locale(identifier: "en_US_POSIX")) else { return false }

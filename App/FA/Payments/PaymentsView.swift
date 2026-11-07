@@ -54,6 +54,8 @@ struct PaymentsView: View {
     @Environment(\.locale) private var locale
     /// The statement read beside the open documents (PDF fallback, §2f); kept per window.
     @SceneStorage("payments.statement") private var openStatementID: String?
+    /// Counts the openings, so opening the statement already shown also gives it a fresh list.
+    @State private var statementOpenings = 0
     @State private var statements: [BankStatement] = []
     @State private var importing = false
     /// A chosen statement file waiting for its account, when the profile has several.
@@ -71,6 +73,8 @@ struct PaymentsView: View {
                 StatementReviewView(stores: stores, documents: documents, statement: statement,
                                     selectedDocumentID: $selectedDocumentID, recordPayment: recordPayment,
                                     close: { closeStatement() })
+                    // Another statement, or the same one opened again, starts clean: no selected row, no search.
+                    .id([statement.id, String(statementOpenings)])
             } else {
                 paymentsList
             }
@@ -190,6 +194,7 @@ struct PaymentsView: View {
         selection = nil
         selectedDocumentID = nil
         openStatementID = id
+        statementOpenings += 1
     }
 
     private func closeStatement() {
