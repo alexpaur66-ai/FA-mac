@@ -517,42 +517,46 @@ public struct DocumentStore: Sendable {
     /// receipt, and its own `paymentDeleted` event names it (`receiptKept`).
     public func deletePayment(id: String, deletingDraftReceipt: Bool = false, now: Date = Date()) throws {
         try database.queue.write { db in
-            guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
-            if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(id) }
-            try Self.checkNotSettled(db, payment: payment)
-            let stamp = Timestamps.string(now)
-            var details = ["payment": id, "kind": payment.kind]
-            if deletingDraftReceipt, let receiptID = payment.receiptDocumentID,
-               let receipt = try DocumentRecord.fetchOne(db, key: receiptID), receipt.status == DocumentStatus.draft.rawValue {
-                try Self.deleteDraft(db, receipt, at: stamp, details: ["reason": "payment deleted", "payment": id])
-                details["receiptDeleted"] = receiptID
-            } else if let receiptID = payment.receiptDocumentID {
-                details["receiptKept"] = receiptID
-            }
-            var deletedRelated: DocumentPaymentRecord?
-            if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
-                if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
-                if let settled = try PaidAdvanceRecord.filter(Column("paymentID") == relatedID).fetchOne(db) {
-                    throw DataError.relatedPaymentSettled(paymentID: id, relatedPaymentID: relatedID, finalInvoiceNumber: settled.finalInvoiceNumber)
-                }
-                // The other leg's draft receipt stays behind (the flag is about the clicked payment's receipt); its event names it.
-                var relatedDetails = ["payment": relatedID, "kind": related.kind]
-                if let receiptID = related.receiptDocumentID { relatedDetails["receiptKept"] = receiptID }
-                try related.delete(db)
-                try AuditLog.append(db, entity: "document", id: related.documentID, action: "paymentDeleted",
-                                    details: relatedDetails, at: stamp)
-                deletedRelated = related
-            }
-            try payment.delete(db)
-            // What final invoices settled as paid in advance stays covered on each advance the deletion touched (ADR 0012).
-            try Self.checkSettledAfterDeletion(db, documentID: payment.documentID, deletedOutgoing: payment.amount < 0, paymentID: id)
-            if let deletedRelated {
-                try Self.checkSettledAfterDeletion(db, documentID: deletedRelated.documentID, deletedOutgoing: deletedRelated.amount < 0,
-                                                   paymentID: id)
-            }
-            try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted", details: details, at: stamp)
-            try Self.releaseTransaction(db, of: payment, at: stamp)
+            try Self.deletePayment(db, id: id, deletingDraftReceipt: deletingDraftReceipt, at: Timestamps.string(now))
         }
+    }
+
+    /// `deletePayment(id:deletingDraftReceipt:now:)` inside the caller's transaction.
+    static func deletePayment(_ db: Database, id: String, deletingDraftReceipt: Bool, at stamp: String) throws {
+        guard let payment = try DocumentPaymentRecord.fetchOne(db, key: id) else { throw DataError.paymentNotFound(id) }
+        if try Self.receiptIsIssued(db, payment) { throw DataError.paymentLocked(id) }
+        try Self.checkNotSettled(db, payment: payment)
+        var details = ["payment": id, "kind": payment.kind]
+        if deletingDraftReceipt, let receiptID = payment.receiptDocumentID,
+           let receipt = try DocumentRecord.fetchOne(db, key: receiptID), receipt.status == DocumentStatus.draft.rawValue {
+            try Self.deleteDraft(db, receipt, at: stamp, details: ["reason": "payment deleted", "payment": id])
+            details["receiptDeleted"] = receiptID
+        } else if let receiptID = payment.receiptDocumentID {
+            details["receiptKept"] = receiptID
+        }
+        var deletedRelated: DocumentPaymentRecord?
+        if let relatedID = payment.relatedPaymentID, let related = try DocumentPaymentRecord.fetchOne(db, key: relatedID) {
+            if try Self.receiptIsIssued(db, related) { throw DataError.relatedPaymentLocked(paymentID: id, relatedPaymentID: relatedID) }
+            if let settled = try PaidAdvanceRecord.filter(Column("paymentID") == relatedID).fetchOne(db) {
+                throw DataError.relatedPaymentSettled(paymentID: id, relatedPaymentID: relatedID, finalInvoiceNumber: settled.finalInvoiceNumber)
+            }
+            // The other leg's draft receipt stays behind (the flag is about the clicked payment's receipt); its event names it.
+            var relatedDetails = ["payment": relatedID, "kind": related.kind]
+            if let receiptID = related.receiptDocumentID { relatedDetails["receiptKept"] = receiptID }
+            try related.delete(db)
+            try AuditLog.append(db, entity: "document", id: related.documentID, action: "paymentDeleted",
+                                details: relatedDetails, at: stamp)
+            deletedRelated = related
+        }
+        try payment.delete(db)
+        // What final invoices settled as paid in advance stays covered on each advance the deletion touched (ADR 0012).
+        try Self.checkSettledAfterDeletion(db, documentID: payment.documentID, deletedOutgoing: payment.amount < 0, paymentID: id)
+        if let deletedRelated {
+            try Self.checkSettledAfterDeletion(db, documentID: deletedRelated.documentID, deletedOutgoing: deletedRelated.amount < 0,
+                                               paymentID: id)
+        }
+        try AuditLog.append(db, entity: "document", id: payment.documentID, action: "paymentDeleted", details: details, at: stamp)
+        try Self.releaseTransaction(db, of: payment, at: stamp)
     }
 
     /// Returns the bank transaction of a deleted payment to the unmatched list when no other payment is taken
