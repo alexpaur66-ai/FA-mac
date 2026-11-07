@@ -92,4 +92,11 @@ public enum DataError: Error, Equatable, Sendable {
     /// an issued payment tax document received), or holding money no final invoice can list any more (a refund
     /// or credit moved away that a payment was settled net of). `finalInvoiceNumber` names the last of them.
     case paymentBacksSettlement(paymentID: String, finalInvoiceNumber: String)
+    /// The bank line is matched to a document already, or a payment is taken from it; unmatch it first.
+    case bankLineResolved(String)
+    /// The payment is linked to a bank line already.
+    case paymentAlreadyLinked(String)
+    /// The payment cannot be confirmed by the bank line: another direction, another currency, or an amount
+    /// outside the payment tolerance.
+    case bankLineMismatch(transactionID: String, paymentID: String)
 }

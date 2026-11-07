@@ -14,7 +14,7 @@ import InvoicingCore
             let exists = try database.queue.read { db in try db.tableExists(table) }
             #expect(exists, "missing table \(table)")
         }
-        #expect(InvoicingData.schemaVersion == 9)
+        #expect(InvoicingData.schemaVersion == 10)
         let foreignKeys = try database.queue.read { db in try Bool.fetchOne(db, sql: "PRAGMA foreign_keys") }
         #expect(foreignKeys == true)
     }

@@ -441,6 +441,20 @@ enum Schema {
                 BEGIN SELECT RAISE(ABORT, 'replaced PDFs are kept as they were'); END
                 """)
         }
+        // v10 (screens-flows.md §2f, v0.2 bank import): a bank line may confirm a payment typed in by hand, so
+        // linking a payment to its bank line is the one change a payment with an issued tax document still takes.
+        // Everything the receipt rests on stays locked.
+        migrator.registerMigration("v10") { db in
+            try db.execute(sql: "DROP TRIGGER documentPayment_locked_update")
+            try db.execute(sql: """
+                CREATE TRIGGER documentPayment_locked_update
+                BEFORE UPDATE OF id, documentID, paidOn, amount, currency, kind, receiptDocumentID, relatedPaymentID, note, createdAt
+                ON documentPayment
+                WHEN OLD.receiptDocumentID IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM document WHERE id = OLD.receiptDocumentID AND status = 'issued')
+                BEGIN SELECT RAISE(ABORT, 'the payment has an issued tax document'); END
+                """)
+        }
         return migrator
     }
 }

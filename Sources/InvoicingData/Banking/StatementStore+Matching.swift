@@ -7,16 +7,18 @@ extension StatementStore {
     /// The lanes and candidates for every line of the statement, as of `today` (`BankMatcher`). It reads
     /// everything in one snapshot and stores nothing.
     public func proposals(statementID: String, today: CalendarDay) throws -> [BankMatchProposal] {
-        try database.queue.read { db in
-            guard try BankStatementRecord.exists(db, key: statementID) else { throw DataError.statementNotFound(statementID) }
-            let transactions = try BankTransactionRecord.filter(Column("statementID") == statementID).fetchAll(db).map { try $0.transaction() }
-            let documents = try DocumentStore.states(db, filter: DocumentFilter(status: .issued), today: today)
-            let payments = try DocumentPaymentRecord
-                .filter(Column("bankTransactionID") == nil && Column("kind") == DocumentPaymentKind.received.rawValue)
-                .fetchAll(db)
-                .map { try $0.payment(receiptIssued: try DocumentStore.receiptIsIssued(db, $0)) }
-            return BankMatcher.propose(transactions, documents: documents, payments: payments, confirmedAccounts: try Self.confirmedAccounts(db))
-        }
+        try database.queue.read { db in try Self.proposals(db, statementID: statementID, today: today) }
+    }
+
+    static func proposals(_ db: Database, statementID: String, today: CalendarDay) throws -> [BankMatchProposal] {
+        guard try BankStatementRecord.exists(db, key: statementID) else { throw DataError.statementNotFound(statementID) }
+        let transactions = try BankTransactionRecord.filter(Column("statementID") == statementID).fetchAll(db).map { try $0.transaction() }
+        let documents = try DocumentStore.states(db, filter: DocumentFilter(status: .issued), today: today)
+        let payments = try DocumentPaymentRecord
+            .filter(Column("bankTransactionID") == nil && Column("kind") == DocumentPaymentKind.received.rawValue)
+            .fetchAll(db)
+            .map { try $0.payment(receiptIssued: try DocumentStore.receiptIsIssued(db, $0)) }
+        return BankMatcher.propose(transactions, documents: documents, payments: payments, confirmedAccounts: try Self.confirmedAccounts(db))
     }
 
     /// Payer accounts of matched incoming lines (`BankMatcher.normalizedAccount`) → the clients of the documents
